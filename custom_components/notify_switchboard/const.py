@@ -36,3 +36,6 @@ VALID_PRIORITIES: Final[tuple[str, ...]] = (
     PRIORITY_HIGH,
     PRIORITY_CRITICAL,
 )
+
+# Origin entity of a routed message (contract: data.source_entity).
+ATTR_SOURCE_ENTITY = "source_entity"
