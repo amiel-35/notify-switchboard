@@ -146,3 +146,52 @@ not depend on either being fixed upstream.
 - A future ADR would be needed to let a row override the `snooze` bound
   (e.g. an arbitrary custom duration) or to add a sixth event type; neither
   is needed yet and both are explicitly out of scope here.
+
+### Addendum (2026-09-07, post-review): the five services are not admin-only
+
+The review of the Sprint 2 implementation asked whether the five services
+should be restricted to administrators, the way core restricts a handful of
+system services. **They are not, and that is the decision, not an oversight.**
+
+The whole point of ADR-0016 is the wall tablet. That tablet runs Home
+Assistant under a **non-admin** account, and the cards on it are the primary
+caller of `acknowledge`, `snooze`, `unsnooze`, `silence` and `unsilence`.
+Marking the services admin-only would make the cards fail for the one user
+they were written for, and would leave the Companion buttons — which are not
+admin-gated either, because a `mobile_app_notification_action` event is not a
+service call — as the only way to acknowledge anything. That is the opposite
+of what this ADR set out to do.
+
+What actually bounds the blast radius is unchanged and is deliberately not
+the caller's role:
+
+- **The allow-list (ADR-0009).** `acknowledge` can only turn off an
+  `alert.*` that is *in the routing table*, on a row whose
+  `allow_acknowledge` is true. A caller cannot name an arbitrary entity; the
+  set of things any of these services can touch is exactly what the
+  administrator put in the options flow.
+- **`alert.turn_off` is called with a child of the caller's context, not
+  with the caller's own.** Forwarding the caller's context verbatim would
+  hand the authorisation decision to core's entity-permission layer
+  (`homeassistant/helpers/service.py`,
+  `_resolve_entity_service_call_entities`) and quietly make the row's
+  allow-list secondary to whatever entity policy the account happens to
+  have. The allow-list stays the single gate; the logbook still attributes
+  the acknowledgement through the parent context.
+- **`context.user_id` is logged and carried.** Every refusal logs it, and the
+  `acknowledged` and `snoozed` `event.switchboard_delivery` events carry it
+  as an attribute, so who acknowledged what is auditable after the fact —
+  which is what ADR-0009 asked for, rather than prevention by role.
+- **Companion buttons keep `authenticationRequired`** on `high` and
+  `critical` rows, so acting from a phone still means unlocking it. The
+  tablet, a shared wall device that nobody unlocks, is precisely why the
+  service path exists alongside the button path.
+- **Nothing here is a security control.** ADR-0010 already says security is a
+  configuration rule, not a code guarantee, and the alarm and the locks are
+  deliberately outside this integration.
+
+Revisit if a household actually needs it — a child who keeps silencing the
+smoke alert, a guest account. The shape it would take is a per-row flag
+(`admin_only`, alongside `allow_acknowledge`), not a blanket restriction on
+the domain, because the blanket version breaks the tablet. Recorded in
+`docs/known-issues.md` so it is not silently re-litigated.

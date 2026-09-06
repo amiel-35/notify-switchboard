@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.event import EventEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Context, HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -52,8 +52,22 @@ class DeliveryEvent(SwitchboardGlobalEntity, EventEntity):
         )
 
     @callback
-    def _handle_delivery(self, event_type: str, attributes: dict[str, Any]) -> None:
-        """Record one delivery event."""
+    def _handle_delivery(
+        self,
+        event_type: str,
+        attributes: dict[str, Any],
+        context: Context | None = None,
+    ) -> None:
+        """Record one delivery event.
+
+        When the switchboard acted for somebody — a UI service call, a
+        Companion button — that caller's `Context` is adopted before the state
+        is written (`homeassistant/helpers/entity.py`, `async_set_context`), so
+        the logbook credits the acknowledgement or the snooze to them rather
+        than to the integration.
+        """
+        if context is not None:
+            self.async_set_context(context)
         self._trigger_event(event_type, attributes)
         self.async_write_ha_state()
 

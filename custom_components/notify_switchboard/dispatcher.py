@@ -14,6 +14,8 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/helpers/issue_registry.py: async_create_issue
 - homeassistant/helpers/device_registry.py: async_get, async_get_device
 - homeassistant/helpers/dispatcher.py: async_dispatcher_send
+- homeassistant/helpers/template/__init__.py: Template(...).async_render
+- homeassistant/exceptions.py: ServiceValidationError
 - homeassistant/util/dt.py: now, utcnow, parse_datetime
 """
 
@@ -33,8 +35,19 @@ from homeassistant.const import (
     STATE_OFF,
     STATE_ON,
 )
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.core import (
+    CALLBACK_TYPE,
+    Context,
+    Event,
+    HomeAssistant,
+    State,
+    callback,
+)
+from homeassistant.exceptions import (
+    HomeAssistantError,
+    ServiceValidationError,
+    TemplateError,
+)
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
@@ -43,6 +56,7 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_change,
 )
+from homeassistant.helpers.template import Template
 from homeassistant.helpers.translation import async_get_translations
 from homeassistant.util import dt as dt_util, slugify
 
@@ -50,6 +64,8 @@ from .const import (
     ACTION_ACKNOWLEDGE,
     ATTR_ACTIONS,
     ATTR_AUTHENTICATION_REQUIRED,
+    ATTR_PERSON,
+    ATTR_TARGET,
     ATTR_USER_ID,
     AUTHENTICATED_PRIORITIES,
     COMPANION_OUTPUT_PREFIX,
@@ -59,12 +75,25 @@ from .const import (
     DROP_DELIVERY_FAILED,
     DROP_SILENCED,
     DROP_UNKNOWN_TARGET,
+    ERROR_ACKNOWLEDGE_NOT_ALLOWED,
+    ERROR_INVALID_SILENCE_MINUTES,
+    ERROR_NO_AUDIENCE,
+    ERROR_PERSON_NOT_IN_AUDIENCE,
+    ERROR_SNOOZE_MINUTES_NOT_OFFERED,
+    ERROR_UNKNOWN_PERSON,
+    ERROR_UNKNOWN_TARGET,
     EVENT_MOBILE_APP_NOTIFICATION_ACTION,
     EVENT_TYPE_ACKNOWLEDGED,
     EVENT_TYPE_DROPPED,
     EVENT_TYPE_ROUTED,
     EVENT_TYPE_SNOOZED,
+    ISSUE_INVALID_SERVICE_CALLS_MANY,
     MAX_CONSECUTIVE_OUTPUT_MISSES,
+    MAX_INVALID_SERVICE_CALLS,
+    MAX_SILENCE_MINUTES,
+    MAX_TRACKED_INVALID_SERVICE_CALLS,
+    MIN_SILENCE_MINUTES,
+    PRIORITY_CRITICAL,
     SIGNAL_STATE_UPDATED,
     UNCOUNTED_DROP_REASONS,
 )
@@ -106,6 +135,13 @@ FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
 FALLBACK_BACK_TO_NORMAL = "Back to normal"
 
+# The name a row's `message`/`done_message` template sees the alert under
+# (contract §"Per-row texts": "rendered with the row's alert's current state
+# exposed as `alert`").
+TEMPLATE_ALERT_VARIABLE = "alert"
+ATTR_ALERT_MESSAGE = "message"
+ATTR_ALERT_DONE_MESSAGE = "done_message"
+
 
 class Switchboard:
     """Owns every side effect of one config entry."""
@@ -131,11 +167,18 @@ class Switchboard:
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._deferral_unsubs: dict[str, CALLBACK_TYPE] = {}
+        # One timer per temporarily silenced person, so `binary_sensor.
+        # <p>_silenced` goes back to `off` on its own when the silence lifts
+        # rather than waiting for the next routing decision to purge it.
+        self._silence_unsubs: dict[str, CALLBACK_TYPE] = {}
         # Consecutive failures per output service: a service that does not
         # exist and one that keeps raising both count here.
         self.failing_outputs: dict[str, int] = {}
         self._reported_unknown_targets: set[str] = set()
         self._labels: dict[str, str] | None = None
+        # How many times a UI service was refused for the same unknown
+        # target/person, keyed by `(field, value)` (brief item 7).
+        self._invalid_service_calls: dict[tuple[str, str], int] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -144,6 +187,10 @@ class Switchboard:
     async def async_setup(self) -> None:
         """Load persisted state and start every listener."""
         await self.store.async_load()
+
+        # An options change reloads the entry, so this is also the moment a
+        # slug or a person the user has just added stops being "invalid".
+        self._async_clear_fixed_service_issues()
 
         self._unsubs.append(
             self.hass.bus.async_listen(
@@ -199,6 +246,15 @@ class Switchboard:
         for person in self.table.persons:
             self._async_schedule_deferral(person)
 
+        # A restart may also have spanned the end of a temporary silence.
+        # Persist the purge: without the save, the lifted silence is still on
+        # disk and comes back at the next load if nothing else writes the store
+        # in between.
+        if self.store.purge_expired_silences(dt_util.utcnow()):
+            await self.store.async_save()
+        for person, until in self.store.silences.items():
+            self._async_schedule_silence_expiry(person, until)
+
     @callback
     def _async_stop_event(self, _event: Event) -> None:
         """Cancel timers when Home Assistant shuts down."""
@@ -206,10 +262,13 @@ class Switchboard:
 
     @callback
     def async_cancel_timers(self) -> None:
-        """Cancel every pending deferral timer."""
+        """Cancel every pending deferral and silence-expiry timer."""
         for unsub in self._deferral_unsubs.values():
             unsub()
         self._deferral_unsubs.clear()
+        for unsub in self._silence_unsubs.values():
+            unsub()
+        self._silence_unsubs.clear()
 
     @callback
     def async_shutdown(self) -> None:
@@ -224,9 +283,10 @@ class Switchboard:
     # ------------------------------------------------------------------
 
     def build_context(self) -> RoutingContext:
-        """Snapshot person states, silence entities and live snoozes."""
+        """Snapshot person states, silence sources and live snoozes."""
         now = dt_util.utcnow()
         self.store.purge_expired_snoozes(now)
+        self.store.purge_expired_silences(now)
 
         person_states: dict[str, str] = {}
         for entity_id in self.table.persons:
@@ -244,15 +304,35 @@ class Switchboard:
             person_states=person_states,
             silenced=silenced,
             snoozes=dict(self.store.snoozes),
+            temporary_silences=dict(self.store.silences),
         )
 
     def is_person_silenced(self, person: PersonConfig) -> bool:
-        """Return True when one of the person's silence entities is `on`."""
+        """Return True when either silence source covers this person.
+
+        ADR-0016: `binary_sensor.<p>_silenced` is true when one of the person's
+        own `silence_entities` is `on` **or** a `notify_switchboard.silence` has
+        not expired yet. The two sources are independent; the router owns only
+        the second one.
+        """
+        return self.has_configured_silence(
+            person
+        ) or self.store.is_temporarily_silenced(person.entity_id, dt_util.utcnow())
+
+    def has_configured_silence(self, person: PersonConfig) -> bool:
+        """Return True when one of the person's own silence entities is `on`."""
         return any(
             (state := self.hass.states.get(entity_id)) is not None
             and state.state == STATE_ON
             for entity_id in person.silence_entities
         )
+
+    def temporary_silence_until(self, person: PersonConfig) -> datetime | None:
+        """Return when a temporary silence lifts, or None when there is none."""
+        until = self.store.silences.get(person.entity_id)
+        if until is None or until <= dt_util.utcnow():
+            return None
+        return until
 
     # ------------------------------------------------------------------
     # Inbound requests
@@ -339,6 +419,13 @@ class Switchboard:
         target = self.table.targets.get(routed.slug)
         if target is None:
             return
+
+        # Contract §"Per-row texts": `default_title` is the outgoing title
+        # whenever the caller did not supply one. Applied here, per delivery,
+        # rather than on the request, so a call fanned out over several rows
+        # gets each row's own default.
+        if title is None:
+            title = target.default_title
 
         payload = await self._async_build_payload(target, routed)
         delivered = False
@@ -478,6 +565,15 @@ class Switchboard:
         if person is None or target is None or person.wake_time is None:
             return False
 
+        if not self.has_configured_silence(person):
+            # The only thing silencing this person is a temporary
+            # `notify_switchboard.silence`, which is not a night: ADR-0016 says
+            # such a message is dropped with reason `silenced`. `wake_time` is
+            # documented as "the end of the night silence", so queueing a
+            # message until tomorrow morning because somebody asked for an hour
+            # of quiet would be the wrong kind of late.
+            return False
+
         deferral = DeferredMessage(
             person=person_id,
             slug=slug,
@@ -526,7 +622,19 @@ class Switchboard:
 
     @callback
     def _async_schedule_deferral(self, person_id: str) -> None:
-        """(Re)schedule the wake-time delivery for one person."""
+        """(Re)schedule the delivery of one person's queued messages.
+
+        The instant is whichever comes first: the person's next wake time, or
+        the end of a temporary `notify_switchboard.silence` if one is running
+        and lifts sooner. The second case matters because
+        `_async_flush_deferrals` re-checks the silence and keeps a message that
+        is still covered — without it, a flush held back by an hour of
+        requested quiet would wait until the *next* morning to try again.
+
+        A configured `silence_entities` going `off` early is not waited for: the
+        router cannot predict when that happens, and `wake_time` is the
+        documented promise.
+        """
         if (unsub := self._deferral_unsubs.pop(person_id, None)) is not None:
             unsub()
 
@@ -536,7 +644,12 @@ class Switchboard:
         if not any(key[0] == person_id for key in self.store.deferrals):
             return
 
-        when = next_wake_time(dt_util.now(), person.wake_time)
+        now = dt_util.now()
+        when = next_wake_time(now, person.wake_time)
+        if (until := self.store.silences.get(person_id)) is not None:
+            local_until = dt_util.as_local(until)
+            if now < local_until < when:
+                when = local_until
 
         async def _deliver(_now: datetime) -> None:
             self._deferral_unsubs.pop(person_id, None)
@@ -553,6 +666,17 @@ class Switchboard:
 
         `only` restricts the flush to a subset (the overdue ones at setup);
         by default everything queued for that person is delivered.
+
+        The wake time is only a *prediction* that the night is over. Before
+        delivering, the person's silence is re-read: a night schedule that runs
+        late, a `notify_switchboard.silence` set in the small hours or a
+        Home Assistant that came back up mid-night would otherwise push the
+        whole queue at somebody who is still asleep — the exact thing the
+        deferral exists to avoid. A message still under a silence stays queued
+        and the flush is re-armed by `_async_schedule_deferral`, which picks the
+        earlier of the next wake time and the end of a temporary silence.
+        `critical` bypasses silence everywhere else
+        (contract §"Routing decision"), so it bypasses it here too.
         """
         pending = (
             only
@@ -563,12 +687,22 @@ class Switchboard:
                 if key[0] == person_id
             ]
         )
+        person = self.table.persons.get(person_id)
+        still_silenced = person is not None and self.is_person_silenced(person)
+
+        deliverable: list[DeferredMessage] = []
+        held: list[DeferredMessage] = []
         for deferral in pending:
+            if still_silenced and deferral.priority != PRIORITY_CRITICAL:
+                held.append(deferral)
+            else:
+                deliverable.append(deferral)
+
+        for deferral in deliverable:
             del self.store.deferrals[deferral.key]
 
-        for deferral in pending:
+        for deferral in deliverable:
             target = self.table.targets.get(deferral.slug)
-            person = self.table.persons.get(person_id)
             if target is None or person is None:
                 continue
             usable, _recursive = split_outputs(person.outputs)
@@ -583,7 +717,15 @@ class Switchboard:
             )
             await self._async_deliver(routed, deferral.message, deferral.title)
 
-        if pending:
+        if held:
+            _LOGGER.debug(
+                "Keeping %d deferral(s) for %s: still silenced at the wake time",
+                len(held),
+                person_id,
+            )
+            self._async_schedule_deferral(person_id)
+
+        if deliverable:
             await self.store.async_save()
             self._async_notify_entities()
 
@@ -608,12 +750,16 @@ class Switchboard:
             return
 
         if action.verb == ACTION_ACKNOWLEDGE:
-            await self._async_acknowledge(target, user_id)
+            await self._async_acknowledge(target, user_id, event.context)
             return
 
         if action.minutes is not None:
             await self._async_snooze(
-                target, action.minutes, event.data.get("device_id"), user_id
+                target,
+                action.minutes,
+                event.data.get("device_id"),
+                user_id,
+                event.context,
             )
 
     def _person_for_user_id(self, user_id: str | None) -> str | None:
@@ -636,11 +782,24 @@ class Switchboard:
                 return entity_id
         return None
 
+    @staticmethod
+    def acknowledge_is_allowed(target: TargetConfig) -> bool:
+        """Return True when the ADR-009 allow-list permits acknowledging a row.
+
+        The single source of truth for both the Companion button path (which
+        logs and returns when it is False) and `notify_switchboard.acknowledge`
+        (which raises `ServiceValidationError`).
+        """
+        return bool(target.alert_entity) and target.allow_acknowledge
+
     async def _async_acknowledge(
-        self, target: TargetConfig, user_id: str | None
+        self,
+        target: TargetConfig,
+        user_id: str | None,
+        context: Context | None = None,
     ) -> None:
         """Turn off the row's alert, if the allow-list permits it (ADR-009)."""
-        if not target.alert_entity or not target.allow_acknowledge:
+        if not self.acknowledge_is_allowed(target):
             _LOGGER.warning(
                 "Refusing to acknowledge target %s: no alert in the routing table "
                 "or acknowledgement disabled (user_id=%s)",
@@ -649,11 +808,46 @@ class Switchboard:
             )
             return
 
+        await self._async_turn_off_alert(target, user_id, context)
+
+    async def _async_turn_off_alert(
+        self,
+        target: TargetConfig,
+        user_id: str | None,
+        context: Context | None = None,
+    ) -> None:
+        """Perform the acknowledgement itself, once the allow-list said yes.
+
+        The caller's `Context` is carried through, so the logbook attributes the
+        acknowledgement to whoever tapped the card or the Companion button
+        rather than to "Notify Switchboard". It is carried in two different
+        ways, and the difference matters:
+
+        - `alert.turn_off` gets a **child** context (`child_context` below), not
+          the caller's own. `alert` is an entity service, and
+          `homeassistant/helpers/service.py`,
+          `_resolve_entity_service_call_entities`, treats a non-empty
+          `context.user_id` as "this call is that user's" and runs an auth
+          lookup plus a per-entity permission check on it. Forwarding the
+          caller's context verbatim would therefore make the row's
+          `allow_acknowledge` allow-list (ADR-0009) silently subordinate to the
+          caller's entity permissions — and would raise `UnknownUser` for a
+          context whose user no longer exists. A child context keeps the
+          attribution without moving the authorisation decision: the logbook
+          falls back to the parent context's user when a row carries none
+          (`homeassistant/components/logbook/processor.py`, the
+          "Fall back to the parent context" branch).
+        - The `acknowledged` event entity gets the caller's context as-is.
+          Writing entity state runs no permission check, so the attribution is
+          direct there.
+        """
+        child_context = Context(parent_id=context.id) if context is not None else None
         await self.hass.services.async_call(
             ALERT_DOMAIN,
             SERVICE_TURN_OFF,
             {ATTR_ENTITY_ID: target.alert_entity},
             blocking=True,
+            context=child_context,
         )
         self._async_fire_delivery_event(
             EVENT_TYPE_ACKNOWLEDGED,
@@ -662,6 +856,7 @@ class Switchboard:
                 "alert_entity": target.alert_entity,
                 "user_id": user_id,
             },
+            context,
         )
         self._async_notify_entities()
 
@@ -671,6 +866,7 @@ class Switchboard:
         minutes: int,
         device_id: Any,
         user_id: str | None,
+        context: Context | None = None,
     ) -> None:
         """Store a snooze for (person, target) with an expiry."""
         persons = self._resolve_persons(target, device_id, user_id)
@@ -682,6 +878,22 @@ class Switchboard:
             )
             return
 
+        await self._async_store_snooze(target, minutes, persons, user_id, context)
+
+    async def _async_store_snooze(
+        self,
+        target: TargetConfig,
+        minutes: int,
+        persons: list[str],
+        user_id: str | None,
+        context: Context | None = None,
+    ) -> None:
+        """Persist one snooze per person and announce it.
+
+        Shared by the Companion callback and `notify_switchboard.snooze`; the
+        two paths differ only in how they resolve `persons` and in what they do
+        with a refusal.
+        """
         expiry = dt_util.utcnow() + timedelta(minutes=minutes)
         for person_id in persons:
             self.store.snoozes[(person_id, target.slug)] = expiry
@@ -696,6 +908,7 @@ class Switchboard:
                 "until": expiry.isoformat(),
                 "user_id": user_id,
             },
+            context,
         )
         self._async_notify_entities()
 
@@ -754,6 +967,299 @@ class Switchboard:
         return known
 
     # ------------------------------------------------------------------
+    # UI services (contract §"UI services (v0.2, ADR-0016)")
+    #
+    # Every entry point below reuses the Companion code paths above and only
+    # differs in one respect: a service call has a caller, so a refusal raises
+    # `ServiceValidationError` (homeassistant/exceptions.py) instead of being
+    # logged and swallowed.
+    # ------------------------------------------------------------------
+
+    async def async_service_acknowledge(
+        self, slug: str, user_id: str | None, context: Context | None = None
+    ) -> None:
+        """Acknowledge a row's alert on behalf of a card, script or automation."""
+        target = self._require_target(slug)
+        if not self.acknowledge_is_allowed(target):
+            _LOGGER.warning(
+                "Refusing notify_switchboard.acknowledge for target %s: no alert "
+                "in the routing table or acknowledgement disabled (user_id=%s)",
+                slug,
+                user_id,
+            )
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_ACKNOWLEDGE_NOT_ALLOWED,
+                translation_placeholders={"target": slug},
+            )
+
+        await self._async_turn_off_alert(target, user_id, context)
+
+    async def async_service_snooze(
+        self,
+        slug: str,
+        minutes: int,
+        person: str | None,
+        user_id: str | None,
+        context: Context | None = None,
+    ) -> None:
+        """Snooze a row for one person, or for its whole audience."""
+        target = self._require_target(slug)
+        if minutes not in target.snooze_minutes:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_SNOOZE_MINUTES_NOT_OFFERED,
+                translation_placeholders={
+                    "target": slug,
+                    "minutes": str(minutes),
+                    "offered": ", ".join(str(m) for m in target.snooze_minutes) or "-",
+                },
+            )
+
+        persons = self._require_persons(target, person)
+        await self._async_store_snooze(target, minutes, persons, user_id, context)
+
+    async def async_service_unsnooze(self, slug: str, person: str | None) -> None:
+        """Clear a stored snooze immediately, without waiting for its expiry."""
+        target = self._require_target(slug)
+        persons = self._require_persons(target, person)
+
+        cleared = [
+            person_id
+            for person_id in persons
+            if self.store.snoozes.pop((person_id, target.slug), None) is not None
+        ]
+        if cleared:
+            await self.store.async_save()
+            self._async_notify_entities()
+        _LOGGER.debug("Unsnoozed %s for %s", target.slug, cleared or "nobody")
+
+    async def async_service_silence(self, person: str, minutes: int) -> None:
+        """Set a temporary, person-wide silence the router owns (ADR-0016).
+
+        `minutes` is bounded on both sides. The lower bound is ADR-0016's rule
+        (zero has no meaning); the upper bound exists because the arithmetic
+        below is not total: `datetime + timedelta(minutes=10**15)` raises
+        `OverflowError`, which is a plain `Exception`, so an unbounded value
+        would reach the caller as an unhandled error rather than as the
+        translated `ServiceValidationError` ADR-0015 promises.
+        """
+        self._require_person(person)
+        self._async_clear_invalid_service_call(ATTR_PERSON, person)
+        if not MIN_SILENCE_MINUTES <= minutes <= MAX_SILENCE_MINUTES:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_INVALID_SILENCE_MINUTES,
+                translation_placeholders={
+                    "minutes": str(minutes),
+                    "min": str(MIN_SILENCE_MINUTES),
+                    "max": str(MAX_SILENCE_MINUTES),
+                },
+            )
+
+        until = dt_util.utcnow() + timedelta(minutes=minutes)
+        self.store.silences[person] = until
+        await self.store.async_save()
+        self._async_schedule_silence_expiry(person, until)
+        self._async_notify_entities()
+        _LOGGER.debug("Silenced %s until %s", person, until.isoformat())
+
+    async def async_service_unsilence(self, person: str) -> None:
+        """Lift a temporary silence immediately.
+
+        Idempotent by contract: a person who is not temporarily silenced has
+        nothing to undo, and that is not an error.
+        """
+        self._require_person(person)
+        self._async_clear_invalid_service_call(ATTR_PERSON, person)
+        if self.store.silences.pop(person, None) is None:
+            return
+
+        self._async_cancel_silence_expiry(person)
+        await self.store.async_save()
+        self._async_notify_entities()
+
+    # ------------------------------------------------------------------
+    # Service-call validation
+    # ------------------------------------------------------------------
+
+    def _require_target(self, slug: str) -> TargetConfig:
+        """Return the row named by `slug`, or refuse the call."""
+        target = self.table.targets.get(slug)
+        if target is None:
+            self._async_record_invalid_service_call(ATTR_TARGET, slug)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_UNKNOWN_TARGET,
+                translation_placeholders={"target": slug},
+            )
+        self._async_clear_invalid_service_call(ATTR_TARGET, slug)
+        return target
+
+    def _require_person(self, person: str) -> PersonConfig:
+        """Return the person row for `person`, or refuse the call."""
+        known = self.table.persons.get(person)
+        if known is None:
+            self._async_record_invalid_service_call(ATTR_PERSON, person)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_UNKNOWN_PERSON,
+                translation_placeholders={"person": person},
+            )
+        return known
+
+    def _require_persons(self, target: TargetConfig, person: str | None) -> list[str]:
+        """Resolve the persons a snooze/unsnooze applies to.
+
+        An explicit `person` must be known *and* in the row's audience; without
+        one, the whole audience is used — the same fallback the Companion path
+        documents for an unresolvable device (`tests/acceptance/README.md`
+        "Assumptions" §3), reached here without needing a device at all.
+        """
+        audience = [
+            person_id
+            for person_id in target.audience
+            if person_id in self.table.persons
+        ]
+
+        if person is None:
+            if not audience:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key=ERROR_NO_AUDIENCE,
+                    translation_placeholders={"target": target.slug},
+                )
+            return audience
+
+        self._require_person(person)
+        if person not in audience:
+            self._async_record_invalid_service_call(ATTR_PERSON, person)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_PERSON_NOT_IN_AUDIENCE,
+                translation_placeholders={"person": person, "target": target.slug},
+            )
+        self._async_clear_invalid_service_call(ATTR_PERSON, person)
+        return [person]
+
+    @callback
+    def _async_record_invalid_service_call(self, field: str, value: str) -> None:
+        """Count a refused service call and repair when the same one recurs.
+
+        One bad call is already answered with a `ServiceValidationError`; a card
+        still pointing at a renamed slug repeats it forever and nobody reads the
+        log, which is what the `repairs` issue is for (brief item 7, same spirit
+        as `MAX_CONSECUTIVE_OUTPUT_MISSES`).
+
+        The count is **cumulative, not consecutive**: only
+        `_async_clear_invalid_service_call` resets it, when that exact
+        slug/person becomes usable again. See `MAX_INVALID_SERVICE_CALLS`.
+
+        Only `MAX_TRACKED_INVALID_SERVICE_CALLS` distinct values are tracked
+        individually. A caller producing a fresh bad value every time — a
+        template rendering to garbage, a fuzzed card — would otherwise grow this
+        dict and the (persisted) issue registry without bound; past the cap a
+        single aggregated issue says so instead.
+        """
+        key = (field, value)
+        if (
+            key not in self._invalid_service_calls
+            and len(self._invalid_service_calls) >= MAX_TRACKED_INVALID_SERVICE_CALLS
+        ):
+            self._async_report_many_invalid_service_calls()
+            return
+
+        count = self._invalid_service_calls.get(key, 0) + 1
+        self._invalid_service_calls[key] = count
+        if count < MAX_INVALID_SERVICE_CALLS:
+            return
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"invalid_service_{field}_{value}",
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"invalid_service_{field}",
+            translation_placeholders={"value": value},
+        )
+
+    @callback
+    def _async_clear_invalid_service_call(self, field: str, value: str) -> None:
+        """Forget a slug/person that is valid again, and drop its repair.
+
+        A `repairs` issue outlives the process that raised it, so adding the
+        missing row back — or putting the person into the audience — has to
+        delete it explicitly, or the user fixes the cause and the warning stays
+        on their dashboard for ever.
+        """
+        if self._invalid_service_calls.pop((field, value), None) is None:
+            return
+        ir.async_delete_issue(self.hass, DOMAIN, f"invalid_service_{field}_{value}")
+
+    @callback
+    def _async_report_many_invalid_service_calls(self) -> None:
+        """Raise the one aggregated issue that replaces per-value ones."""
+        ir.async_create_issue(
+            self.hass,
+            DOMAIN,
+            ISSUE_INVALID_SERVICE_CALLS_MANY,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_INVALID_SERVICE_CALLS_MANY,
+            translation_placeholders={"count": str(MAX_TRACKED_INVALID_SERVICE_CALLS)},
+        )
+
+    @callback
+    def _async_clear_fixed_service_issues(self) -> None:
+        """Delete the repairs whose cause the options flow has just fixed.
+
+        Called at setup, so a reload — which is what an options change triggers
+        (`__init__._async_update_options`) — is enough to clear the warnings for
+        every slug and person the new table now knows about. The in-memory
+        counters do not survive that reload, so the aggregated issue goes too:
+        it describes a burst this process never saw.
+        """
+        for slug in self.table.targets:
+            ir.async_delete_issue(
+                self.hass, DOMAIN, f"invalid_service_{ATTR_TARGET}_{slug}"
+            )
+        for person in self.table.persons:
+            ir.async_delete_issue(
+                self.hass, DOMAIN, f"invalid_service_{ATTR_PERSON}_{person}"
+            )
+        ir.async_delete_issue(self.hass, DOMAIN, ISSUE_INVALID_SERVICE_CALLS_MANY)
+
+    # ------------------------------------------------------------------
+    # Temporary silence expiry
+    # ------------------------------------------------------------------
+
+    @callback
+    def _async_schedule_silence_expiry(self, person: str, until: datetime) -> None:
+        """(Re)arm the timer that lifts one person's temporary silence.
+
+        The routing decision purges expired silences anyway; this timer exists
+        so `binary_sensor.<p>_silenced` goes back to `off` at the right minute
+        instead of at the next notification, which may be hours later.
+        """
+        self._async_cancel_silence_expiry(person)
+
+        async def _expire(_now: datetime) -> None:
+            self._silence_unsubs.pop(person, None)
+            self.store.purge_expired_silences(dt_util.utcnow())
+            await self.store.async_save()
+            self._async_notify_entities()
+
+        self._silence_unsubs[person] = async_track_point_in_time(
+            self.hass, _expire, until
+        )
+
+    @callback
+    def _async_cancel_silence_expiry(self, person: str) -> None:
+        """Cancel the pending expiry timer of one person, if there is one."""
+        if (unsub := self._silence_unsubs.pop(person, None)) is not None:
+            unsub()
+
+    # ------------------------------------------------------------------
     # Observer mode (brief item 8)
     # ------------------------------------------------------------------
 
@@ -778,17 +1284,87 @@ class Switchboard:
         old, new = old_state.state, new_state.state
         for target in targets:
             if old == STATE_IDLE and new == STATE_ON:
-                message = str(new_state.attributes.get("message") or target.name)
-                await self.async_handle_request(
-                    message, title=target.name, targets=[target.slug]
-                )
+                message = self._observer_message(target, new_state)
             elif new == STATE_IDLE and old in (STATE_ON, STATE_OFF):
-                done = new_state.attributes.get("done_message")
-                message = str(done) if done else await self._async_back_to_normal()
-                await self.async_handle_request(
-                    message, title=target.name, targets=[target.slug]
-                )
-            # `on -> off` is an acknowledgement: nothing is routed.
+                message = await self._async_observer_done_message(target, new_state)
+            else:
+                # `on -> off` is an acknowledgement: nothing is routed.
+                continue
+
+            await self.async_handle_request(
+                message,
+                title=self._observer_title(target),
+                targets=[target.slug],
+            )
+
+    def _observer_message(self, target: TargetConfig, state: State) -> str:
+        """Return the text of an `idle -> on` transition (contract, ADR-0016).
+
+        Order: the alert's own `message` attribute (kept first for forward
+        compatibility — a real `AlertEntity` exposes none today, see
+        `docs/known-issues.md`), then the row's `message` template, then the
+        row's bare name.
+        """
+        if (attribute := state.attributes.get(ATTR_ALERT_MESSAGE)) not in (None, ""):
+            return str(attribute)
+        if (rendered := self._render_row_text(target, target.message)) is not None:
+            return rendered
+        return target.name
+
+    async def _async_observer_done_message(
+        self, target: TargetConfig, state: State
+    ) -> str:
+        """Return the text of an `on|off -> idle` transition (contract, ADR-0016).
+
+        Order: the row's `done_message` template, then the alert's own
+        `done_message` attribute, then the translated `common.back_to_normal`.
+        Contract §"Per-row texts" and ADR-0016 §3 both put the row's template
+        first here, unlike `message`; the row is the only source that exists in
+        practice, so the two orders behave identically on a real alert.
+        """
+        if (rendered := self._render_row_text(target, target.done_message)) is not None:
+            return rendered
+        if (attribute := state.attributes.get(ATTR_ALERT_DONE_MESSAGE)) not in (
+            None,
+            "",
+        ):
+            return str(attribute)
+        return await self._async_back_to_normal()
+
+    def _observer_title(self, target: TargetConfig) -> str:
+        """Return the title of an observer-generated message.
+
+        Observer mode never had a caller to supply a title, so the row's
+        `default_title` always applies (ADR-0016); the row's name stays the last
+        resort, which is exactly what Sprint 1 always sent.
+        """
+        return target.default_title or target.name
+
+    def _render_row_text(self, target: TargetConfig, raw: str | None) -> str | None:
+        """Render one of the row's optional templates, or return None.
+
+        The row's alert's current state is exposed to the template as `alert`
+        (`None` when the row has no `alert_entity`, or that entity does not
+        exist), so a row can write `{{ alert.attributes.level }}` without
+        depending on a real `AlertEntity` ever gaining state attributes.
+        """
+        if not raw:
+            return None
+
+        alert_state = (
+            self.hass.states.get(target.alert_entity) if target.alert_entity else None
+        )
+        try:
+            rendered = Template(raw, self.hass).async_render(
+                {TEMPLATE_ALERT_VARIABLE: alert_state}, parse_result=False
+            )
+        except TemplateError as err:
+            _LOGGER.error(
+                "Target %s: could not render the row text %r: %s", target.slug, raw, err
+            )
+            return None
+        text = str(rendered).strip()
+        return text or None
 
     # ------------------------------------------------------------------
     # Translations
@@ -859,9 +1435,18 @@ class Switchboard:
 
     @callback
     def _async_fire_delivery_event(
-        self, event_type: str, attributes: dict[str, Any]
+        self,
+        event_type: str,
+        attributes: dict[str, Any],
+        context: Context | None = None,
     ) -> None:
-        """Push one `event.switchboard_delivery` event."""
+        """Push one `event.switchboard_delivery` event.
+
+        `context` is the caller's, when there is one (a UI service call, a
+        Companion callback). It is handed to the event entity so the state
+        change it writes is attributed to that user in the logbook, the same
+        way `alert.turn_off` is.
+        """
         if event_type not in DELIVERY_EVENT_TYPES:  # pragma: no cover - guard
             return
         async_dispatcher_send(
@@ -869,6 +1454,7 @@ class Switchboard:
             f"{DOMAIN}_delivery_{self.entry.entry_id}",
             event_type,
             attributes,
+            context,
         )
 
     @callback

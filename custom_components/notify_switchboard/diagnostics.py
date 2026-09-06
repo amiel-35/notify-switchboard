@@ -7,6 +7,14 @@ payload). Message bodies go through
 `homeassistant.components.diagnostics.async_redact_data`; `default_data` is
 redacted value by value so the *shape* of the row stays readable, which is the
 whole point of a diagnostics dump.
+
+The three per-row texts of ADR-0016 (`message`, `done_message`,
+`default_title`) are deliberately **not** redacted. They are configuration, not
+content: a Jinja template and a fixed title the user wrote in the options flow,
+the same kind of thing as `presence_rule` or `snooze_minutes`, and unreadable
+without them the dump cannot explain what observer mode actually sent. What is
+redacted is the *rendered* result — it appears as the `message` of a decision
+or of a deferral, and both go through `TO_REDACT` below.
 """
 
 from __future__ import annotations
@@ -70,6 +78,17 @@ async def async_get_config_entry_diagnostics(
                 "active": expiry > now,
             }
             for (person, slug), expiry in switchboard.store.snoozes.items()
+        ],
+        # The router-owned temporary silences (ADR-0016), next to the snoozes
+        # they sit beside in the store. Nothing here needs redacting that is not
+        # already redacted: a silence is a `person.*` entity id and an instant.
+        "silences": [
+            {
+                "person": person,
+                "until": until.isoformat(),
+                "active": until > now,
+            }
+            for person, until in switchboard.store.silences.items()
         ],
         "deferrals": [
             async_redact_data(deferral.as_dict(), TO_REDACT)

@@ -28,27 +28,13 @@ fix it:
   flag. Reproduced with a two-line test that only sets up core's `alert`.
 
 Accepted: `tests/conftest.py` overrides the `expected_lingering_timers`
-fixture for exactly those two node ids, with the reasoning above. Nothing else
-in the suite is affected. Planned resolution: an upstream issue against core so
-that `async_track_point_in_utc_time` schedules in a way `cancel_on_shutdown`
-can see, and/or so that `alert.turn_off` cancels its own repeat.
-
-## 2026-09-06 — S1 — a real `alert.*` never exposes `message` or `done_message`
-
-Brief item 8 asks observer mode to read the alert's `message` attribute on
-`idle -> on` and its `done_message` on `-> idle`. `AlertEntity`
-(`homeassistant/components/alert/entity.py`) has no `extra_state_attributes`
-at all: both templates are rendered internally to build the `notifiers`
-payload and are never surfaced on the entity's state.
-
-Observer mode is implemented exactly as specified, so a real alert always
-takes the fallback branch: the row's `name` on `idle -> on`, and the
-translated `common.back_to_normal` on `-> idle`. Both branches are covered by
-the acceptance suite, which drives a synthetic `alert.*`-shaped entity.
-
-Accepted for S1. Planned resolution: an ADR before S2 decides whether the row
-should own its own message templates, or whether to propose the attributes
-upstream.
+fixture for exactly those node ids, with the reasoning above — three of them
+since Sprint 2, which reaches the same core bug through
+`notify_switchboard.acknowledge` as well as through the Companion callback.
+Nothing else in the suite is affected. Planned resolution: an upstream issue
+against core so that `async_track_point_in_utc_time` schedules in a way
+`cancel_on_shutdown` can see, and/or so that `alert.turn_off` cancels its own
+repeat.
 
 ## 2026-09-07 — S1 — the Companion output prefix, and what it really matches
 
@@ -100,6 +86,14 @@ Accepted for S1: it keeps the whole table validated before every write
 (doctrine §5) without a custom panel. Planned resolution: a nicer editor is a
 card/S6 concern.
 
+**Partly addressed in 0.2.0.** The step still writes one whole row at a time,
+but it no longer opens empty: `Edit a person` / `Edit a target` pick the row and
+`add_suggested_values_to_schema` pre-fills every field with what is stored, and
+a validation error hands back what was typed. Before that, opening the target
+form to change one word of `message` silently reset `done_message`,
+`default_title`, `snooze_minutes` and `default_data` to their schema defaults on
+submit — a data-loss bug, not a convenience gap.
+
 ## 2026-09-07 — S1 — the Companion `device_id` path is unverified on a real device
 
 `Switchboard._resolve_persons` matches the `device_id` carried by a
@@ -127,8 +121,10 @@ through `async_get_translations`.
 
 Accepted for S1: the fix is to drop `_attr_name` in favour of
 `_attr_translation_key` plus an `entity` section in `strings.json`, which
-touches every entity and every translation file at once. Planned resolution:
-a dedicated commit early in S2, before more entities exist.
+touches every entity and every translation file at once. Still open after S2,
+which added no entity and was scoped to the five UI services and the per-row
+texts (`docs/sprints/sprint-2-brief.md`). Planned resolution: a dedicated
+commit in S3, before more entities exist.
 
 ## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per row
 
@@ -141,21 +137,100 @@ one on an `info` alert.
 
 Accepted for S1: adding a fourth state (unset / forced on / forced off) to
 every routing-table row costs a field in the options flow, a migration and
-three translations, for a case nobody has hit yet. Planned resolution: a
-`require_authentication` tri-state on the row in S2, if a real use case shows
-up.
+three translations, for a case nobody has hit yet. Still open: the Sprint 2
+brief lists `require_authentication` under "Out of scope (must not)", so 0.2.0
+did not take it up even though it added three other per-row fields. Planned
+resolution: a `require_authentication` tri-state on the row when a real use
+case shows up.
 
 ## 2026-09-07 — S1 — two `alert` limitations to raise upstream
 
-Both are recorded above with their core file paths; this entry exists so the
-follow-up is not lost:
+This entry exists so the follow-up is not lost:
 
-1. `AlertEntity` exposes no state attributes at all, so neither `message` nor
-   `done_message` can be read by observer mode.
+1. `AlertEntity` (`homeassistant/components/alert/entity.py`) exposes no state
+   attributes at all — both `message` and `done_message` are rendered
+   internally to build the `notifiers` payload and never surfaced — so neither
+   can be read by observer mode. **No longer blocking this integration**: the
+   row now owns its own `message`/`done_message` templates (ADR-0016, shipped
+   in 0.2.0), which is option (a) the original entry raised. The attribute is
+   still checked first, for the day core changes its mind.
 2. `alert.turn_off` sets `_ack` but never calls `self._cancel()`, so
    acknowledging leaves the repeat timer armed, and `cancel_on_shutdown` is
    unenforceable because `async_track_point_in_utc_time` schedules with
-   `loop.call_at(when, self)` and no `HassJob` in `handle._args`.
+   `loop.call_at(when, self)` and no `HassJob` in `handle._args`. Still open,
+   and still the reason `tests/conftest.py` tolerates a lingering timer for
+   the three tests that drive a real alert.
 
 Neither issue has been filed against home-assistant/core yet. Planned
-resolution: file both before S2 opens, and link the issue numbers here.
+resolution: file (2) and link the issue number here; (1) is now a
+nice-to-have rather than a gap.
+
+## 2026-09-07 — S2 — the contract and the tests' README order `done_message`
+differently
+
+`docs/contract.md` §"Per-row texts" and `docs/ADR/0016-…` §3 both put the
+row's `done_message` template **ahead of** the alert's own `done_message`
+attribute, while `tests/acceptance/README.md` ("v0.2 addendum") and
+`docs/sprints/sprint-2-brief.md` item 8 describe it the other way round, the
+same way `message` is ordered. No acceptance test pins it, since no scenario
+has both a row template and an alert attribute.
+
+Resolved in favour of the two normative documents (contract + ADR): the row's
+template wins for `done_message`, the alert's attribute wins for `message`.
+Because a real `AlertEntity` exposes neither attribute (see above), the two
+orders are indistinguishable on any real alert today; the choice only matters
+for a synthetic `alert.*`-shaped entity. Recorded here so a future reader does
+not read the asymmetry as a bug. Planned resolution: one sentence in whichever
+document is wrong, next time the contract is amended.
+
+## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
+
+`notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and
+`unsilence` are callable by any Home Assistant user, administrator or not. This
+came up in the Sprint 2 review and was decided, not overlooked: the wall tablet
+runs under a **non-admin** account and its cards are the main caller, so an
+admin-only domain would break the one surface ADR-0016 was written for while
+leaving the Companion buttons — which are events, not service calls, and so
+cannot be role-gated at all — as the only way to acknowledge anything.
+
+What bounds them instead: the ADR-0009 allow-list (only an `alert.*` that is in
+the routing table, on a row with `allow_acknowledge`), `context.user_id` logged
+on every refusal and carried in the `acknowledged`/`snoozed` events, and
+`authenticationRequired` still set on `high`/`critical` Companion buttons. The
+full reasoning is the "Addendum (2026-09-07, post-review)" section of
+[`ADR/0016`](ADR/0016-ui-services-and-row-texts.md).
+
+Revisit if a household needs it — a child who keeps silencing the smoke alert,
+a guest account. Planned resolution: an optional per-row flag next to
+`allow_acknowledge` in a later version, never a blanket restriction on the
+domain.
+
+## 2026-09-07 — S2 — a deferral now re-checks silence, but only silence
+
+`Switchboard._async_flush_deferrals` used to trust its timer: whatever was
+queued for a person went out at their `wake_time`, full stop. A night schedule
+that runs late, a `notify_switchboard.silence` set in the small hours, or a
+Home Assistant that came back up mid-night would therefore push the whole queue
+at somebody still asleep — the exact notification the deferral exists to
+prevent. Fixed in 0.2.0: the flush re-reads `is_person_silenced` and keeps a
+still-silenced message queued, re-arming for whichever comes first, the end of
+the temporary silence or the next wake time. `critical` is delivered regardless,
+as it is everywhere else.
+
+Still accepted, and this is the narrowed version of the old
+`docs/ARCHITECTURE.md` line "deferred deliveries do not re-run the decision":
+**only the silence is re-checked**, not the rest of the routing decision. A
+person who left the row's audience, who is now away under a `home_only` rule, or
+who has since snoozed that row, still gets their queued message at the wake
+time. Nothing is lost that way, which is the property the deferral is for; the
+cost is a message that a fresh decision might have dropped. Re-running `decide`
+at flush time would need a `RoutingContext` for a request that no longer exists
+and a rule for what to do with a message the second decision drops (deliver it
+anyway? count it? re-queue it?), which is a design question, not a bug fix.
+Planned resolution: decide it if somebody reports the case; today the wake time
+is minutes away from the decision that queued the message.
+
+A configured silence entity that goes `off` well before the wake time does not
+trigger an early flush either: `_async_silence_changed` refreshes
+`binary_sensor.<p>_silenced` but does not re-arm the deferral timer. The message
+waits for the wake time, which is the documented promise.

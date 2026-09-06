@@ -24,6 +24,7 @@ from homeassistant.helpers import entity_registry as er
 
 from .dispatcher import Switchboard
 from .legacy import SwitchboardNotificationService
+from .services import async_register_services, async_unregister_services
 from .store import SwitchboardStore
 
 PLATFORMS: list[Platform] = [
@@ -87,6 +88,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: SwitchboardConfigEntry) 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await legacy_service.async_register(hass)
 
+    # The five `notify_switchboard.*` UI services of contract v0.2 (ADR-0016).
+    # They belong to the entry, not to the integration: a single instance is
+    # enforced by `manifest.json`'s `single_config_entry`, and unloading the
+    # entry must not leave a service pointing at a dead `Switchboard`.
+    async_register_services(hass, switchboard)
+
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
@@ -96,6 +103,7 @@ async def async_unload_entry(
 ) -> bool:
     """Unload a config entry."""
     runtime_data = entry.runtime_data
+    async_unregister_services(hass)
     await runtime_data.legacy_service.async_unregister()
     runtime_data.switchboard.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)

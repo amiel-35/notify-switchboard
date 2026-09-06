@@ -22,7 +22,9 @@ STORAGE_VERSION: Final = 1
 # Minor 2 adds `queued_at` to every deferral, so a deferral whose wake time
 # passed while Home Assistant was down can be delivered at the next start
 # instead of waiting a whole day.
-STORAGE_MINOR_VERSION: Final = 2
+# Minor 3 (v0.2, ADR-0016) adds the `silences` list: the temporary, router-owned
+# per-person silences set by `notify_switchboard.silence`.
+STORAGE_MINOR_VERSION: Final = 3
 
 # ---------------------------------------------------------------------------
 # Options shape (`entry.options`), normative -- see tests/acceptance/README.md
@@ -48,6 +50,12 @@ CONF_ALLOW_ACKNOWLEDGE: Final = "allow_acknowledge"
 CONF_SNOOZE_MINUTES: Final = "snooze_minutes"
 CONF_DEFAULT_DATA: Final = "default_data"
 CONF_OBSERVER_MODE: Final = "observer_mode"
+
+# Per-row optional texts (v0.2 addendum, ADR-0016). All three default to None,
+# so a Sprint 1 row keeps behaving exactly as it did.
+CONF_MESSAGE: Final = "message"
+CONF_DONE_MESSAGE: Final = "done_message"
+CONF_DEFAULT_TITLE: Final = "default_title"
 
 # ---------------------------------------------------------------------------
 # `data` payload attributes (contract "Input")
@@ -167,11 +175,81 @@ ACTION_SNOOZE: Final = "snooze"
 COMPANION_OUTPUT_PREFIX: Final = "mobile_app_"
 
 # ---------------------------------------------------------------------------
+# UI services (contract §"UI services (v0.2, ADR-0016)")
+# ---------------------------------------------------------------------------
+
+SERVICE_ACKNOWLEDGE: Final = "acknowledge"
+SERVICE_SNOOZE: Final = "snooze"
+SERVICE_UNSNOOZE: Final = "unsnooze"
+SERVICE_SILENCE: Final = "silence"
+SERVICE_UNSILENCE: Final = "unsilence"
+
+UI_SERVICES: Final[tuple[str, ...]] = (
+    SERVICE_ACKNOWLEDGE,
+    SERVICE_SNOOZE,
+    SERVICE_UNSNOOZE,
+    SERVICE_SILENCE,
+    SERVICE_UNSILENCE,
+)
+
+# Service call fields.
+ATTR_TARGET: Final = "target"
+ATTR_MINUTES: Final = "minutes"
+ATTR_PERSON: Final = "person"
+
+# `ServiceValidationError` translation keys; each one has a matching entry
+# under `exceptions` in `strings.json` and every `translations/*.json`.
+ERROR_UNKNOWN_TARGET: Final = "unknown_target"
+ERROR_ACKNOWLEDGE_NOT_ALLOWED: Final = "acknowledge_not_allowed"
+ERROR_SNOOZE_MINUTES_NOT_OFFERED: Final = "snooze_minutes_not_offered"
+ERROR_UNKNOWN_PERSON: Final = "unknown_person"
+ERROR_PERSON_NOT_IN_AUDIENCE: Final = "person_not_in_audience"
+ERROR_INVALID_SILENCE_MINUTES: Final = "invalid_silence_minutes"
+ERROR_NO_AUDIENCE: Final = "no_audience"
+
+# The smallest temporary silence that has a defined meaning (ADR-0016:
+# `silence(minutes: 0)` is refused, zero has no meaning).
+MIN_SILENCE_MINUTES: Final = 1
+
+# The longest temporary silence, in minutes: one day, the same ceiling
+# `services.yaml` already puts on the `minutes` number selector. An upper bound
+# is not cosmetic: `dt_util.utcnow() + timedelta(minutes=minutes)` raises
+# `OverflowError` (a plain `Exception`, not a `HomeAssistantError`) as soon as
+# the result leaves `datetime`'s range, so an unbounded `minutes` turns a
+# caller's typo into a 500 instead of a translated refusal. Beyond a day, a
+# silence is a schedule -- that is what a person's `silence_entities` are for.
+MAX_SILENCE_MINUTES: Final = 1440
+
+# ---------------------------------------------------------------------------
 # Robustness
 # ---------------------------------------------------------------------------
 
 # An output missing for more than this many consecutive calls raises a repair.
 MAX_CONSECUTIVE_OUTPUT_MISSES: Final = 3
+
+# A UI service refused for the same unknown target/person this many times
+# raises a `repairs` issue (sprint-2 brief item 7). One refused call is already
+# reported to its caller as a `ServiceValidationError`; a card wired to a stale
+# slug keeps hitting it, and that is what deserves a repair.
+#
+# The count is **cumulative, not consecutive**: it is only ever reset when that
+# exact slug/person becomes valid again (the row is added back, the person joins
+# the audience), at which point the issue is deleted too. Nothing else clears
+# it, so three refusals a week apart raise the issue just as three in a row do
+# -- which is the point, since a card wired to a stale slug fires whenever
+# somebody taps it, not in bursts.
+MAX_INVALID_SERVICE_CALLS: Final = 3
+
+# How many *distinct* invalid targets/persons are tracked individually. A caller
+# that generates a fresh bad value on every call (a template gone wrong, a fuzz
+# test) would otherwise grow the counter dict and the issue registry without
+# bound, one persisted `repairs` issue per value. Past this many distinct
+# values, no new per-value issue is raised and a single aggregated one takes
+# over.
+MAX_TRACKED_INVALID_SERVICE_CALLS: Final = 20
+
+# The aggregated `repairs` issue id/translation key used past that bound.
+ISSUE_INVALID_SERVICE_CALLS_MANY: Final = "invalid_service_calls_many"
 
 # Number of decisions kept in memory for diagnostics.
 DIAGNOSTICS_DECISION_LOG_SIZE: Final = 20

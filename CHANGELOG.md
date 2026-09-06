@@ -7,6 +7,119 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-07
+
+Router 0.2.0 — UI services (contract v0.2 addendum, ADR-0016).
+
+### Added
+
+- **Five `notify_switchboard.*` services** for callers that are not a
+  Companion push notification — a card, a script, an automation:
+  `acknowledge`, `snooze`, `unsnooze`, `silence`, `unsilence`. They reuse the
+  Companion code paths and differ in one respect only: a service call has a
+  caller, so a refused or invalid call raises a `ServiceValidationError` with a
+  translated message instead of being logged and swallowed. `acknowledge`
+  keeps the ADR-0009 allow-list; `snooze` additionally refuses a duration the
+  row does not offer, and an explicit `person` outside the row's audience.
+  Declared in `services.yaml`, with `en`/`fr`/`es` translations under
+  `services` and `exceptions`.
+- **Temporary, person-wide silence** (`silence` / `unsilence`), a second and
+  independent source of silence the router owns: the person's configured
+  `silence_entities` are still read, never touched. It is persisted in the
+  same `Store` as snoozes (minor version 3, migrated), shows up in
+  `binary_sensor.<person>_silenced` (with an `until` attribute while it runs),
+  drops routing with the existing `silenced` reason, is bypassed by
+  `priority: critical`, and expires both lazily and on its own timer — so the
+  sensor goes back to `off` at the right minute, not at the next notification.
+  `minutes` must be between 1 and 1440 (a day): anything outside that raises a
+  translated `ServiceValidationError`, including the values large enough to make
+  `datetime` arithmetic overflow. `unsilence` on somebody who is not silenced is
+  a no-op, not an error.
+- **Three optional per-row texts**: `message` and `done_message`, templates
+  rendered with the row's alert's current state exposed as `alert`, and
+  `default_title`, used as the outgoing title whenever the caller gave none —
+  including every message observer mode generates. All three default to
+  absent, so a routing table written for 0.1.0 behaves exactly as it did.
+  This resolves the known-issues entry "a real `alert.*` never exposes
+  `message` or `done_message`": the row, not the alert, is now the documented
+  source of observer-mode text.
+- **A `repairs` issue** when the same unknown target or unusable person has
+  been refused by a service three times — a card left pointing at a renamed
+  row, the counterpart of `MAX_CONSECUTIVE_OUTPUT_MISSES`. The count is
+  **cumulative, not consecutive**: three refusals a week apart raise the issue
+  just as three in a row do, because a card wired to a stale slug fires whenever
+  somebody taps it rather than in bursts. It is reset — and the issue deleted —
+  when that slug or person is accepted again, and at setup for everything the
+  reloaded routing table now knows about, so fixing the cause in the options
+  flow makes the warning go away. At most 20 distinct bad values get an issue
+  of their own; past that a single `invalid_service_calls_many` stands for the
+  rest, so a caller generating a fresh bad value every time cannot fill the
+  (persisted) issue registry.
+
+### Changed
+
+- `binary_sensor.<person>_silenced` is now true when **either** silence source
+  is active. Its `sources` attribute keeps its 0.1.0 meaning (the configured
+  entities).
+- Observer mode's `idle -> on` text order is now: the alert's own `message`
+  attribute, the row's `message` template, the row's name. Its
+  `on|off -> idle` order is: the row's `done_message` template, the alert's
+  own `done_message` attribute, the translated `common.back_to_normal`
+  (contract §"Per-row texts" and ADR-0016 §3 both put the row first here).
+  Absent the new fields, both chains end exactly where 0.1.0 ended.
+- A message silenced only by a temporary silence is dropped with reason
+  `silenced` rather than deferred: `wake_time` is documented as the end of the
+  *night* silence, and queueing an hour of requested quiet until tomorrow
+  morning would be the wrong kind of late. A configured night silence still
+  defers, even when a temporary silence is running on top of it.
+- The routing-table options flow gained the three new text fields; the two
+  template fields use a `TemplateSelector`, which refuses unparsable Jinja.
+- **The options flow no longer forgets the row it is editing.** Two new menu
+  entries, `Edit a person` and `Edit a target`, pick a row and open its form
+  pre-filled with what is stored; a validation error now hands back what was
+  typed instead of an empty form. The step writes the whole row, so opening it
+  to change one word of `message` used to reset `done_message`,
+  `default_title`, `snooze_minutes` and `default_data` to their defaults on
+  submit.
+- **A deferred message re-checks the silence before going out.** `wake_time` is
+  a prediction that the night is over, not a promise: a schedule running late,
+  a `notify_switchboard.silence` set in the small hours or a restart spanning
+  the night used to push the whole queue at somebody still asleep. A
+  still-silenced message stays queued and the flush is re-armed for whichever
+  comes first, the end of the temporary silence or the next wake time.
+  `critical` is delivered regardless. The rest of the routing decision is still
+  not re-run (`docs/known-issues.md`).
+- **Acknowledging carries the caller's context**, so the logbook credits the
+  person who tapped the card or the Companion button rather than the
+  integration. `alert.turn_off` gets a *child* of that context on purpose:
+  core treats a non-empty `context.user_id` on an entity service call as an
+  authorisation claim, and the row's ADR-0009 allow-list — not the caller's
+  entity permissions — is what decides here. The `acknowledged` and `snoozed`
+  `event.switchboard_delivery` events carry the caller's own context.
+- Diagnostics now report the temporary `silences` alongside the snoozes and the
+  deferrals. The three per-row texts stay unredacted: they are configuration
+  the user typed, and it is their *rendered* output that is redacted.
+- A temporary silence that expired while the entry was unloaded is now written
+  back to the store when it is purged at setup, instead of only being dropped
+  from memory.
+
+### Known limitations
+
+Added to [`docs/known-issues.md`](docs/known-issues.md); everything listed
+under 0.1.0 that is still open stays open.
+
+- The five services are **callable by any Home Assistant user, by design**.
+  The wall tablet runs under a non-admin account and its cards are the main
+  caller; what bounds them is the ADR-0009 allow-list, not the caller's role.
+  `context.user_id` is logged and carried in the `acknowledged`/`snoozed`
+  events, and Companion buttons keep `authenticationRequired` on `high` and
+  `critical` rows. Revisit if a household needs it — the shape would be a
+  per-row flag, not a restriction on the whole domain.
+- A deferral re-checks the person's silence at flush time but **not** the rest
+  of the routing decision: somebody who left the audience, went away under a
+  `home_only` rule or snoozed the row since still receives their queued
+  message.
+
 ## [0.1.0] - 2026-09-07
 
 ### Added
@@ -91,5 +204,6 @@ Detailed in [`docs/known-issues.md`](docs/known-issues.md):
   against a real device; `context.user_id` is tried first and does not depend
   on it.
 
-[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.0.1...v0.1.0

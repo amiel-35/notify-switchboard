@@ -23,8 +23,10 @@
         "description": "Add the people this house notifies, then one target per alert. Each target becomes a notify.switchboard_[slug] service you can list under an alert's notifiers.",
         "menu_options": {
           "person": "Add or update a person",
+          "edit_person": "Edit a person",
           "remove_person": "Remove a person",
           "target": "Add or update a target",
+          "edit_target": "Edit a target",
           "remove_target": "Remove a target",
           "general": "Default target"
         }
@@ -43,6 +45,13 @@
           "outputs": "Notify service names without the notify. prefix, for example mobile_app_alice. A service that does not exist yet is tolerated and retried.",
           "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor.",
           "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+        }
+      },
+      "edit_person": {
+        "title": "Edit a person",
+        "description": "Pick the person to edit. The form opens on their stored settings.",
+        "data": {
+          "entity_id": "Person"
         }
       },
       "remove_person": {
@@ -68,7 +77,10 @@
           "allow_acknowledge": "Allow acknowledgement",
           "snooze_minutes": "Snooze durations",
           "default_data": "Default data",
-          "observer_mode": "Observer mode"
+          "observer_mode": "Observer mode",
+          "message": "Message template",
+          "done_message": "Back-to-normal template",
+          "default_title": "Default title"
         },
         "data_description": {
           "slug": "Lowercase, no spaces. Renaming it breaks every alert that lists the old service.",
@@ -81,7 +93,17 @@
           "allow_acknowledge": "Adds an Acknowledge button that turns the alert off.",
           "snooze_minutes": "Comma-separated minutes, for example 15, 60. Leave empty for no snooze button.",
           "default_data": "Merged under the caller's data; the caller wins on conflicting keys.",
-          "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier."
+          "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier.",
+          "message": "Optional template used in observer mode when the alert goes off. The alert's state is available as alert, for example {{ alert.attributes.level }}. Leave empty to send the name.",
+          "done_message": "Optional template used in observer mode when the alert returns to idle. Leave empty to send the translated back-to-normal text.",
+          "default_title": "Title used when the caller gives none, and for every message observer mode sends."
+        }
+      },
+      "edit_target": {
+        "title": "Edit a target",
+        "description": "Pick the routing-table row to edit. The form opens on its stored settings.",
+        "data": {
+          "slug": "Target"
         }
       },
       "remove_target": {
@@ -123,6 +145,7 @@
     },
     "abort": {
       "nothing_to_remove": "There is nothing to remove yet.",
+      "nothing_to_edit": "There is nothing to edit yet.",
       "nothing_to_configure": "Add a target first."
     }
   },
@@ -134,6 +157,109 @@
     "missing_output": {
       "title": "Notify service unusable",
       "description": "The notify service {output} has failed for several notifications in a row: it does not exist, or every call to it raised. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
+    },
+    "invalid_service_target": {
+      "title": "A card or script keeps calling an unknown target",
+      "description": "A notify_switchboard service has been refused several times for the target {value}, which is not in the routing table. Something — most likely a card or a script still pointing at a renamed row — keeps asking for it. Fix the caller, or add the target."
+    },
+    "invalid_service_person": {
+      "title": "A card or script keeps naming an unusable person",
+      "description": "A notify_switchboard service has been refused several times for {value}, who is either not in the table or not in the target's audience. Fix the caller, or add that person to the table or to the audience."
+    },
+    "invalid_service_calls_many": {
+      "title": "A card or script keeps calling with values that do not exist",
+      "description": "notify_switchboard services have now been refused for more than {count} different targets or persons. Rather than one warning per value, this single issue stands for all of them. Something is generating names that are not in the routing table — most often a template that renders to the wrong thing. Fix the caller; this warning goes away when the integration is reloaded."
+    }
+  },
+  "exceptions": {
+    "unknown_target": {
+      "message": "There is no target {target} in the routing table."
+    },
+    "acknowledge_not_allowed": {
+      "message": "The target {target} cannot be acknowledged: it has no alert, or acknowledgement is disabled for it."
+    },
+    "snooze_minutes_not_offered": {
+      "message": "The target {target} does not offer a {minutes} min snooze. It offers: {offered}."
+    },
+    "unknown_person": {
+      "message": "{person} is not in the Notify Switchboard table."
+    },
+    "person_not_in_audience": {
+      "message": "{person} is not in the audience of the target {target}."
+    },
+    "invalid_silence_minutes": {
+      "message": "A silence lasts between {min} and {max} minutes; {minutes} is neither."
+    },
+    "no_audience": {
+      "message": "The target {target} has nobody in its audience."
+    }
+  },
+  "services": {
+    "acknowledge": {
+      "name": "Acknowledge",
+      "description": "Turns off the alert linked to a routing-table row, exactly as the Acknowledge button of a notification does.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "The slug of the routing-table row. Its row must have an alert and allow acknowledgement."
+        }
+      }
+    },
+    "snooze": {
+      "name": "Snooze",
+      "description": "Stops notifications from one target for a while, for one person or for the whole audience of the row.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "The slug of the routing-table row to snooze."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long to snooze. It has to be one of the durations the row offers."
+        },
+        "person": {
+          "name": "Person",
+          "description": "Who to snooze it for. Leave empty to snooze everybody in the row's audience."
+        }
+      }
+    },
+    "unsnooze": {
+      "name": "Cancel a snooze",
+      "description": "Lifts a snooze immediately instead of waiting for it to expire.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "The slug of the routing-table row to stop snoozing."
+        },
+        "person": {
+          "name": "Person",
+          "description": "Whose snooze to lift. Leave empty for everybody in the row's audience."
+        }
+      }
+    },
+    "silence": {
+      "name": "Silence a person",
+      "description": "Silences somebody for a while, for every target. Their own silence entities are left untouched; only a critical message still gets through.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "The person to silence. They have to be in the Notify Switchboard table."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "How long the silence lasts: from 1 minute to 1440 (a day)."
+        }
+      }
+    },
+    "unsilence": {
+      "name": "Lift a silence",
+      "description": "Lifts a silence set by the silence service immediately. Does nothing if the person is not silenced that way.",
+      "fields": {
+        "person": {
+          "name": "Person",
+          "description": "The person whose silence to lift."
+        }
+      }
     }
   }
 }
