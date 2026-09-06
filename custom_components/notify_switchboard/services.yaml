@@ -1,0 +1,78 @@
+# UI services (contract v0.2 addendum, ADR-0016). Names and descriptions live
+# in strings.json / translations/*.json under the `services` key, the way core
+# integrations document theirs (script/hassfest/services.py).
+acknowledge:
+  fields:
+    target:
+      required: true
+      example: leak
+      selector:
+        text:
+
+snooze:
+  fields:
+    target:
+      required: true
+      example: leak
+      selector:
+        text:
+    minutes:
+      required: true
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+          unit_of_measurement: min
+    person:
+      example: person.alice
+      selector:
+        entity:
+          filter:
+            domain: person
+
+unsnooze:
+  fields:
+    target:
+      required: true
+      example: leak
+      selector:
+        text:
+    person:
+      example: person.alice
+      selector:
+        entity:
+          filter:
+            domain: person
+
+silence:
+  fields:
+    person:
+      required: true
+      example: person.alice
+      selector:
+        entity:
+          filter:
+            domain: person
+    minutes:
+      required: true
+      example: 60
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+          unit_of_measurement: min
+
+unsilence:
+  fields:
+    person:
+      required: true
+      example: person.alice
+      selector:
+        entity:
+          filter:
+            domain: person

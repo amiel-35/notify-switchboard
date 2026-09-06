@@ -1,8 +1,9 @@
 """Persisted state for Notify Switchboard.
 
-Doctrine §5: nothing lives in RAM only. Snoozes and night deferrals go through
-`homeassistant.helpers.storage.Store` so they survive a reload or a restart,
-and the recorder database is never touched.
+Doctrine §5: nothing lives in RAM only. Snoozes, night deferrals and the
+temporary per-person silences of `notify_switchboard.silence` (v0.2, ADR-0016)
+go through `homeassistant.helpers.storage.Store` so they survive a reload or a
+restart, and the recorder database is never touched.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
 
 # Minor version that introduced `queued_at` on a deferral.
 STORAGE_MINOR_VERSION_QUEUED_AT = 2
+# Minor version that introduced the temporary per-person silences (ADR-0016).
+STORAGE_MINOR_VERSION_SILENCES = 3
 
 
 class StoredData(TypedDict, total=False):
@@ -26,6 +29,7 @@ class StoredData(TypedDict, total=False):
 
     snoozes: list[dict[str, Any]]
     deferrals: list[dict[str, Any]]
+    silences: list[dict[str, Any]]
 
 
 @dataclass(slots=True)
@@ -107,6 +111,11 @@ class SwitchboardStorage(Store[StoredData]):
             for raw in old_data.get("deferrals", []):
                 raw.setdefault("queued_at", stamp)
 
+        if old_minor_version < STORAGE_MINOR_VERSION_SILENCES:
+            # Temporary silences did not exist. An upgrade must not invent one,
+            # so the list simply starts empty.
+            old_data.setdefault("silences", [])
+
         return old_data
 
 
@@ -123,12 +132,23 @@ class SwitchboardStore:
         )
         self.snoozes: dict[tuple[str, str], datetime] = {}
         self.deferrals: dict[tuple[str, str, str], DeferredMessage] = {}
+        # Temporary, router-owned per-person silences (ADR-0016): person -> the
+        # UTC instant the silence lifts. Configured `silence_entities` are read,
+        # never owned, and never appear here.
+        self.silences: dict[str, datetime] = {}
 
     async def async_load(self) -> None:
-        """Load snoozes and deferrals, dropping anything unparsable."""
+        """Load snoozes, deferrals and silences, dropping anything unparsable."""
         data = await self._store.async_load()
         if not data:
             return
+
+        for raw in data.get("silences", []):
+            person = raw.get("person")
+            until = dt_util.parse_datetime(str(raw.get("until", "")))
+            if not person or until is None:
+                continue
+            self.silences[str(person)] = until
 
         for raw in data.get("snoozes", []):
             person = raw.get("person")
@@ -159,6 +179,10 @@ class SwitchboardStore:
                 "deferrals": [
                     deferral.as_dict() for deferral in self.deferrals.values()
                 ],
+                "silences": [
+                    {"person": person, "until": until.isoformat()}
+                    for person, until in self.silences.items()
+                ],
             }
         )
 
@@ -166,6 +190,7 @@ class SwitchboardStore:
         """Delete the stored document (used when the entry is removed)."""
         self.snoozes.clear()
         self.deferrals.clear()
+        self.silences.clear()
         await self._store.async_remove()
 
     def purge_expired_snoozes(self, now: datetime) -> bool:
@@ -174,6 +199,22 @@ class SwitchboardStore:
         for key in expired:
             del self.snoozes[key]
         return bool(expired)
+
+    def purge_expired_silences(self, now: datetime) -> bool:
+        """Drop temporary silences that have lifted; True when something changed.
+
+        ADR-0016: a temporary silence expires lazily, exactly the way a snooze
+        already does, so a missed timer can never leave somebody silent forever.
+        """
+        expired = [person for person, until in self.silences.items() if until <= now]
+        for person in expired:
+            del self.silences[person]
+        return bool(expired)
+
+    def is_temporarily_silenced(self, person: str, now: datetime) -> bool:
+        """Return True when a temporary silence for `person` has not expired."""
+        until = self.silences.get(person)
+        return until is not None and until > now
 
     def active_snoozes(self, person: str, now: datetime) -> int:
         """Return how many snoozes are still running for a person."""

@@ -29,6 +29,9 @@ from .const import (
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
     CONF_DEFAULT_TARGET,
+    CONF_DEFAULT_TITLE,
+    CONF_DONE_MESSAGE,
+    CONF_MESSAGE,
     CONF_OBSERVER_MODE,
     CONF_OUTPUTS,
     CONF_PERSONS,
@@ -104,6 +107,12 @@ class TargetConfig:
     snooze_minutes: tuple[int, ...] = ()
     default_data: dict[str, Any] = field(default_factory=dict)
     observer_mode: bool = False
+    # Per-row optional texts (v0.2 addendum, ADR-0016). `message` and
+    # `done_message` are templates rendered with the row's alert state exposed
+    # as `alert`; `default_title` is the outgoing title when no caller gave one.
+    message: str | None = None
+    done_message: str | None = None
+    default_title: str | None = None
 
     @property
     def service_name(self) -> str:
@@ -157,8 +166,12 @@ class RoutingContext:
 
     now: datetime
     person_states: dict[str, str] = field(default_factory=dict)
+    # Configured `silence_entities` (entity_id -> is it `on`): read, never owned.
     silenced: dict[str, bool] = field(default_factory=dict)
     snoozes: dict[tuple[str, str], datetime] = field(default_factory=dict)
+    # Temporary, router-owned silences (person -> expiry), ADR-0016. Defaults to
+    # empty so every Sprint 1 caller of `decide` keeps its exact behaviour.
+    temporary_silences: dict[str, datetime] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,7 +262,23 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
         ),
         default_data=dict(raw.get(CONF_DEFAULT_DATA) or {}),
         observer_mode=bool(raw.get(CONF_OBSERVER_MODE)),
+        message=_optional_text(raw.get(CONF_MESSAGE)),
+        done_message=_optional_text(raw.get(CONF_DONE_MESSAGE)),
+        default_title=_optional_text(raw.get(CONF_DEFAULT_TITLE)),
     )
+
+
+def _optional_text(raw: Any) -> str | None:
+    """Return a non-empty row text, or None.
+
+    An empty string in the options is the same as "not configured": the row
+    falls back to whatever the contract says it falls back to, instead of
+    routing an empty message or an empty title.
+    """
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
 
 
 def build_routing_table(options: dict[str, Any]) -> RoutingTable:
@@ -311,10 +340,29 @@ def presence_allows(presence_rule: str, person_state: str | None) -> bool:
     return True
 
 
-def is_silenced(person: PersonConfig, context: RoutingContext) -> bool:
-    """Return True when any of the person's silence entities is `on`."""
+def has_configured_silence(person: PersonConfig, context: RoutingContext) -> bool:
+    """Return True when any of the person's own silence entities is `on`."""
     return any(
         context.silenced.get(entity_id, False) for entity_id in person.silence_entities
+    )
+
+
+def has_temporary_silence(person_id: str, context: RoutingContext) -> bool:
+    """Return True when a `notify_switchboard.silence` has not expired yet."""
+    until = context.temporary_silences.get(person_id)
+    return until is not None and until > context.now
+
+
+def is_silenced(person: PersonConfig, context: RoutingContext) -> bool:
+    """Return True when the person is silent, whichever source says so.
+
+    ADR-0016: the two sources are independent and combine with an OR. A
+    configured `schedule`/`input_boolean` is read and never owned; a temporary
+    silence is owned by the router and expires on its own. Either one produces
+    the same `silenced` drop reason, and `critical` bypasses both.
+    """
+    return has_configured_silence(person, context) or has_temporary_silence(
+        person.entity_id, context
     )
 
 

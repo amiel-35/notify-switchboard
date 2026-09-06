@@ -22,7 +22,9 @@ STORAGE_VERSION: Final = 1
 # Minor 2 adds `queued_at` to every deferral, so a deferral whose wake time
 # passed while Home Assistant was down can be delivered at the next start
 # instead of waiting a whole day.
-STORAGE_MINOR_VERSION: Final = 2
+# Minor 3 (v0.2, ADR-0016) adds the `silences` list: the temporary, router-owned
+# per-person silences set by `notify_switchboard.silence`.
+STORAGE_MINOR_VERSION: Final = 3
 
 # ---------------------------------------------------------------------------
 # Options shape (`entry.options`), normative -- see tests/acceptance/README.md
@@ -48,6 +50,12 @@ CONF_ALLOW_ACKNOWLEDGE: Final = "allow_acknowledge"
 CONF_SNOOZE_MINUTES: Final = "snooze_minutes"
 CONF_DEFAULT_DATA: Final = "default_data"
 CONF_OBSERVER_MODE: Final = "observer_mode"
+
+# Per-row optional texts (v0.2 addendum, ADR-0016). All three default to None,
+# so a Sprint 1 row keeps behaving exactly as it did.
+CONF_MESSAGE: Final = "message"
+CONF_DONE_MESSAGE: Final = "done_message"
+CONF_DEFAULT_TITLE: Final = "default_title"
 
 # ---------------------------------------------------------------------------
 # `data` payload attributes (contract "Input")
@@ -167,11 +175,54 @@ ACTION_SNOOZE: Final = "snooze"
 COMPANION_OUTPUT_PREFIX: Final = "mobile_app_"
 
 # ---------------------------------------------------------------------------
+# UI services (contract §"UI services (v0.2, ADR-0016)")
+# ---------------------------------------------------------------------------
+
+SERVICE_ACKNOWLEDGE: Final = "acknowledge"
+SERVICE_SNOOZE: Final = "snooze"
+SERVICE_UNSNOOZE: Final = "unsnooze"
+SERVICE_SILENCE: Final = "silence"
+SERVICE_UNSILENCE: Final = "unsilence"
+
+UI_SERVICES: Final[tuple[str, ...]] = (
+    SERVICE_ACKNOWLEDGE,
+    SERVICE_SNOOZE,
+    SERVICE_UNSNOOZE,
+    SERVICE_SILENCE,
+    SERVICE_UNSILENCE,
+)
+
+# Service call fields.
+ATTR_TARGET: Final = "target"
+ATTR_MINUTES: Final = "minutes"
+ATTR_PERSON: Final = "person"
+
+# `ServiceValidationError` translation keys; each one has a matching entry
+# under `exceptions` in `strings.json` and every `translations/*.json`.
+ERROR_UNKNOWN_TARGET: Final = "unknown_target"
+ERROR_ACKNOWLEDGE_NOT_ALLOWED: Final = "acknowledge_not_allowed"
+ERROR_SNOOZE_MINUTES_NOT_OFFERED: Final = "snooze_minutes_not_offered"
+ERROR_UNKNOWN_PERSON: Final = "unknown_person"
+ERROR_PERSON_NOT_IN_AUDIENCE: Final = "person_not_in_audience"
+ERROR_INVALID_SILENCE_MINUTES: Final = "invalid_silence_minutes"
+ERROR_NO_AUDIENCE: Final = "no_audience"
+
+# The smallest temporary silence that has a defined meaning (ADR-0016:
+# `silence(minutes: 0)` is refused, zero has no meaning).
+MIN_SILENCE_MINUTES: Final = 1
+
+# ---------------------------------------------------------------------------
 # Robustness
 # ---------------------------------------------------------------------------
 
 # An output missing for more than this many consecutive calls raises a repair.
 MAX_CONSECUTIVE_OUTPUT_MISSES: Final = 3
+
+# A UI service refused for the same unknown target/person this many times
+# raises a `repairs` issue (sprint-2 brief item 7). One refused call is already
+# reported to its caller as a `ServiceValidationError`; a card wired to a stale
+# slug keeps hitting it, and that is what deserves a repair.
+MAX_INVALID_SERVICE_CALLS: Final = 3
 
 # Number of decisions kept in memory for diagnostics.
 DIAGNOSTICS_DECISION_LOG_SIZE: Final = 20

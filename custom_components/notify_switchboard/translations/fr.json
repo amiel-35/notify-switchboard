@@ -68,7 +68,10 @@
           "allow_acknowledge": "Autoriser l'acquittement",
           "snooze_minutes": "Durées de report",
           "default_data": "Données par défaut",
-          "observer_mode": "Mode observateur"
+          "observer_mode": "Mode observateur",
+          "message": "Modèle de message",
+          "done_message": "Modèle de retour à la normale",
+          "default_title": "Titre par défaut"
         },
         "data_description": {
           "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
@@ -81,7 +84,10 @@
           "allow_acknowledge": "Ajoute un bouton « J'ai vu » qui éteint l'alerte.",
           "snooze_minutes": "Minutes séparées par des virgules, par exemple 15, 60. Laissez vide pour ne pas proposer de report.",
           "default_data": "Fusionné sous le data de l'appelant ; en cas de conflit, l'appelant gagne.",
-          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier."
+          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier.",
+          "message": "Modèle facultatif utilisé en mode observateur quand l'alerte se déclenche. L'état de l'alerte est disponible sous alert, par exemple {{ alert.attributes.level }}. Laissez vide pour envoyer le nom.",
+          "done_message": "Modèle facultatif utilisé en mode observateur quand l'alerte revient au repos. Laissez vide pour envoyer le texte traduit de retour à la normale.",
+          "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur."
         }
       },
       "remove_target": {
@@ -119,7 +125,8 @@
       "empty_audience": "Choisissez au moins une personne.",
       "unknown_person": "Cette cible nomme quelqu'un qui n'est pas dans la table.",
       "invalid_snooze_minutes": "Utilisez des minutes entières positives séparées par des virgules.",
-      "invalid_default_data": "Les données par défaut doivent être un objet."
+      "invalid_default_data": "Les données par défaut doivent être un objet.",
+      "invalid_template": "Ce n'est pas un modèle valide."
     },
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
@@ -134,6 +141,105 @@
     "missing_output": {
       "title": "Service notify inutilisable",
       "description": "Le service notify {output} échoue depuis plusieurs notifications d'affilée : il n'existe pas, ou chaque appel a levé une erreur. Les messages qui lui sont destinés sont perdus. Réparez le service, ou retirez-le des sorties de la personne."
+    },
+    "invalid_service_target": {
+      "title": "Une carte ou un script appelle sans cesse une cible inconnue",
+      "description": "Un service notify_switchboard a été refusé plusieurs fois pour la cible {value}, qui n'est pas dans la table de routage. Quelque chose — le plus souvent une carte ou un script resté sur une ligne renommée — continue de la demander. Corrigez l'appelant, ou ajoutez la cible."
+    },
+    "invalid_service_person": {
+      "title": "Une carte ou un script nomme sans cesse une personne inutilisable",
+      "description": "Un service notify_switchboard a été refusé plusieurs fois pour {value}, qui n'est pas dans la table ou pas dans l'audience de la cible. Corrigez l'appelant, ou ajoutez cette personne à la table ou à l'audience."
+    }
+  },
+  "exceptions": {
+    "unknown_target": {
+      "message": "Il n'y a pas de cible {target} dans la table de routage."
+    },
+    "acknowledge_not_allowed": {
+      "message": "La cible {target} ne peut pas être acquittée : elle n'a pas d'alerte, ou l'acquittement y est désactivé."
+    },
+    "snooze_minutes_not_offered": {
+      "message": "La cible {target} ne propose pas de report de {minutes} min. Elle propose : {offered}."
+    },
+    "unknown_person": {
+      "message": "{person} n'est pas dans la table du Standard de notification."
+    },
+    "person_not_in_audience": {
+      "message": "{person} n'est pas dans l'audience de la cible {target}."
+    },
+    "invalid_silence_minutes": {
+      "message": "Un silence dure au moins une minute ; {minutes} n'est pas une durée."
+    },
+    "no_audience": {
+      "message": "La cible {target} n'a personne dans son audience."
+    }
+  },
+  "services": {
+    "acknowledge": {
+      "name": "Acquitter",
+      "description": "Éteint l'alerte liée à une ligne de la table de routage, exactement comme le bouton « J'ai vu » d'une notification.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "L'identifiant de la ligne de la table de routage. Sa ligne doit avoir une alerte et autoriser l'acquittement."
+        }
+      }
+    },
+    "snooze": {
+      "name": "Reporter",
+      "description": "Coupe les notifications d'une cible pendant un moment, pour une personne ou pour toute l'audience de la ligne.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "L'identifiant de la ligne de la table de routage à reporter."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Durée du report. Elle doit faire partie des durées proposées par la ligne."
+        },
+        "person": {
+          "name": "Personne",
+          "description": "Pour qui reporter. Laissez vide pour reporter pour toute l'audience de la ligne."
+        }
+      }
+    },
+    "unsnooze": {
+      "name": "Annuler un report",
+      "description": "Lève un report tout de suite, sans attendre qu'il expire.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "L'identifiant de la ligne de la table de routage à ne plus reporter."
+        },
+        "person": {
+          "name": "Personne",
+          "description": "De qui lever le report. Laissez vide pour toute l'audience de la ligne."
+        }
+      }
+    },
+    "silence": {
+      "name": "Mettre une personne en silence",
+      "description": "Met quelqu'un en silence pendant un moment, pour toutes les cibles. Ses propres entités de silence ne sont pas touchées ; seul un message critical passe encore.",
+      "fields": {
+        "person": {
+          "name": "Personne",
+          "description": "La personne à mettre en silence. Elle doit être dans la table du Standard de notification."
+        },
+        "minutes": {
+          "name": "Minutes",
+          "description": "Durée du silence, au moins une minute."
+        }
+      }
+    },
+    "unsilence": {
+      "name": "Lever un silence",
+      "description": "Lève tout de suite un silence posé par le service de silence. Ne fait rien si la personne n'est pas en silence de cette façon.",
+      "fields": {
+        "person": {
+          "name": "Personne",
+          "description": "La personne dont il faut lever le silence."
+        }
+      }
     }
   }
 }

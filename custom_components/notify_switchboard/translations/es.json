@@ -68,7 +68,10 @@
           "allow_acknowledge": "Permitir confirmación",
           "snooze_minutes": "Duraciones de posposición",
           "default_data": "Datos predeterminados",
-          "observer_mode": "Modo observador"
+          "observer_mode": "Modo observador",
+          "message": "Plantilla de mensaje",
+          "done_message": "Plantilla de vuelta a la normalidad",
+          "default_title": "Título por defecto"
         },
         "data_description": {
           "slug": "En minúsculas, sin espacios. Cambiarlo rompe todas las alertas que usan el servicio anterior.",
@@ -81,7 +84,10 @@
           "allow_acknowledge": "Añade un botón Visto que apaga la alerta.",
           "snooze_minutes": "Minutos separados por comas, por ejemplo 15, 60. Déjalo vacío para no ofrecer posposición.",
           "default_data": "Se fusiona bajo el data de quien llama; en caso de conflicto gana quien llama.",
-          "observer_mode": "Vigilar el estado de la alerta en lugar de esperar a ser llamado como notifier."
+          "observer_mode": "Vigilar el estado de la alerta en lugar de esperar a ser llamado como notifier.",
+          "message": "Plantilla opcional usada en modo observador cuando la alerta se dispara. El estado de la alerta está disponible como alert, por ejemplo {{ alert.attributes.level }}. Déjala vacía para enviar el nombre.",
+          "done_message": "Plantilla opcional usada en modo observador cuando la alerta vuelve a reposo. Déjala vacía para enviar el texto traducido de vuelta a la normalidad.",
+          "default_title": "Título usado cuando quien llama no da ninguno, y para todos los mensajes que envía el modo observador."
         }
       },
       "remove_target": {
@@ -119,7 +125,8 @@
       "empty_audience": "Elige al menos una persona.",
       "unknown_person": "Este destino nombra a alguien que no está en la tabla.",
       "invalid_snooze_minutes": "Usa minutos enteros positivos separados por comas.",
-      "invalid_default_data": "Los datos predeterminados deben ser un objeto."
+      "invalid_default_data": "Los datos predeterminados deben ser un objeto.",
+      "invalid_template": "Esto no es una plantilla válida."
     },
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",
@@ -134,6 +141,105 @@
     "missing_output": {
       "title": "Servicio notify inutilizable",
       "description": "El servicio notify {output} lleva varias notificaciones seguidas fallando: no existe, o todas las llamadas han dado error. Los mensajes dirigidos a él se pierden. Repara el servicio o quítalo de las salidas de la persona."
+    },
+    "invalid_service_target": {
+      "title": "Una tarjeta o un script llama sin parar a un destino desconocido",
+      "description": "Un servicio notify_switchboard ha sido rechazado varias veces para el destino {value}, que no está en la tabla de enrutamiento. Algo — casi siempre una tarjeta o un script que sigue apuntando a una fila renombrada — lo sigue pidiendo. Corrige a quien llama, o añade el destino."
+    },
+    "invalid_service_person": {
+      "title": "Una tarjeta o un script nombra sin parar a una persona inutilizable",
+      "description": "Un servicio notify_switchboard ha sido rechazado varias veces para {value}, que no está en la tabla o no está en la audiencia del destino. Corrige a quien llama, o añade a esa persona a la tabla o a la audiencia."
+    }
+  },
+  "exceptions": {
+    "unknown_target": {
+      "message": "No hay ningún destino {target} en la tabla de enrutamiento."
+    },
+    "acknowledge_not_allowed": {
+      "message": "El destino {target} no se puede reconocer: no tiene alerta, o el reconocimiento está desactivado."
+    },
+    "snooze_minutes_not_offered": {
+      "message": "El destino {target} no ofrece un aplazamiento de {minutes} min. Ofrece: {offered}."
+    },
+    "unknown_person": {
+      "message": "{person} no está en la tabla de Notify Switchboard."
+    },
+    "person_not_in_audience": {
+      "message": "{person} no está en la audiencia del destino {target}."
+    },
+    "invalid_silence_minutes": {
+      "message": "Un silencio dura al menos un minuto; {minutes} no es una duración."
+    },
+    "no_audience": {
+      "message": "El destino {target} no tiene a nadie en su audiencia."
+    }
+  },
+  "services": {
+    "acknowledge": {
+      "name": "Reconocer",
+      "description": "Apaga la alerta ligada a una fila de la tabla de enrutamiento, igual que el botón Reconocer de una notificación.",
+      "fields": {
+        "target": {
+          "name": "Destino",
+          "description": "El identificador de la fila de la tabla de enrutamiento. Su fila debe tener una alerta y permitir el reconocimiento."
+        }
+      }
+    },
+    "snooze": {
+      "name": "Aplazar",
+      "description": "Corta las notificaciones de un destino durante un rato, para una persona o para toda la audiencia de la fila.",
+      "fields": {
+        "target": {
+          "name": "Destino",
+          "description": "El identificador de la fila de la tabla de enrutamiento que hay que aplazar."
+        },
+        "minutes": {
+          "name": "Minutos",
+          "description": "Duración del aplazamiento. Tiene que ser una de las duraciones que ofrece la fila."
+        },
+        "person": {
+          "name": "Persona",
+          "description": "Para quién aplazar. Déjalo vacío para aplazar para toda la audiencia de la fila."
+        }
+      }
+    },
+    "unsnooze": {
+      "name": "Cancelar un aplazamiento",
+      "description": "Levanta un aplazamiento de inmediato, sin esperar a que caduque.",
+      "fields": {
+        "target": {
+          "name": "Destino",
+          "description": "El identificador de la fila de la tabla de enrutamiento que hay que dejar de aplazar."
+        },
+        "person": {
+          "name": "Persona",
+          "description": "De quién levantar el aplazamiento. Déjalo vacío para toda la audiencia de la fila."
+        }
+      }
+    },
+    "silence": {
+      "name": "Silenciar a una persona",
+      "description": "Silencia a alguien durante un rato, para todos los destinos. Sus propias entidades de silencio no se tocan; solo un mensaje critical sigue pasando.",
+      "fields": {
+        "person": {
+          "name": "Persona",
+          "description": "La persona a silenciar. Tiene que estar en la tabla de Notify Switchboard."
+        },
+        "minutes": {
+          "name": "Minutos",
+          "description": "Duración del silencio, al menos un minuto."
+        }
+      }
+    },
+    "unsilence": {
+      "name": "Levantar un silencio",
+      "description": "Levanta de inmediato un silencio puesto por el servicio de silencio. No hace nada si la persona no está silenciada de esa forma.",
+      "fields": {
+        "person": {
+          "name": "Persona",
+          "description": "La persona a la que hay que levantarle el silencio."
+        }
+      }
     }
   }
 }

@@ -612,7 +612,10 @@ async def test_a_deferral_stored_before_queued_at_existed_is_migrated(
         ("person.alice", "leak", "t")
     ]
     assert stored.queued_at == dt_util.utcnow()
-    assert hass_storage["notify_switchboard.data"]["minor_version"] == 2
+    # Re-saved at the current minor version: the same load also ran the
+    # minor 3 step, which only adds an empty `silences` list.
+    assert hass_storage["notify_switchboard.data"]["minor_version"] == 3
+    assert hass_storage["notify_switchboard.data"]["data"]["silences"] == []
 
 
 async def test_daily_counters_reset_at_local_midnight(
