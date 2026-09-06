@@ -39,6 +39,7 @@ entities. There is no intermediate "house" sensor.
 | `dispatcher.py` | Every side effect: service calls, buttons, callbacks, observer mode, deferrals, counters, repairs. |
 | `store.py` | `Store`-backed snoozes and night deferrals. |
 | `legacy.py` | `notify.switchboard` and `notify.switchboard_<slug>`. |
+| `services.py` | The five `notify_switchboard.*` UI services (v0.2, ADR-0016): schemas and registration only, every decision delegated to `dispatcher.py`. |
 | `notify.py` | The degraded `NotifyEntity`. |
 | `entity.py`, `sensor.py`, `binary_sensor.py`, `event.py` | Contract §3.5 entities. |
 | `config_flow.py`, `validation.py` | Options flow and its pure validation rules. |
@@ -126,6 +127,87 @@ Decisions taken in Sprint 1, where the contract left room:
   `delivery_failed` is counted on `sensor.switchboard_dropped_today` instead.
   One working output out of several is still a delivery.
 
+## UI services (v0.2, ADR-0016)
+
+A card, a script or an automation cannot originate a
+`mobile_app_notification_action` event, so everything the Companion buttons do
+is also a domain service: `notify_switchboard.acknowledge`, `snooze`,
+`unsnooze`, `silence`, `unsilence`. They are registered with the config entry
+and removed on unload, so a reload never leaves a service pointing at a dead
+`Switchboard`; `manifest.json`'s `single_config_entry` is what makes one entry
+owning the domain's services safe.
+
+Decisions taken in Sprint 2, where the contract left room:
+
+- **Validation lives in one place.** `Switchboard.acknowledge_is_allowed`,
+  `_require_target`, `_require_person`, `_require_persons` and
+  `_async_store_snooze` are shared by the Companion path and the services; the
+  only difference is what each does with a refusal. The event handler logs and
+  returns (nobody is listening); the service raises `ServiceValidationError`
+  with a `translation_key` resolved from the `exceptions` section of
+  `strings.json`.
+- **The voluptuous schemas are strict about shape, permissive about value.**
+  `homeassistant/core.py`, `ServiceRegistry.async_call`, re-raises a schema's
+  `vol.Invalid` as-is, and a `vol.Invalid` is not a `ServiceValidationError`.
+  So `minutes: 0`, a duration the row does not offer, an unknown slug and an
+  unknown person are all checked in the handler, never in the schema.
+- **A recurring refusal raises a `repairs` issue.** One bad call is answered to
+  its caller; the same unknown target or person refused
+  `MAX_INVALID_SERVICE_CALLS` times is a card nobody fixed, and gets an issue —
+  the same posture as `MAX_CONSECUTIVE_OUTPUT_MISSES`.
+
+### The two silence sources
+
+`is_person_silenced` is an **OR** of two independent sources:
+
+| Source | Owned by | Lifetime |
+|---|---|---|
+| the person's `silence_entities` (`schedule.*`, `input_boolean.*`, …) | the user — read, never written | whatever the entity says |
+| a `notify_switchboard.silence` | the router | until its stored expiry |
+
+Both produce the same `silenced` drop reason, both are bypassed by
+`priority: critical`, and neither is aware of the other. Temporary silences
+live in the same `Store` as snoozes (`person -> until`) and expire twice over:
+lazily, in `build_context`, the way snoozes already do; and on an
+`async_track_point_in_time` timer per person, so
+`binary_sensor.<person>_silenced` returns to `off` at the minute the silence
+lifts rather than at the next notification. That entity gains an `until`
+attribute while a temporary silence runs; `sources` keeps its Sprint 1
+meaning (the configured entities only).
+
+Night deferral is deliberately **not** extended to temporary silence: a
+message silenced only by a `notify_switchboard.silence` is dropped, because
+`wake_time` is the end of the *night*, not the end of an hour of requested
+quiet. When a configured night silence is also active, the message is deferred
+as before — nothing is lost.
+
+### Per-row texts and the template context
+
+`message`, `done_message` and `default_title` are optional per-row strings,
+absent by default. The two templates are rendered with
+`Template(raw, hass).async_render({"alert": <State|None>}, parse_result=False)`
+(`homeassistant/helpers/template/__init__.py`): `alert` is the row's
+`alert_entity`'s current `State`, or `None` when the row has no alert or the
+entity does not exist, so a row can write `{{ alert.attributes.level }}`
+without waiting for a real `AlertEntity` to gain state attributes. A template
+that raises is logged and treated as absent; so is one that renders to an
+empty string. `parse_result=False` keeps a message a string rather than
+letting a numeric-looking render become an `int`.
+
+Resolution order, unchanged when the new fields are absent:
+
+| Transition | Order |
+|---|---|
+| `idle -> on` | alert's `message` attribute → row's `message` template → row's `name` |
+| `on\|off -> idle` | row's `done_message` template → alert's `done_message` attribute → translated `common.back_to_normal` |
+| title | caller's `title` → row's `default_title` → (observer mode only) row's `name` |
+
+The two orders differ because the contract and ADR-0016 order them
+differently; on a real `alert.*`, which exposes no attributes at all, both
+chains behave identically. `default_title` is applied per delivery, in
+`_async_deliver`, not per request, so a call fanned out over several rows gets
+each row's own default.
+
 ## Why both a legacy service and an entity
 
 Home Assistant's `alert` integration lists `notifiers:` by legacy `notify.*`
@@ -151,13 +233,14 @@ of waiting to be called:
 
 | Transition | What is routed |
 |---|---|
-| `idle -> on` | the alert's `message` attribute, else the row's name |
-| `on\|off -> idle` | the alert's `done_message` attribute, else the translated `common.back_to_normal` |
+| `idle -> on` | the alert's `message` attribute, else the row's `message` template, else the row's name |
+| `on\|off -> idle` | the row's `done_message` template, else the alert's `done_message` attribute, else the translated `common.back_to_normal` |
 | `on -> off` | nothing (the alert was acknowledged) |
 
 `AlertEntity` in core 2026.9.1 exposes **no** state attributes at all, so on a
-real alert both fallbacks are what actually fires today. See
-`docs/known-issues.md`.
+real alert the row's own templates (v0.2, ADR-0016) are what actually fires
+today; absent them, the fallbacks are. See "Per-row texts and the template
+context" above.
 
 ## Entities
 
@@ -184,12 +267,16 @@ switchboard schedules is cancelled both on unload and on
 
 ## Persistence
 
-One `Store` (`notify_switchboard.data`, version 1, minor version 2) holds the
-snoozes (`(person, target) -> expiry`, expired lazily) and the night
-deferrals. Minor version 2 added `queued_at` to every deferral; the migration
-lives in `store.SwitchboardStorage._async_migrate_func` and stamps the
-existing rows with the migration time, so an upgrade never fires a backlog.
-The recorder database is never touched.
+One `Store` (`notify_switchboard.data`, version 1, minor version 3) holds the
+snoozes (`(person, target) -> expiry`, expired lazily), the night deferrals and
+the temporary silences (`person -> until`, expired lazily too). Minor version 2
+added `queued_at` to every deferral; the migration lives in
+`store.SwitchboardStorage._async_migrate_func` and stamps the existing rows
+with the migration time, so an upgrade never fires a backlog. Minor version 3
+added the `silences` list, which starts empty: an upgrade never invents a
+silence. Any row that will not parse is dropped rather than fatal — a
+hand-edited `.storage` file must not stop the entry from loading. The recorder
+database is never touched.
 
 ## Roadmap
 
@@ -200,7 +287,7 @@ per sprint.
 |---|---|---|
 | S0 | Foundations: repo, template, CI, dev instance | CI green on the skeleton; `hassfest` passes |
 | S1 | Router v0.1: routing table, per-person decision, acknowledge / snooze buttons, night deferral, observer mode, diagnostics, config flow | A test alert routes to a present phone, not to an absent one; silence blocks unless `critical`; acknowledging from a phone stops the repeat; a 1 h snooze holds across a restart |
-| S2 | Router v0.2: per-class snooze bounds, burst windows, escalation | A burst of ten leaks becomes one notification |
+| S2 | Router v0.2: five UI services (acknowledge/snooze/unsnooze/silence/unsilence), temporary person-wide silence, per-row `message`/`done_message`/`default_title` | A card silences somebody for an hour and the message is dropped, not lost; a snooze the row does not offer is refused with a translated error |
 | S3 | `notify-cast` v0.1: a `notify` per Cast speaker that talks | An announcement is heard in the kitchen |
 | S4 | `notify-airplay` v0.1: same for AirPlay speakers | An announcement is heard on an AirPlay speaker |
 | S5 | `notify-alexa` v0.1: same via Alexa Media Player | An announcement is heard on an Echo |

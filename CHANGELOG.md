@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.2.0 — UI services (contract v0.2 addendum, ADR-0016).
+
+### Added
+
+- **Five `notify_switchboard.*` services** for callers that are not a
+  Companion push notification — a card, a script, an automation:
+  `acknowledge`, `snooze`, `unsnooze`, `silence`, `unsilence`. They reuse the
+  Companion code paths and differ in one respect only: a service call has a
+  caller, so a refused or invalid call raises a `ServiceValidationError` with a
+  translated message instead of being logged and swallowed. `acknowledge`
+  keeps the ADR-0009 allow-list; `snooze` additionally refuses a duration the
+  row does not offer, and an explicit `person` outside the row's audience.
+  Declared in `services.yaml`, with `en`/`fr`/`es` translations under
+  `services` and `exceptions`.
+- **Temporary, person-wide silence** (`silence` / `unsilence`), a second and
+  independent source of silence the router owns: the person's configured
+  `silence_entities` are still read, never touched. It is persisted in the
+  same `Store` as snoozes (minor version 3, migrated), shows up in
+  `binary_sensor.<person>_silenced` (with an `until` attribute while it runs),
+  drops routing with the existing `silenced` reason, is bypassed by
+  `priority: critical`, and expires both lazily and on its own timer — so the
+  sensor goes back to `off` at the right minute, not at the next notification.
+  `silence` with `minutes: 0` is refused; `unsilence` on somebody who is not
+  silenced is a no-op, not an error.
+- **Three optional per-row texts**: `message` and `done_message`, templates
+  rendered with the row's alert's current state exposed as `alert`, and
+  `default_title`, used as the outgoing title whenever the caller gave none —
+  including every message observer mode generates. All three default to
+  absent, so a routing table written for 0.1.0 behaves exactly as it did.
+  This resolves the known-issues entry "a real `alert.*` never exposes
+  `message` or `done_message`": the row, not the alert, is now the documented
+  source of observer-mode text.
+- **A `repairs` issue** when the same unknown target or unusable person is
+  refused by a service three times in a row — a card left pointing at a
+  renamed row, the counterpart of `MAX_CONSECUTIVE_OUTPUT_MISSES`.
+
+### Changed
+
+- `binary_sensor.<person>_silenced` is now true when **either** silence source
+  is active. Its `sources` attribute keeps its 0.1.0 meaning (the configured
+  entities).
+- Observer mode's `idle -> on` text order is now: the alert's own `message`
+  attribute, the row's `message` template, the row's name. Its
+  `on|off -> idle` order is: the row's `done_message` template, the alert's
+  own `done_message` attribute, the translated `common.back_to_normal`
+  (contract §"Per-row texts" and ADR-0016 §3 both put the row first here).
+  Absent the new fields, both chains end exactly where 0.1.0 ended.
+- A message silenced only by a temporary silence is dropped with reason
+  `silenced` rather than deferred: `wake_time` is documented as the end of the
+  *night* silence, and queueing an hour of requested quiet until tomorrow
+  morning would be the wrong kind of late. A configured night silence still
+  defers, even when a temporary silence is running on top of it.
+- The routing-table options flow gained the three new text fields; the two
+  template fields use a `TemplateSelector`, which refuses unparsable Jinja.
+
 ## [0.1.0] - 2026-09-07
 
 ### Added

@@ -82,6 +82,34 @@ alert:
       - switchboard_leak
 ```
 
+## Services
+
+Everything the notification buttons do is also a service, so a card, a script
+or an automation can do it too. Each one refuses an invalid call with an
+explicit error rather than doing nothing quietly.
+
+| Service | Fields | What it does |
+|---|---|---|
+| `notify_switchboard.acknowledge` | `target` | Turns off the row's alert, if the row has one and allows it. |
+| `notify_switchboard.snooze` | `target`, `minutes`, `person` (optional) | Stops that target for a while. `minutes` has to be one of the durations the row offers; without `person`, the whole audience is snoozed. |
+| `notify_switchboard.unsnooze` | `target`, `person` (optional) | Lifts a snooze immediately. |
+| `notify_switchboard.silence` | `person`, `minutes` | Silences somebody for a while, for every target, without touching their own silence entities. Only `critical` still gets through. |
+| `notify_switchboard.unsilence` | `person` | Lifts that silence immediately. |
+
+A silence set this way shows up in `binary_sensor.<person>_silenced` (with an
+`until` attribute), survives a restart, and lifts on its own.
+
+## Message text
+
+Three optional fields per row, all empty by default:
+
+- **Message template** and **Back-to-normal template** — used in observer mode
+  instead of the row's bare name. The watched alert's state is available to
+  the template as `alert`, so a row can write
+  `Water on the floor, {{ alert.attributes.level }}`.
+- **Default title** — the title used when the caller gives none, and for every
+  message observer mode sends.
+
 ## Translations
 
 The interface ships in English, French and Spanish. English and French are
@@ -99,9 +127,10 @@ the `notify.switchboard` service and the entity; it does not touch the
 ## Roadmap
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table
-(S0 → S8). This release covers S0 and S1: the routing table, the per-person
-decision, acknowledge and snooze, night deferral, observer mode and the
-diagnostic entities.
+(S0 → S8). This release covers S0 to S2: the routing table, the per-person
+decision, acknowledge and snooze, night deferral, observer mode, the
+diagnostic entities, and — since 0.2.0 — the five services above, a temporary
+per-person silence and the per-row message texts.
 
 ## Documentation
 
@@ -110,7 +139,8 @@ diagnostic entities.
   `data.source_entity`, observer mode) that this project commits to across
   minor versions.
 - [Architecture](docs/ARCHITECTURE.md) — the proxy model, input/output
-  contracts, the decisions Sprint 1 took where the contract left room, and the
+  contracts, the decisions Sprints 1 and 2 took where the contract left room
+  (how the two silence sources combine, what a row template can read), and the
   sprint roadmap.
 - [Known issues](docs/known-issues.md) — what was consciously left out, and
   why.
