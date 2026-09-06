@@ -159,7 +159,7 @@ corps de messages. Snoozes persistés via `Store` (survivent au redémarrage).
 | Rôle | Nom | Contenu |
 |---|---|---|
 | Routeur (+ parapluie) | **Notify Switchboard** — `amiel-35/notify-switchboard`, domaine `notify_switchboard` | intégration ; `docs/` porte doctrine (EN), ADR, contract.md, blueprints, exemples |
-| Voix Cast | **Google Home Notifier** — `google-home-notifier` (collision de nom avec un vieux projet Node à vérifier ; repli `cast-notifier`) | plateforme `notify` legacy + entité qui parle sur Cast (`tts.speak`, volume, langue) |
+| Voix Cast | **Cast Notifier** — `cast-notifier`, domaine `cast_notifier` (ADR-014 : « Google Home Notifier » écarté, nom déjà porté par un projet Node de 574 ★ au même usage) | plateforme `notify` legacy + entité qui parle sur Cast (`tts.speak`, volume restauré, langue, deny-list `alarm_control_panel`/`lock` sur `data.source_entity`) |
 | Voix AirPlay | **AirPlay Notifier** — `airplay-notifier` | idem via Music Assistant si présent, sinon lecteur AirPlay HA |
 | Voix Alexa | **Alexa Notifier** — reporté | **Alexa Devices** (core) expose déjà des entités notify Speak/Announce ; à ne faire que si un besoin non couvert apparaît |
 | Cartes | `notify-switchboard-cards` | bulle sur `alert.*`, tuiles de silence par personne |
@@ -182,9 +182,28 @@ translated, contributions welcome »).
 - **HACS** : `hacs.json` avec `zip_release: true` **et** `filename`,
   `homeassistant: "2026.9.1"`, `render_readme`. Un composant par dépôt, tout
   sous `custom_components/<domain>/`, README, description + topics GitHub,
-  **icône dans `home-assistant/brands`** (PR à faire avant S8).
+  **icône embarquée** dans `custom_components/<domain>/brand/icon.png` +
+  `icon@2x.png` (256/512, fond transparent) — depuis HA 2026.3 le dépôt
+  `home-assistant/brands` **refuse** les nouvelles intégrations custom ; la
+  vérification « brands » de l'action HACS accepte l'icône embarquée (vérifié
+  le 07/09 sur le routeur, CI verte sans `ignore: brands`). Icônes générées
+  localement (famille commune : badge bleu #1F3A5F, glyphe blanc).
 - **Config** : config flow obligatoire ; `ConfigEntry.version/minor_version`
   et `async_migrate_entry` dès la v0.1 ; unique_id stables (§3.5).
+- **Plateformes `notify` legacy — règles apprises aux relectures du 07/09**
+  (Cast et AirPlay Notifier, no-go tous les deux pour les mêmes causes) :
+  (1) core ne retire **jamais** un service `notify.*` legacy au déchargement
+  d'une entrée et **ne le réenregistre pas** s'il existe déjà (`legacy.py`
+  retourne tôt) → chaque intégration doit `hass.services.async_remove` son
+  service dans `entry.async_on_unload` et purger `hass.data[NOTIFY_SERVICES]`,
+  sinon les options ne prennent jamais effet ; (2) le service **lit l'entrée
+  vivante** à chaque appel, ne capture jamais les options ; (3) tout état
+  partagé (volume, timers) : verrou par cible, `try/finally`, timers annulés
+  et liés au cycle de vie ; (4) `data.*` validé par un schéma voluptuous,
+  `source_entity` normalisé (`ensure_list`, `str`, `casefold`) et refusé s'il
+  est inexploitable ; (5) un device par entrée + `translation_key`, jamais un
+  `_attr_name` littéral ; (6) les tests doivent couvrir reload d'options,
+  unload/remove, échec du TTS, chevauchement, lecteur déjà en lecture.
 - **Qualité** : `quality_scale.yaml` tenu comme **discipline interne** (le
   programme quality scale est réservé au core ; HACS ne l'exige pas).
 - **Code** : `ruff` (format + lint), **config mypy reprise de core** (pas
@@ -230,6 +249,18 @@ Règles :
   appel d'API core cité dans la PR doit pointer un fichier core** (parade à
   l'hallucination d'API, risque n°1).
 - Codeur et testeur distincts ; le relecteur n'a vu ni l'un ni l'autre.
+- **Un agent = un worktree git isolé** (`isolation: worktree`), jamais deux
+  agents dans la même copie de travail : un agent docs a un jour basculé la
+  branche courante pendant qu'un commit de l'orchestrateur partait, et a dû
+  démêler l'historique à la main. Seul l'orchestrateur travaille dans la
+  copie principale, et il n'y commit que lorsqu'aucun agent n'y tourne.
+  Précision : l'option `isolation: worktree` de l'outil Agent crée un
+  worktree du dépôt **de la session donneuse d'ordre**, pas du dépôt cible —
+  pour tout autre dépôt, l'agent doit lui-même faire
+  `git worktree add <dossier> -b <branche> origin/main` dans le dépôt cible et
+  y travailler ; l'orchestrateur fait de même pour ses propres correctifs
+  (worktrees sous `~/Projets/<repo>-worktrees/`), et ne lance **aucune**
+  commande git dans la copie principale tant qu'un agent y code.
 - Un finding du testeur **bloque la DoD** ou est accepté explicitement dans
   `known-issues.md`.
 - Toute PR qui touche `contract.md` sans ADR est rejetée.
@@ -259,6 +290,18 @@ Règles :
 
 S4/S5 sont indépendants et peuvent s'intercaler dès S0 fini si le mainteneur veut la
 voix pour la sonnette tôt.
+
+**État d'avancement (07/09)** : S0 ✔ ; **S1 ✔ Notify Switchboard v0.1.0**
+publié (182 tests, relecture go + correctifs, bout en bout sur l'instance de
+dev) ; **S2 cartes ✔ v0.1.0** publié (91 tests, relecture no-go → go,
+vérification visuelle : acquittement en direct OK, un défaut cosmétique en
+issue) ; **S3 blueprints/quickstart ✔** fusionné ; **S4 Cast Notifier ✔
+v0.1.0** publié (55 tests, no-go → go, bout en bout sur l'instance de dev ;
+0.1.1 en cours pour l'ADR-015) ; **S5 AirPlay Notifier** : 69 tests, no-go →
+correctifs → no-go de peu (hassfest placeholder + course sur le volume) →
+derniers correctifs en cours, tag imminent ; **S6 HACS default** : pas
+commencé (brands à soumettre) ; **routeur 0.2.0** (services UI + textes de
+ligne, ADR-016) : spécification en cours.
 
 ## 8. Accessibilité des cartes (S2)
 
@@ -316,3 +359,15 @@ dans la maison de référence après release.
   blueprints avant la voix, Alexa reporté (Alexa Devices core).
 - **ADR-013** : la surveillance d'indisponibilité des sources (cas KLIPPBOK)
   est livrée en **blueprint** (S3), pas dans le routeur.
+- **ADR-014 (07/09)** : l'adaptateur voix Cast s'appelle **Cast Notifier**
+  (`cast-notifier`, `cast_notifier`), pas « Google Home Notifier » : ce nom
+  est celui d'un projet Node.js de 574 ★ au même usage, et « Cast » couvre
+  aussi Nest Hub et Chromecast. Style « X Notifier » conservé (AirPlay
+  Notifier, Alexa Notifier si un jour).
+- **ADR-015 (07/09)** : un adaptateur qui **refuse** un message (deny-list,
+  `data` invalide) **lève une `ServiceValidationError` traduite et
+  journalise** — jamais un refus silencieux (le bout en bout de Cast 0.1.0 a
+  montré qu'un appelant recevait un 200 sur un message refusé). Coût assumé :
+  une `alert` qui liste un notifier refusé verra une erreur à chaque
+  répétition, ce qui est la bonne information. AirPlay 0.1.0 l'applique ;
+  Cast s'aligne en 0.1.1.
