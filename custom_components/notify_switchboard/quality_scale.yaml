@@ -1,6 +1,6 @@
 # Quality scale self-assessment for Notify Switchboard.
-# Bronze is the target for this sprint (S0/S1 skeleton). Silver/gold are not
-# assessed yet; they will be added once routing (S2+) lands.
+# Bronze is the target for Sprint 1 (the router). Silver/gold are not assessed
+# yet; they will be added once the cards and voice adapters land.
 rules:
   # Bronze
   action-setup:
@@ -8,7 +8,7 @@ rules:
     comment: This integration does not register any custom actions/services.
   appropriate-polling:
     status: exempt
-    comment: iot_class is local_push; there is nothing to poll.
+    comment: iot_class is calculated; every entity is push-updated.
   brands:
     status: todo
     comment: Brand assets not yet submitted to home-assistant/brands.
@@ -18,7 +18,9 @@ rules:
   dependency-transparency: done
   docs-actions:
     status: exempt
-    comment: No custom services.yaml is shipped this sprint.
+    comment: >-
+      No custom services.yaml is shipped: the public surface is the legacy
+      notify.switchboard[_<slug>] services, described by notify's own schema.
   docs-conditions:
     status: exempt
     comment: This integration does not have any conditions.
@@ -29,8 +31,11 @@ rules:
     status: exempt
     comment: This integration does not have any triggers.
   entity-event-setup:
-    status: exempt
-    comment: The notify entity does not subscribe to any external event bus.
+    status: done
+    comment: >-
+      Entities subscribe in async_added_to_hass and unsubscribe through
+      async_on_remove; the switchboard's own listeners are cancelled on unload
+      and on EVENT_HOMEASSISTANT_STOP.
   entity-unique-id: done
   has-entity-name: done
   runtime-data: done
@@ -43,3 +48,16 @@ rules:
     status: exempt
     comment: Same reasoning as test-before-configure.
   unique-config-entry: done
+  # Bronze, added in Sprint 1
+  diagnostics: done
+  entity-translations:
+    status: exempt
+    comment: >-
+      Entity names are fixed by docs/contract.md; only the router-added
+      Companion labels are translated, through the common.* section.
+  reauthentication-flow:
+    status: exempt
+    comment: There is nothing to authenticate against.
+  parallel-updates:
+    status: exempt
+    comment: No entity polls or writes to a device.
