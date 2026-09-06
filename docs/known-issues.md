@@ -99,3 +99,63 @@ adding the new row and removing the old one.
 Accepted for S1: it keeps the whole table validated before every write
 (doctrine §5) without a custom panel. Planned resolution: a nicer editor is a
 card/S6 concern.
+
+## 2026-09-07 — S1 — the Companion `device_id` path is unverified on a real device
+
+`Switchboard._resolve_persons` matches the `device_id` carried by a
+`mobile_app_notification_action` event against the device registry, directly
+and as a `("mobile_app", <id>)` identifier, then turns the device's name into
+`slugify(f"mobile_app_{name}")` and looks for a person listing that output.
+Every branch is unit tested against a synthetic registry, but **no event from
+a real Companion device has ever been observed by this project**: whether the
+`device_id` is the registry id, the webhook id, or the registration id is
+inferred from core's source, not measured.
+
+Accepted for S1 because it is now only the *second* resolution path:
+`event.context.user_id` is tried first and is exact (see
+`docs/ARCHITECTURE.md`), and when both fail the documented fallback snoozes
+the whole audience — never the wrong person alone. Planned resolution:
+capture one real callback on the dev instance and pin its shape in a test.
+
+## 2026-09-07 — S1 — entity display names are hard-coded in English
+
+`sensor.py`, `binary_sensor.py` and `event.py` pass literal English names
+("Routed today", "Silenced", …) to the entity constructors, so a French or
+Spanish user sees English entity names even though every other string of the
+integration is translated. Only the router-added Companion button labels go
+through `async_get_translations`.
+
+Accepted for S1: the fix is to drop `_attr_name` in favour of
+`_attr_translation_key` plus an `entity` section in `strings.json`, which
+touches every entity and every translation file at once. Planned resolution:
+a dedicated commit early in S2, before more entities exist.
+
+## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per row
+
+The contract says `authenticationRequired: true` is set "by default" when the
+row's priority is `high` or `critical`, and the brief adds "unless the row
+overrides". No override exists: `AUTHENTICATED_PRIORITIES` is consulted
+directly in `Switchboard._async_build_payload`, so a row cannot ask for an
+unauthenticated Acknowledge on a `critical` alert, nor for an authenticated
+one on an `info` alert.
+
+Accepted for S1: adding a fourth state (unset / forced on / forced off) to
+every routing-table row costs a field in the options flow, a migration and
+three translations, for a case nobody has hit yet. Planned resolution: a
+`require_authentication` tri-state on the row in S2, if a real use case shows
+up.
+
+## 2026-09-07 — S1 — two `alert` limitations to raise upstream
+
+Both are recorded above with their core file paths; this entry exists so the
+follow-up is not lost:
+
+1. `AlertEntity` exposes no state attributes at all, so neither `message` nor
+   `done_message` can be read by observer mode.
+2. `alert.turn_off` sets `_ack` but never calls `self._cancel()`, so
+   acknowledging leaves the repeat timer armed, and `cancel_on_shutdown` is
+   unenforceable because `async_track_point_in_utc_time` schedules with
+   `loop.call_at(when, self)` and no `HassJob` in `handle._args`.
+
+Neither issue has been filed against home-assistant/core yet. Planned
+resolution: file both before S2 opens, and link the issue numbers here.
