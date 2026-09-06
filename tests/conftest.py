@@ -25,6 +25,11 @@ _ALERT_LINGERING_TIMER_TESTS = frozenset(
         "test_acknowledge_action_turns_off_the_row_alert_when_allowed",
         "tests/acceptance/test_s1_actions.py::"
         "test_acknowledge_is_refused_for_an_alert_not_in_the_routing_table",
+        # Same root cause, exercised again via the v0.2 UI service instead of
+        # the Companion callback (ADR-0016): the real `alert.*` this test
+        # drives still leaves an un-cancellable repeat timer at teardown.
+        "tests/acceptance/test_s2_services.py::"
+        "test_acknowledge_service_turns_off_the_row_alert_when_allowed",
     }
 )
 
