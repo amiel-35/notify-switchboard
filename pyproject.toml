@@ -8,7 +8,7 @@ requires-python = ">=3.13"
 
 [tool.ruff]
 line-length = 88
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
@@ -24,7 +24,7 @@ combine-as-imports = true
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.13"
+python_version = "3.14"
 strict = true
 warn_unused_ignores = true
 show_error_codes = true
