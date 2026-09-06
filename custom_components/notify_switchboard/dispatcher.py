@@ -119,6 +119,10 @@ class Switchboard:
 
         self.routed_today = 0
         self.dropped_today = 0
+        # Deferrals are neither routed nor dropped: they are late. Counting
+        # them separately is the only way a user can see that a quiet night
+        # was a queue rather than silence.
+        self.deferred_today = 0
         self.drop_reasons: dict[str, int] = {}
         self.last_notification: dict[str, datetime] = {}
         self.decision_log: deque[dict[str, Any]] = deque(
@@ -187,6 +191,10 @@ class Switchboard:
                 EVENT_HOMEASSISTANT_STOP, self._async_stop_event
             )
         )
+
+        # A restart may have spanned somebody's wake time: deliver what is
+        # already late before arming the timers for what is not.
+        await self._async_catch_up_deferrals()
 
         for person in self.table.persons:
             self._async_schedule_deferral(person)
@@ -478,11 +486,43 @@ class Switchboard:
             title=request.title,
             priority=resolve_priority(target, request.data),
             data=dict(request.data),
+            queued_at=dt_util.utcnow(),
         )
         self.store.deferrals[deferral.key] = deferral
+        self.deferred_today += 1
         self._async_schedule_deferral(person_id)
         _LOGGER.debug("Deferred %s for %s until %s", slug, person_id, person.wake_time)
         return True
+
+    async def _async_catch_up_deferrals(self) -> None:
+        """Deliver deferrals whose wake time passed while HA was down.
+
+        Without this, a message queued at 23:30 and reloaded at 09:00 the next
+        morning would be rescheduled for the *following* 07:00 and arrive a
+        day late. Overdue messages are delivered once at setup; the store is
+        keyed on `(person, target, tag)`, so the tag de-duplication still
+        holds and nothing is sent twice.
+        """
+        now = dt_util.now()
+        for person_id, person in self.table.persons.items():
+            if person.wake_time is None:
+                continue
+            overdue = [
+                deferral
+                for key, deferral in self.store.deferrals.items()
+                if key[0] == person_id
+                and next_wake_time(
+                    dt_util.as_local(deferral.queued_at), person.wake_time
+                )
+                <= now
+            ]
+            if overdue:
+                _LOGGER.debug(
+                    "Delivering %d deferral(s) for %s whose wake time already passed",
+                    len(overdue),
+                    person_id,
+                )
+                await self._async_flush_deferrals(person_id, only=overdue)
 
     @callback
     def _async_schedule_deferral(self, person_id: str) -> None:
@@ -506,13 +546,23 @@ class Switchboard:
             self.hass, _deliver, when
         )
 
-    async def _async_flush_deferrals(self, person_id: str) -> None:
-        """Deliver every message queued for one person, then persist."""
-        pending = [
-            deferral
-            for key, deferral in self.store.deferrals.items()
-            if key[0] == person_id
-        ]
+    async def _async_flush_deferrals(
+        self, person_id: str, only: list[DeferredMessage] | None = None
+    ) -> None:
+        """Deliver the messages queued for one person, then persist.
+
+        `only` restricts the flush to a subset (the overdue ones at setup);
+        by default everything queued for that person is delivered.
+        """
+        pending = (
+            only
+            if only is not None
+            else [
+                deferral
+                for key, deferral in self.store.deferrals.items()
+                if key[0] == person_id
+            ]
+        )
         for deferral in pending:
             del self.store.deferrals[deferral.key]
 
@@ -791,6 +841,7 @@ class Switchboard:
         """Reset the daily counters at local midnight (brief item 9)."""
         self.routed_today = 0
         self.dropped_today = 0
+        self.deferred_today = 0
         self.drop_reasons.clear()
         self._async_notify_entities()
 

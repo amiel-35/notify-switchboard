@@ -15,7 +15,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from .const import STORAGE_KEY, STORAGE_VERSION
+from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
+
+# Minor version that introduced `queued_at` on a deferral.
+STORAGE_MINOR_VERSION_QUEUED_AT = 2
 
 
 class StoredData(TypedDict, total=False):
@@ -36,6 +39,10 @@ class DeferredMessage:
     title: str | None = None
     priority: str = "normal"
     data: dict[str, Any] = field(default_factory=dict)
+    # When the message was queued. Kept so that a restart spanning the wake
+    # time can tell "this is still tonight's message" from "this one is
+    # already late" -- see `Switchboard._async_catch_up_deferrals`.
+    queued_at: datetime = field(default_factory=dt_util.utcnow)
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -52,12 +59,14 @@ class DeferredMessage:
             "title": self.title,
             "priority": self.priority,
             "data": self.data,
+            "queued_at": self.queued_at.isoformat(),
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DeferredMessage | None:
         """Rebuild a deferral from storage, or None when the row is unusable."""
         try:
+            queued_at = dt_util.parse_datetime(str(raw.get("queued_at", "")))
             return cls(
                 person=str(raw["person"]),
                 slug=str(raw["slug"]),
@@ -66,9 +75,39 @@ class DeferredMessage:
                 title=raw.get("title"),
                 priority=str(raw.get("priority", "normal")),
                 data=dict(raw.get("data") or {}),
+                queued_at=queued_at or dt_util.utcnow(),
             )
         except KeyError, TypeError, ValueError:
             return None
+
+
+class SwitchboardStorage(Store[StoredData]):
+    """`Store` subclass owning the schema migration of the stored document."""
+
+    async def _async_migrate_func(
+        self,
+        old_major_version: int,
+        old_minor_version: int,
+        old_data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Migrate a stored document to the current version.
+
+        `homeassistant/helpers/storage.py`, `Store.async_load`, calls this
+        whenever the file on disk does not carry the current
+        `version`/`minor_version` pair, then re-saves the result.
+        """
+        if old_major_version > STORAGE_VERSION:
+            raise ValueError(f"Cannot downgrade {STORAGE_KEY} from {old_major_version}")
+
+        if old_minor_version < STORAGE_MINOR_VERSION_QUEUED_AT:
+            # `queued_at` did not exist. Stamping "now" is the conservative
+            # choice: the deferral keeps waiting for its next wake time rather
+            # than firing immediately on the upgrade.
+            stamp = dt_util.utcnow().isoformat()
+            for raw in old_data.get("deferrals", []):
+                raw.setdefault("queued_at", stamp)
+
+        return old_data
 
 
 class SwitchboardStore:
@@ -76,7 +115,12 @@ class SwitchboardStore:
 
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialise the store for this Home Assistant instance."""
-        self._store: Store[StoredData] = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+        self._store: Store[StoredData] = SwitchboardStorage(
+            hass,
+            STORAGE_VERSION,
+            STORAGE_KEY,
+            minor_version=STORAGE_MINOR_VERSION,
+        )
         self.snoozes: dict[tuple[str, str], datetime] = {}
         self.deferrals: dict[tuple[str, str, str], DeferredMessage] = {}
 

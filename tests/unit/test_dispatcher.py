@@ -484,6 +484,163 @@ async def test_deferred_message_survives_a_reload(
     assert [call.data["message"] for call in calls] == ["night"]
 
 
+async def test_deferral_whose_wake_time_passed_is_delivered_at_the_next_setup(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """Queued at 23:30, reloaded at 09:00 the next day: delivered at reload."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify",
+        "switchboard_leak",
+        {"message": "night", "data": {"tag": "t"}},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+    assert calls == []
+    assert hass.states.get("sensor.switchboard_deferred_today").state == "1"
+
+    # Home Assistant is down across 07:00 and comes back at 09:00.
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    freezer.move_to(datetime(2026, 9, 11, 7, 0, tzinfo=dt_util.UTC))  # 09:00 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # Delivered at the reload, not a day later, and exactly once.
+    assert [call.data["message"] for call in calls] == ["night"]
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_a_deferral_still_within_the_night_is_not_delivered_early(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A reload before the wake time keeps the message queued."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    freezer.move_to(datetime(2026, 9, 10, 23, 0, tzinfo=dt_util.UTC))  # 01:00 Paris
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+
+async def test_a_deferral_stored_before_queued_at_existed_is_migrated(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """Minor version 1 rows get a `queued_at` and keep waiting, not fire."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 11, 7, 0, tzinfo=dt_util.UTC))  # 09:00 Paris
+
+    hass_storage["notify_switchboard.data"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": "notify_switchboard.data",
+        "data": {
+            "snoozes": [],
+            "deferrals": [
+                {
+                    "person": "person.alice",
+                    "slug": "leak",
+                    "tag": "t",
+                    "message": "old",
+                    "title": None,
+                    "priority": "normal",
+                    "data": {},
+                }
+            ],
+        },
+    }
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"], wake_time="07:00:00")],
+        [make_target("leak")],
+        "leak",
+    )
+
+    # No `queued_at` means "assume it was queued now": it waits for 07:00
+    # tomorrow instead of firing on the upgrade.
+    assert calls == []
+    stored = entry.runtime_data.switchboard.store.deferrals[
+        ("person.alice", "leak", "t")
+    ]
+    assert stored.queued_at == dt_util.utcnow()
+    assert hass_storage["notify_switchboard.data"]["minor_version"] == 2
+
+
+async def test_daily_counters_reset_at_local_midnight(
+    hass: HomeAssistant, freezer: Any
+) -> None:
+    """`TOTAL` + `last_reset` = local midnight, not `TOTAL_INCREASING`."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 12, 0, tzinfo=dt_util.UTC))  # 14:00 Paris
+
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    midnight = datetime(2026, 9, 9, 22, 0, tzinfo=dt_util.UTC)  # 2026-09-10 00:00 Paris
+    for entity_id in (
+        "sensor.switchboard_routed_today",
+        "sensor.switchboard_dropped_today",
+        "sensor.switchboard_deferred_today",
+    ):
+        state = hass.states.get(entity_id)
+        assert state.attributes["state_class"] == "total"
+        assert dt_util.parse_datetime(state.attributes["last_reset"]) == midnight
+
+
 async def test_diagnostics_redacts_message_bodies(hass: HomeAssistant) -> None:
     """Message bodies never leave the house in a diagnostics dump."""
     async_mock_service(hass, "notify", "mobile_app_alice")

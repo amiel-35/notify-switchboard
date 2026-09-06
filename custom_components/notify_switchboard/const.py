@@ -19,6 +19,10 @@ LEGACY_SERVICE_NAME: Final = "switchboard"
 # RAM only -- snoozes and night deferrals survive a restart).
 STORAGE_KEY: Final = f"{DOMAIN}.data"
 STORAGE_VERSION: Final = 1
+# Minor 2 adds `queued_at` to every deferral, so a deferral whose wake time
+# passed while Home Assistant was down can be delivered at the next start
+# instead of waiting a whole day.
+STORAGE_MINOR_VERSION: Final = 2
 
 # ---------------------------------------------------------------------------
 # Options shape (`entry.options`), normative -- see tests/acceptance/README.md

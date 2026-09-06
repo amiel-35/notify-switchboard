@@ -89,6 +89,12 @@ Decisions taken in Sprint 1, where the contract left room:
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
   right local hour (`dispatcher.next_wake_time`).
+- **A deferral whose wake time passed while Home Assistant was down is
+  delivered at the next setup.** Each `DeferredMessage` carries `queued_at`;
+  at startup `Switchboard._async_catch_up_deferrals` compares
+  `next_wake_time(queued_at, wake_time)` with `dt_util.now()` and flushes what
+  is already late, instead of rescheduling it for the following day. The
+  `(person, target, tag)` key still de-duplicates, so nothing is sent twice.
 - **Snooze resolves the acting person from `context.user_id` first.** The
   Companion webhook re-fires the action event with the registration's own
   context (`homeassistant/components/mobile_app/webhook.py`,
@@ -160,9 +166,17 @@ Per person (`<p>` = the object_id of the `person.*` entity):
 `sensor.<p>_active_snoozes`, each on a virtual device named after the person.
 Globally: `sensor.switchboard_routed_today`,
 `sensor.switchboard_dropped_today` (attribute `reasons`, a
-`{reason: count}` dict), and `event.switchboard_delivery` with the four frozen
-event types. Counters reset at local midnight
-(`homeassistant/helpers/event.py`, `async_track_time_change`).
+`{reason: count}` dict), `sensor.switchboard_deferred_today` (attribute
+`queued`, a `{person: [target, ...]}` dict) and `event.switchboard_delivery`
+with the four frozen event types. `deferred_today` is an **additional**
+diagnostic entity, allowed by contract §3.5; it exists because a deferral is
+neither routed nor dropped and was therefore invisible.
+
+Counters reset at local midnight (`homeassistant/helpers/event.py`,
+`async_track_time_change`). They are `SensorStateClass.TOTAL` with an explicit
+`last_reset` set to the current local midnight, not `TOTAL_INCREASING`:
+`TOTAL_INCREASING` would read the daily reset as a meter rollover and
+compensate for it, which is the opposite of what happens.
 
 Config entries are not unloaded when Home Assistant stops, so every timer the
 switchboard schedules is cancelled both on unload and on
@@ -170,9 +184,12 @@ switchboard schedules is cancelled both on unload and on
 
 ## Persistence
 
-One `Store` (`notify_switchboard.data`, version 1) holds the snoozes
-(`(person, target) -> expiry`, expired lazily) and the night deferrals. The
-recorder database is never touched.
+One `Store` (`notify_switchboard.data`, version 1, minor version 2) holds the
+snoozes (`(person, target) -> expiry`, expired lazily) and the night
+deferrals. Minor version 2 added `queued_at` to every deferral; the migration
+lives in `store.SwitchboardStorage._async_migrate_func` and stamps the
+existing rows with the migration time, so an upgrade never fires a backlog.
+The recorder database is never touched.
 
 ## Roadmap
 

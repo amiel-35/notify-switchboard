@@ -33,6 +33,7 @@ async def async_setup_entry(
     entities: list[SwitchboardGlobalEntity | SwitchboardPersonEntity] = [
         RoutedTodaySensor(switchboard),
         DroppedTodaySensor(switchboard),
+        DeferredTodaySensor(switchboard),
     ]
     for person in switchboard.table.persons.values():
         entities.append(LastNotificationSensor(switchboard, person))
@@ -40,11 +41,28 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class RoutedTodaySensor(SwitchboardGlobalEntity, SensorEntity):
-    """How many (person, target) deliveries were routed since local midnight."""
+class DailyCounterSensor(SwitchboardGlobalEntity, SensorEntity):
+    """A counter that is reset to zero at local midnight.
+
+    `TOTAL_INCREASING` would be wrong: it tells the statistics engine that any
+    decrease is a meter rollover to be compensated for, which is exactly the
+    opposite of a deliberate daily reset. `TOTAL` with an explicit `last_reset`
+    (`homeassistant/components/sensor/__init__.py`,
+    `SensorEntity._attr_last_reset`) says what actually happens: the series
+    starts again from zero at each local midnight.
+    """
 
     _attr_state_class = SensorStateClass.TOTAL
     _attr_native_unit_of_measurement = "notifications"
+
+    @property
+    def last_reset(self) -> datetime:
+        """Return the local midnight the current count started from."""
+        return dt_util.start_of_local_day()
+
+
+class RoutedTodaySensor(DailyCounterSensor):
+    """How many (person, target) deliveries were routed since local midnight."""
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `sensor.switchboard_routed_today`."""
@@ -56,11 +74,8 @@ class RoutedTodaySensor(SwitchboardGlobalEntity, SensorEntity):
         return self._switchboard.routed_today
 
 
-class DroppedTodaySensor(SwitchboardGlobalEntity, SensorEntity):
+class DroppedTodaySensor(DailyCounterSensor):
     """How many deliveries were dropped since local midnight, and why."""
-
-    _attr_state_class = SensorStateClass.TOTAL
-    _attr_native_unit_of_measurement = "notifications"
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `sensor.switchboard_dropped_today`."""
@@ -75,6 +90,32 @@ class DroppedTodaySensor(SwitchboardGlobalEntity, SensorEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the drop reasons as `reasons: {reason: count}`."""
         return {ATTR_REASONS: dict(self._switchboard.drop_reasons)}
+
+
+class DeferredTodaySensor(DailyCounterSensor):
+    """How many messages were queued for a wake time since local midnight.
+
+    A deferral is neither routed nor dropped, so without this sensor a night
+    spent queueing looked exactly like a night with nothing to say. Contract
+    §3.5 allows additional diagnostic entities; the frozen ones are untouched.
+    """
+
+    def __init__(self, switchboard: Switchboard) -> None:
+        """Initialise `sensor.switchboard_deferred_today`."""
+        super().__init__(switchboard, "deferred_today", "Deferred today")
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of deferred messages."""
+        return self._switchboard.deferred_today
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose what is still waiting, as `{person: [target, ...]}`."""
+        queued: dict[str, list[str]] = {}
+        for person, slug, _tag in self._switchboard.store.deferrals:
+            queued.setdefault(person, []).append(slug)
+        return {"queued": queued}
 
 
 class LastNotificationSensor(SwitchboardPersonEntity, SensorEntity):
