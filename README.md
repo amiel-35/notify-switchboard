@@ -20,17 +20,27 @@ contract and rationale.
 
 ## The proxy model
 
-Notify Switchboard exposes two things:
+Notify Switchboard exposes:
 
-- the legacy `notify.switchboard` service, so the core `alert` integration
-  can list it under `notifiers:`;
-- a modern `NotifyEntity`, for automations and future action buttons.
+- `notify.switchboard`, and one `notify.switchboard_<slug>` per row of the
+  routing table, so the core `alert` integration can name a row under
+  `notifiers:`;
+- a `NotifyEntity`, documented as degraded: `notify.send_message` carries only
+  `message` and `title`, so it routes to the default row with priority
+  `normal`.
 
-Both accept `message`, `title` and `data` (including `data.class`,
-`data.priority`, `data.alert_entity`) and forward, unchanged, to whichever
-`notify.*` services a `Router` selects. In this first release the router is
-a pass-through: it always calls every configured default target. Per-person
-routing (presence, do-not-disturb, snoozes) is on the roadmap.
+A call carries `message`, `title` and `data` (`priority`, `source_entity`,
+`tag`, and anything else, merged over the row's default data). For every
+person in the row's audience the router checks, in order: the presence rule
+against `person.*`, the person's silence entities, an active snooze — with
+`priority: critical` overriding the last two — and then calls each of that
+person's `notify.*` outputs.
+
+On a Companion output it adds an **Acknowledge** button (when the row is tied
+to an `alert.*` and allows it) and one **Snooze** button per configured
+duration. Acknowledging turns that alert off, and only an alert listed in the
+routing table. A message silenced during someone's night is not lost: it is
+queued and delivered at their wake time.
 
 ## Install
 
@@ -44,11 +54,31 @@ Via [HACS](https://hacs.xyz/), as a custom repository:
 ## Configuration
 
 Settings → Devices & services → Add integration → "Notify Switchboard".
-Setup takes no input. Then open the integration's options to set the
-**default targets**: a comma-separated list of notify service names, e.g.
+Setup takes no input; the routing table is built from the integration's
+options:
 
-```
-notify.mobile_app_maintainer, notify.persistent_notification
+1. **Add a person** — pick a `person.*`, list the notify services that reach
+   them (`mobile_app_alice`, without the `notify.` prefix), optionally the
+   entities whose `on` state means "silent", and a wake time.
+2. **Add a target** — one row per alert: a slug (it becomes
+   `notify.switchboard_<slug>`), a name, a default priority, the `alert.*` it
+   is tied to, the audience, a presence rule, and the snooze durations to
+   offer.
+3. **Default target** — the row used by `notify.switchboard` when no target is
+   given, and by the notify entity.
+
+Then point an alert at it:
+
+```yaml
+alert:
+  water_leak:
+    name: Water leak
+    entity_id: binary_sensor.leak_kitchen
+    state: "on"
+    repeat: [5, 15, 60]
+    can_acknowledge: true
+    notifiers:
+      - switchboard_leak
 ```
 
 ## Removal
@@ -60,23 +90,23 @@ the `notify.switchboard` service and the entity; it does not touch the
 ## Roadmap
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table
-(S0 → S8). This release covers S0/S1: skeleton, contracts, and a working
-pass-through.
+(S0 → S8). This release covers S0 and S1: the routing table, the per-person
+decision, acknowledge and snooze, night deferral, observer mode and the
+diagnostic entities.
 
 ## Documentation
 
-- [Quickstart](docs/quickstart.md) — route your first alert in 10 minutes:
-  install, config flow, a routing-table row, an `alert:`, testing from
-  Developer tools, acknowledge/snooze from a phone.
-- [Blueprints](docs/blueprints.md) — ready-made automation blueprints for
-  one-off "information" notifications (a state change, a source that went
-  silent, an appliance cycle finishing), with import badges and inputs.
 - [Contract](docs/contract.md) — the frozen public names and behaviour
   (`notify.switchboard`, `notify.switchboard_<target>`, `data.priority`,
   `data.source_entity`, observer mode) that this project commits to across
   minor versions.
 - [Architecture](docs/ARCHITECTURE.md) — the proxy model, input/output
-  contracts, and the sprint roadmap.
+  contracts, the decisions Sprint 1 took where the contract left room, and the
+  sprint roadmap.
+- [Known issues](docs/known-issues.md) — what was consciously left out, and
+  why.
+
+A quickstart and importable blueprints are planned for S7.
 
 ## License
 
