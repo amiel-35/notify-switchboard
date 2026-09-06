@@ -7,6 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import homeassistant.helpers.device_registry as dr
+import homeassistant.helpers.entity_registry as er
 import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
@@ -639,6 +640,88 @@ async def test_daily_counters_reset_at_local_midnight(
         state = hass.states.get(entity_id)
         assert state.attributes["state_class"] == "total"
         assert dt_util.parse_datetime(state.attributes["last_reset"]) == midnight
+
+
+async def test_the_pre_0_1_0_notify_entity_orphan_is_removed(
+    hass: HomeAssistant,
+) -> None:
+    """Upgrading from 0.0.1 must not leave `notify.switchboard` unavailable.
+
+    0.0.1 gave the `NotifyEntity` the unique_id `<entry_id>_notify_entity`;
+    0.1.0 gives it `<entry_id>:entity`. Without cleanup the registry keeps the
+    old row, holds on to `notify.switchboard`, and the working entity lands on
+    `notify.switchboard_2`.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        entry_id="ns_unit_entry",
+        title="Notify Switchboard",
+        version=1,
+        minor_version=1,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak")],
+            "default_target": "leak",
+        },
+    )
+    entry.add_to_hass(hass)
+
+    registry = er.async_get(hass)
+    orphan = registry.async_get_or_create(
+        "notify",
+        DOMAIN,
+        "ns_unit_entry_notify_entity",
+        suggested_object_id="switchboard",
+        config_entry=entry,
+    )
+    assert orphan.entity_id == "notify.switchboard"
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    remaining = {
+        item.unique_id: item.entity_id
+        for item in er.async_entries_for_config_entry(registry, entry.entry_id)
+    }
+    assert "ns_unit_entry_notify_entity" not in remaining
+    assert remaining["ns_unit_entry:entity"] == "notify.switchboard"
+    assert hass.states.get("notify.switchboard_2") is None
+
+
+async def test_removing_the_entry_deletes_the_stored_document(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """`async_remove_entry` drops `.storage/notify_switchboard.data`."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "queued"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert "notify_switchboard.data" in hass_storage
+
+    assert await hass.config_entries.async_remove(entry.entry_id) == {
+        "require_restart": False
+    }
+    await hass.async_block_till_done()
+    assert "notify_switchboard.data" not in hass_storage
 
 
 async def test_diagnostics_redacts_message_bodies(hass: HomeAssistant) -> None:

@@ -19,10 +19,12 @@ from dataclasses import dataclass
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 
 from .dispatcher import Switchboard
 from .legacy import SwitchboardNotificationService
+from .store import SwitchboardStore
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -30,6 +32,14 @@ PLATFORMS: list[Platform] = [
     Platform.NOTIFY,
     Platform.SENSOR,
 ]
+
+# `unique_id` schemes used by versions before 0.1.0, whose entities are now
+# orphans. 0.0.1's `notify.py` gave the `NotifyEntity`
+# `f"{entry.entry_id}_notify_entity"`; 0.1.0 gives it `f"{entry_id}:entity"`
+# (see `entity.SwitchboardGlobalEntity`), so upgrading left an `unavailable`
+# `notify.switchboard` behind and pushed the live entity to
+# `notify.switchboard_2`.
+LEGACY_UNIQUE_ID_SUFFIXES: tuple[str, ...] = ("_notify_entity",)
 
 
 @dataclass(slots=True)
@@ -43,8 +53,27 @@ class SwitchboardRuntimeData:
 type SwitchboardConfigEntry = ConfigEntry[SwitchboardRuntimeData]
 
 
+@callback
+def _async_drop_pre_0_1_0_entities(
+    hass: HomeAssistant, entry: SwitchboardConfigEntry
+) -> None:
+    """Remove registry entries left behind by a pre-0.1.0 `unique_id` scheme.
+
+    A `unique_id` the integration no longer produces can never be claimed
+    again, so the entity stays in the registry as `unavailable` *and* keeps
+    its entity id, forcing the new entity to `notify.switchboard_2`. Dropping
+    the orphan frees `notify.switchboard` for the entity that actually works.
+    """
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.unique_id.endswith(LEGACY_UNIQUE_ID_SUFFIXES):
+            registry.async_remove(entity.entity_id)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SwitchboardConfigEntry) -> bool:
     """Set up Notify Switchboard from a config entry."""
+    _async_drop_pre_0_1_0_entities(hass, entry)
+
     switchboard = Switchboard(hass, entry)
     await switchboard.async_setup()
 
@@ -82,6 +111,19 @@ async def async_migrate_entry(
     """
     # Downgrades are not supported.
     return entry.version <= 1
+
+
+async def async_remove_entry(
+    hass: HomeAssistant, entry: SwitchboardConfigEntry
+) -> None:
+    """Delete the persisted snoozes and deferrals when the entry is removed.
+
+    Home Assistant calls this after the entry is gone
+    (`homeassistant/config_entries.py`, `ConfigEntries.async_remove`). Without
+    it, `.storage/notify_switchboard.data` would survive the integration and
+    a fresh install would inherit somebody else's snoozes.
+    """
+    await SwitchboardStore(hass).async_remove()
 
 
 async def _async_update_options(
