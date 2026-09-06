@@ -1,0 +1,56 @@
+# Notify Switchboard — example: a water-leak alert.
+#
+# `alert:` is a native, YAML-only Home Assistant integration; it is not an
+# automation, so it cannot be created by a blueprint. This is a complete,
+# copy-pastable snippet to add under your `alert:` key (in `configuration.yaml`,
+# or a package — see the "packages" merge caveat in Home Assistant's own docs
+# if you split this across files).
+#
+# Fields, verified against `homeassistant/components/alert/__init__.py` and
+# `homeassistant/components/alert/const.py` in Home Assistant core:
+#   - entity_id     : the binary_sensor (or any entity) this alert watches.
+#   - state         : the state that means "alerting". Defaults to "on", so it
+#                      is omitted below — a leak sensor's "on" is exactly the
+#                      wet-detected state.
+#   - repeat        : minutes between re-notifications while still alerting.
+#                      A list re-notifies at increasing intervals; the last
+#                      value repeats indefinitely once reached.
+#   - can_acknowledge / skip_first : see comments below.
+#   - notifiers     : legacy `notify.*` service names, WITHOUT the `notify.`
+#                      prefix. `switchboard_leak` is a Notify Switchboard
+#                      per-target service (contract: `notify.switchboard_<target>`),
+#                      generated from the routing-table row named "leak" —
+#                      see the matching row description at the end of this file.
+
+alert:
+  leak_kitchen:
+    name: "Kitchen leak sensor"
+    entity_id: binary_sensor.leak_kitchen
+    # state: "on"                     # default; the sensor's wet-detected state
+    repeat:
+      - 5                             # first re-notification after 5 minutes
+      - 15                            # then every 15 minutes
+      - 60                            # then hourly until acknowledged or dry
+    can_acknowledge: true             # default; a leak can be marked "seen"
+    skip_first: false                 # default; notify immediately when it starts
+    message: "Water leak detected: {{ state_attr('binary_sensor.leak_kitchen', 'friendly_name') }}."
+    done_message: "Kitchen leak sensor is dry again."
+    title: "Leak"
+    notifiers:
+      - switchboard_leak              # -> notify.switchboard_leak
+
+# Matching routing-table row (configured in the Notify Switchboard options
+# flow, not in YAML — see docs/quickstart.md):
+#
+# | Field             | Value                                    |
+# |--------------------|------------------------------------------|
+# | slug               | leak                                      |
+# | alert_entity       | alert.leak_kitchen                        |
+# | audience           | everyone who should hear about water damage (e.g. person.alice, person.bob) |
+# | snooze_minutes     | [15, 60]  (a leak should not be snoozed for long) |
+# | allow_acknowledge  | true                                      |
+#
+# A row with `allow_acknowledge: true` and an `alert_entity` set is what
+# makes the router add the "Acknowledge" button to Companion notifications;
+# pressing it calls `alert.turn_off` on `alert.leak_kitchen` (allow-listed
+# because it is this row's `alert_entity` — see docs/contract.md).

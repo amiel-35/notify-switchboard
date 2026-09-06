@@ -1,0 +1,37 @@
+# Notify Switchboard — example: a garden fountain pump alert.
+#
+# Same `alert:` mechanism as docs/examples/alert_leak.yaml (see that file for
+# a field-by-field explanation and the core source references). This one is
+# lower priority and slower to repeat: a fountain running dry matters far
+# less than a leak, and does not need to wake anyone at night.
+
+alert:
+  fountain_pump:
+    name: "Garden fountain pump"
+    entity_id: binary_sensor.fountain_pump_dry_run
+    # state: "on"                     # default; "on" == dry-run / fault detected
+    repeat:
+      - 30                            # first re-notification after 30 minutes
+      - 240                           # then every 4 hours until acknowledged or fixed
+    can_acknowledge: true
+    skip_first: false
+    message: "Fountain pump is running dry — check the water level."
+    done_message: "Fountain pump is back to normal."
+    title: "Fountain"
+    notifiers:
+      - switchboard_fountain          # -> notify.switchboard_fountain
+
+# Matching routing-table row:
+#
+# | Field             | Value                                    |
+# |--------------------|------------------------------------------|
+# | slug               | fountain                                  |
+# | alert_entity       | alert.fountain_pump                       |
+# | audience           | whoever maintains the garden (e.g. person.alice) |
+# | snooze_minutes     | [60, 240, 1440]  (a full day is fine for this class) |
+# | allow_acknowledge  | true                                      |
+#
+# Unlike the leak example, this row's `presence_rule` would typically be
+# `home_only` (no point paging someone away for a garden fixture) and its
+# `default_priority` `normal` rather than `high` — set both in the options
+# flow row, not here; `alert:` never carries routing decisions (ADR-008).

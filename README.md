@@ -63,6 +63,21 @@ See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table
 (S0 → S8). This release covers S0/S1: skeleton, contracts, and a working
 pass-through.
 
+## Documentation
+
+- [Quickstart](docs/quickstart.md) — route your first alert in 10 minutes:
+  install, config flow, a routing-table row, an `alert:`, testing from
+  Developer tools, acknowledge/snooze from a phone.
+- [Blueprints](docs/blueprints.md) — ready-made automation blueprints for
+  one-off "information" notifications (a state change, a source that went
+  silent, an appliance cycle finishing), with import badges and inputs.
+- [Contract](docs/contract.md) — the frozen public names and behaviour
+  (`notify.switchboard`, `notify.switchboard_<target>`, `data.priority`,
+  `data.source_entity`, observer mode) that this project commits to across
+  minor versions.
+- [Architecture](docs/ARCHITECTURE.md) — the proxy model, input/output
+  contracts, and the sprint roadmap.
+
 ## License
 
 [MIT](LICENSE) © 2026 the maintainer

@@ -1,0 +1,86 @@
+blueprint:
+  name: "Notify Switchboard: source-unavailability watchdog"
+  description: >-
+    The KLIPPBOK case (ADR-013, doctrine.md §7): a sensor that quietly goes
+    `unavailable`/`unknown` and stays that way produces no alert, because
+    nothing is watching the *absence* of state changes. This blueprint fires
+    a one-off "information" through Notify Switchboard, naming the entity and
+    how long it has been gone, the first time any watched entity has been
+    unavailable or unknown for more than the configured number of minutes.
+
+    This is the one-shot variant: it fires once per entity, then re-arms only
+    if that entity recovers and goes unavailable again. For a persistent,
+    repeating, acknowledgeable version instead, see
+    docs/examples/alert_source_unavailable.yaml (a template binary_sensor +
+    a native `alert:`) — the two are independent, use either or both.
+  domain: automation
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/blueprints/automation/notify_switchboard/source_unavailable_watchdog.yaml
+  input:
+    watched_entities:
+      name: Entities to watch
+      description: Any entity whose long-term silence should be noticed.
+      selector:
+        entity:
+          multiple: true
+    minutes:
+      name: Minutes before reporting
+      description: How long an entity must stay unavailable/unknown before this fires.
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 1440
+          unit_of_measurement: minutes
+          mode: box
+    target_slug:
+      name: Switchboard target slug
+      description: >-
+        The `slug` of the Notify Switchboard routing-table row to notify.
+        The service called is `notify.switchboard_<slug>`.
+      selector:
+        text: {}
+    priority:
+      name: Priority
+      default: high
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: info
+              label: Info
+            - value: normal
+              label: Normal
+            - value: high
+              label: High
+            - value: critical
+              label: Critical
+
+mode: queued
+max: 10
+
+variables:
+  target_slug: !input target_slug
+  threshold_minutes: !input minutes
+
+triggers:
+  - trigger: state
+    entity_id: !input watched_entities
+    to:
+      - "unavailable"
+      - "unknown"
+    for:
+      minutes: !input minutes
+
+actions:
+  - variables:
+      watched_entity: "{{ trigger.entity_id }}"
+      watched_name: "{{ trigger.to_state.name }}"
+  - action: "notify.switchboard_{{ target_slug }}"
+    data:
+      message: >-
+        {{ watched_name }} has been {{ trigger.to_state.state }} for at least
+        {{ threshold_minutes }} minutes.
+      title: "Source unavailable"
+      data:
+        priority: !input priority
+        source_entity: "{{ watched_entity }}"

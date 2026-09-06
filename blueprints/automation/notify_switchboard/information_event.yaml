@@ -1,0 +1,98 @@
+blueprint:
+  name: "Notify Switchboard: information from a state change"
+  description: >-
+    Turn any state change into a one-off "information" notification routed
+    through Notify Switchboard, per the doctrine's "two natures" principle
+    (doctrine.md §2.2): a one-off fact is an information, not a persistent
+    `alert:`. Calls the per-target service `notify.switchboard_<target>`
+    (docs/contract.md) with `data.source_entity` set to the entity that
+    changed, so voice adapters and diagnostics can identify the origin.
+
+    Good for: a door left open, a package delivered, a sensor crossing a
+    threshold once — anything that does not need a repeat/acknowledge/done
+    lifecycle. For a lasting condition, use a native `alert:` instead (see
+    docs/examples/) and list `switchboard_<target>` in its `notifiers:`.
+  domain: automation
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/blueprints/automation/notify_switchboard/information_event.yaml
+  input:
+    trigger_entity:
+      name: Entity to watch
+      description: The entity whose state change should be reported.
+      selector:
+        entity: {}
+    trigger_from:
+      name: From state (optional)
+      description: >-
+        Only trigger when coming from this state. Leave empty to match any
+        previous state.
+      default: null
+      selector:
+        text: {}
+    trigger_to:
+      name: To state (optional)
+      description: >-
+        Only trigger when reaching this state. Leave empty to match any new
+        state (any change at all).
+      default: null
+      selector:
+        text: {}
+    target_slug:
+      name: Switchboard target slug
+      description: >-
+        The `slug` of the Notify Switchboard routing-table row to notify
+        (Settings -> Devices & services -> Notify Switchboard -> Configure).
+        The service called is `notify.switchboard_<slug>`, e.g. `doors` for
+        a row whose slug is `doors`.
+      selector:
+        text: {}
+    message:
+      name: Message
+      description: >-
+        The notification text. Templates can use `trigger.to_state` /
+        `trigger.from_state` (the standard state-trigger variables).
+      selector:
+        template: {}
+    title:
+      name: Title (optional)
+      default: ""
+      selector:
+        text: {}
+    priority:
+      name: Priority
+      description: >-
+        Only `critical` bypasses a person's silence/snooze (docs/contract.md).
+        Informations are usually `info` or `normal`.
+      default: info
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: info
+              label: Info
+            - value: normal
+              label: Normal
+            - value: high
+              label: High
+            - value: critical
+              label: Critical
+
+mode: queued
+max: 10
+
+variables:
+  target_slug: !input target_slug
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    from: !input trigger_from
+    to: !input trigger_to
+
+actions:
+  - action: "notify.switchboard_{{ target_slug }}"
+    data:
+      message: !input message
+      title: !input title
+      data:
+        priority: !input priority
+        source_entity: !input trigger_entity
