@@ -1,10 +1,10 @@
 [project]
 name = "notify-switchboard"
-version = "0.0.1"
+version = "0.1.0"
 description = "A pure notify proxy for Home Assistant."
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.13"
+requires-python = ">=3.14.2"
 
 [tool.ruff]
 line-length = 88

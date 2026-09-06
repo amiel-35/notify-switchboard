@@ -1,10 +1,15 @@
 {
   "title": "Standard de notification",
+  "common": {
+    "acknowledge": "J'ai vu",
+    "snooze_minutes": "Reporter {minutes} min",
+    "back_to_normal": "Tout est revenu à la normale"
+  },
   "config": {
     "step": {
       "user": {
         "title": "Configurer Standard de notification",
-        "description": "Standard de notification est un relais : il n'envoie aucune notification lui-même. Une fois l'installation terminée, utilisez les options pour choisir vers quels services notify il redirige."
+        "description": "Standard de notification est un relais : il n'envoie jamais de notification lui-même. Une fois installé, construisez la table de routage depuis ses options : d'abord les personnes et leurs services notify, puis une cible par alerte."
       }
     },
     "abort": {
@@ -14,15 +19,121 @@
   "options": {
     "step": {
       "init": {
-        "title": "Destinataires du Standard de notification",
-        "description": "Choisissez les services notify vers lesquels Standard de notification redirige les messages.",
+        "title": "Standard de notification",
+        "description": "Ajoutez les personnes que la maison notifie, puis une cible par alerte. Chaque cible devient un service notify.switchboard_[slug] à lister dans les notifiers d'une alerte.",
+        "menu_options": {
+          "person": "Ajouter ou modifier une personne",
+          "remove_person": "Supprimer une personne",
+          "target": "Ajouter ou modifier une cible",
+          "remove_target": "Supprimer une cible",
+          "general": "Cible par défaut"
+        }
+      },
+      "person": {
+        "title": "Personne",
+        "description": "Quels services notify joignent cette personne, et quand elle est en silence.",
         "data": {
-          "default_targets": "Destinataires par défaut"
+          "entity_id": "Personne",
+          "outputs": "Services notify",
+          "silence_entities": "Entités de silence",
+          "wake_time": "Heure de réveil"
         },
         "data_description": {
-          "default_targets": "Noms de services notify séparés par des virgules, par exemple notify.mobile_app_amiel, notify.persistent_notification"
+          "entity_id": "L'entité person.* dont la présence décide si cette personne est notifiée.",
+          "outputs": "Noms de services notify sans le préfixe notify., par exemple mobile_app_amiel. Un service qui n'existe pas encore est toléré et réessayé.",
+          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire.",
+          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
+        }
+      },
+      "remove_person": {
+        "title": "Supprimer une personne",
+        "data": {
+          "entity_id": "Personne"
+        },
+        "data_description": {
+          "entity_id": "La personne est aussi retirée de l'audience de toutes les cibles."
+        }
+      },
+      "target": {
+        "title": "Cible",
+        "description": "Une ligne de la table de routage. Elle devient notify.switchboard_[slug].",
+        "data": {
+          "slug": "Identifiant",
+          "name": "Nom",
+          "class": "Classe",
+          "default_priority": "Priorité par défaut",
+          "alert_entity": "Alerte",
+          "audience": "Audience",
+          "presence_rule": "Règle de présence",
+          "allow_acknowledge": "Autoriser l'acquittement",
+          "snooze_minutes": "Durées de report",
+          "default_data": "Données par défaut",
+          "observer_mode": "Mode observateur"
+        },
+        "data_description": {
+          "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
+          "name": "Affiché aux personnes, et utilisé comme message en mode observateur quand l'alerte n'en porte pas.",
+          "class": "Texte libre, uniquement pour regrouper, par exemple bâtiment ou animaux.",
+          "default_priority": "Seul critical lève le silence et les reports d'une personne.",
+          "alert_entity": "L'alert.* à laquelle cette ligne est liée. Nécessaire pour le bouton « J'ai vu ».",
+          "audience": "Les personnes concernées par cette cible. Les autres ne sont pas notifiées.",
+          "presence_rule": "Si l'état person.* doit être à la maison, absent, ou peu importe.",
+          "allow_acknowledge": "Ajoute un bouton « J'ai vu » qui éteint l'alerte.",
+          "snooze_minutes": "Minutes séparées par des virgules, par exemple 15, 60. Laissez vide pour ne pas proposer de report.",
+          "default_data": "Fusionné sous le data de l'appelant ; en cas de conflit, l'appelant gagne.",
+          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier."
+        }
+      },
+      "remove_target": {
+        "title": "Supprimer une cible",
+        "data": {
+          "slug": "Cible"
+        },
+        "data_description": {
+          "slug": "Le service notify.switchboard_[slug] disparaît avec elle."
+        }
+      },
+      "general": {
+        "title": "Cible par défaut",
+        "data": {
+          "default_target": "Cible par défaut"
+        },
+        "data_description": {
+          "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify."
         }
       }
+    },
+    "error": {
+      "not_a_person": "Choisissez une entité person.*.",
+      "duplicate_person": "Cette personne est déjà dans la table.",
+      "no_outputs": "Indiquez au moins un service notify.",
+      "recursive_output": "Une sortie ne peut pas pointer sur Standard de notification.",
+      "invalid_output": "Un nom de service notify contient des caractères qu'un nom de service ne peut pas porter.",
+      "invalid_entity": "Ce n'est pas un identifiant d'entité.",
+      "invalid_time": "Utilisez HH:MM ou HH:MM:SS.",
+      "invalid_slug": "Utilisez uniquement des minuscules, des chiffres et des tirets bas.",
+      "duplicate_slug": "Une autre cible utilise déjà cet identifiant.",
+      "invalid_priority": "Choisissez info, normal, high ou critical.",
+      "invalid_presence_rule": "Choisissez always, home_only ou away_only.",
+      "not_an_alert": "Choisissez une entité alert.*.",
+      "empty_audience": "Choisissez au moins une personne.",
+      "unknown_person": "Cette cible nomme quelqu'un qui n'est pas dans la table.",
+      "invalid_snooze_minutes": "Utilisez des minutes entières positives séparées par des virgules.",
+      "invalid_default_data": "Les données par défaut doivent être un objet."
+    },
+    "abort": {
+      "nothing_to_remove": "Il n'y a encore rien à supprimer.",
+      "nothing_to_configure": "Ajoutez d'abord une cible."
+    }
+  },
+  "issues": {
+    "unknown_target": {
+      "title": "Cible inconnue du Standard de notification",
+      "description": "Quelque chose a appelé notify.switchboard avec la cible {slug}, qui n'est pas dans la table de routage. Le message a été écarté. Ajoutez la cible, ou corrigez l'appelant."
+    },
+    "missing_output": {
+      "title": "Service notify inutilisable",
+      "description": "Le service notify {output} échoue depuis plusieurs notifications d'affilée : il n'existe pas, ou chaque appel a levé une erreur. Les messages qui lui sont destinés sont perdus. Réparez le service, ou retirez-le des sorties de la personne."
     }
   }
 }
