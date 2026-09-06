@@ -18,8 +18,7 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.exceptions import TemplateError
-from homeassistant.helpers import selector, template
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_ALERT_ENTITY,
@@ -283,7 +282,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
             errors = validate_target(
                 row_for_validation, targets, known_persons, is_new=is_new
             )
-            errors |= self._template_errors(row)
             if not errors:
                 targets = [
                     other for other in targets if other[CONF_SLUG] != row[CONF_SLUG]
@@ -329,6 +327,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_OBSERVER_MODE, default=False
                 ): selector.BooleanSelector(),
+                # `TemplateSelector.__call__` runs `cv.template`
+                # (`homeassistant/helpers/selector.py`), so an unparsable
+                # template is already refused by the schema and needs no rule
+                # of its own in `validation.py`.
                 vol.Optional(CONF_MESSAGE): selector.TemplateSelector(),
                 vol.Optional(CONF_DONE_MESSAGE): selector.TemplateSelector(),
                 vol.Optional(CONF_DEFAULT_TITLE): selector.TextSelector(
@@ -337,25 +339,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="target", data_schema=schema, errors=errors)
-
-    def _template_errors(self, row: dict[str, Any]) -> dict[str, str]:
-        """Reject a row text that is not a valid template.
-
-        `Template.ensure_valid` (`homeassistant/helpers/template/__init__.py`)
-        compiles the Jinja source without rendering it, which is the only check
-        that can be made here: the alert the template reads does not have to
-        exist yet.
-        """
-        errors: dict[str, str] = {}
-        for field in (CONF_MESSAGE, CONF_DONE_MESSAGE):
-            raw = row.get(field)
-            if not raw:
-                continue
-            try:
-                template.Template(str(raw), self.hass).ensure_valid()
-            except TemplateError:
-                errors[field] = "invalid_template"
-        return errors
 
     async def async_step_remove_target(
         self, user_input: dict[str, Any] | None = None

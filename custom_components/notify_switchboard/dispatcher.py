@@ -233,8 +233,8 @@ class Switchboard:
 
         # A restart may also have spanned the end of a temporary silence.
         self.store.purge_expired_silences(dt_util.utcnow())
-        for person in list(self.store.silences):
-            self._async_schedule_silence_expiry(person)
+        for person, until in self.store.silences.items():
+            self._async_schedule_silence_expiry(person, until)
 
     @callback
     def _async_stop_event(self, _event: Event) -> None:
@@ -935,7 +935,7 @@ class Switchboard:
         until = dt_util.utcnow() + timedelta(minutes=minutes)
         self.store.silences[person] = until
         await self.store.async_save()
-        self._async_schedule_silence_expiry(person)
+        self._async_schedule_silence_expiry(person, until)
         self._async_notify_entities()
         _LOGGER.debug("Silenced %s until %s", person, until.isoformat())
 
@@ -1043,17 +1043,19 @@ class Switchboard:
     # ------------------------------------------------------------------
 
     @callback
-    def _async_schedule_silence_expiry(self, person: str) -> None:
-        """(Re)arm the timer that lifts one person's temporary silence."""
+    def _async_schedule_silence_expiry(self, person: str, until: datetime) -> None:
+        """(Re)arm the timer that lifts one person's temporary silence.
+
+        The routing decision purges expired silences anyway; this timer exists
+        so `binary_sensor.<p>_silenced` goes back to `off` at the right minute
+        instead of at the next notification, which may be hours later.
+        """
         self._async_cancel_silence_expiry(person)
-        until = self.store.silences.get(person)
-        if until is None:
-            return
 
         async def _expire(_now: datetime) -> None:
             self._silence_unsubs.pop(person, None)
-            if self.store.purge_expired_silences(dt_util.utcnow()):
-                await self.store.async_save()
+            self.store.purge_expired_silences(dt_util.utcnow())
+            await self.store.async_save()
             self._async_notify_entities()
 
         self._silence_unsubs[person] = async_track_point_in_time(

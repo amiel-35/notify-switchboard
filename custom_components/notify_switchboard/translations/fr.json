@@ -125,8 +125,7 @@
       "empty_audience": "Choisissez au moins une personne.",
       "unknown_person": "Cette cible nomme quelqu'un qui n'est pas dans la table.",
       "invalid_snooze_minutes": "Utilisez des minutes entières positives séparées par des virgules.",
-      "invalid_default_data": "Les données par défaut doivent être un objet.",
-      "invalid_template": "Ce n'est pas un modèle valide."
+      "invalid_default_data": "Les données par défaut doivent être un objet."
     },
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",

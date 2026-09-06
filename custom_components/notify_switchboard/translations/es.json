@@ -125,8 +125,7 @@
       "empty_audience": "Elige al menos una persona.",
       "unknown_person": "Este destino nombra a alguien que no está en la tabla.",
       "invalid_snooze_minutes": "Usa minutos enteros positivos separados por comas.",
-      "invalid_default_data": "Los datos predeterminados deben ser un objeto.",
-      "invalid_template": "Esto no es una plantilla válida."
+      "invalid_default_data": "Los datos predeterminados deben ser un objeto."
     },
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",

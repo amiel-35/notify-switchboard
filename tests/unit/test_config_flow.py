@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.notify_switchboard.const import (
@@ -255,3 +256,64 @@ async def test_editing_an_existing_person_replaces_the_row(
         "mobile_app_alice",
         "persistent_notification",
     ]
+
+
+async def test_target_step_stores_the_three_optional_row_texts(
+    hass: HomeAssistant,
+) -> None:
+    """v0.2 addendum (ADR-0016): message, done_message and default_title."""
+    entry = await _create_entry(hass)
+    await _options_step(hass, entry, "person", _person_input())
+
+    result = await _options_step(
+        hass,
+        entry,
+        "target",
+        _target_input(
+            message="Level {{ alert.attributes.level }}",
+            done_message="All clear",
+            default_title="Switchboard",
+        ),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    row = entry.options[CONF_TARGETS][0]
+    assert row["message"] == "Level {{ alert.attributes.level }}"
+    assert row["done_message"] == "All clear"
+    assert row["default_title"] == "Switchboard"
+
+
+async def test_target_step_leaves_the_optional_texts_none_when_omitted(
+    hass: HomeAssistant,
+) -> None:
+    """A Sprint 1 submission keeps producing a Sprint 1 row."""
+    entry = await _create_entry(hass)
+    await _options_step(hass, entry, "person", _person_input())
+    await _options_step(hass, entry, "target", _target_input())
+    await hass.async_block_till_done()
+
+    row = entry.options[CONF_TARGETS][0]
+    assert row["message"] is None
+    assert row["done_message"] is None
+    assert row["default_title"] is None
+
+
+async def test_an_unparsable_row_template_is_rejected_by_the_schema(
+    hass: HomeAssistant,
+) -> None:
+    """`TemplateSelector` runs `cv.template`, so the schema refuses bad Jinja.
+
+    No rule of our own is needed in `validation.py`: the selector compiles the
+    template (`homeassistant/helpers/selector.py`, `TemplateSelector.__call__`)
+    and the flow raises `InvalidData` before the row is ever built.
+    """
+    entry = await _create_entry(hass)
+    await _options_step(hass, entry, "person", _person_input())
+
+    for field, bad in (("message", "{{ unclosed "), ("done_message", "{% if %}")):
+        with pytest.raises(InvalidData) as err:
+            await _options_step(hass, entry, "target", _target_input(**{field: bad}))
+        assert field in str(err.value)
+
+    assert entry.options[CONF_TARGETS] == []

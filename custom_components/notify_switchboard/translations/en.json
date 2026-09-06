@@ -125,8 +125,7 @@
       "empty_audience": "Pick at least one person.",
       "unknown_person": "This target names somebody who is not in the table.",
       "invalid_snooze_minutes": "Use comma-separated positive whole minutes.",
-      "invalid_default_data": "Default data must be an object.",
-      "invalid_template": "This is not a valid template."
+      "invalid_default_data": "Default data must be an object."
     },
     "abort": {
       "nothing_to_remove": "There is nothing to remove yet.",
