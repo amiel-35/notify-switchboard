@@ -13,11 +13,13 @@ from custom_components.notify_switchboard.const import (
     DROP_RECURSION,
     DROP_SILENCED,
     DROP_SNOOZED,
+    DROP_UNKNOWN_PERSON,
     DROP_UNKNOWN_TARGET,
     PRIORITY_CRITICAL,
     PRIORITY_HIGH,
     PRIORITY_INFO,
     PRIORITY_NORMAL,
+    UNCOUNTED_DROP_REASONS,
 )
 from custom_components.notify_switchboard.router import (
     NotificationRequest,
@@ -489,15 +491,18 @@ def test_decide_reports_people_outside_the_audience() -> None:
 
 
 def test_decide_reports_an_audience_member_missing_from_the_table() -> None:
-    """A row naming an unknown person is reported, never crashes."""
+    """A row naming an unknown person is a counted `unknown_person` drop."""
     built = table(
         [person("person.alice", outputs=("mobile_app_alice",))],
         [target("leak", audience=("person.alice", "person.ghost"))],
     )
     decision = decide(built, request(), context(person_states={"person.alice": "home"}))
-    assert ("person.ghost", DROP_NOT_IN_AUDIENCE) in [
+    assert ("person.ghost", DROP_UNKNOWN_PERSON) in [
         (item.person, item.reason) for item in decision.dropped
     ]
+    # It is a real loss, so unlike `not_in_audience` it must be counted.
+    assert DROP_UNKNOWN_PERSON not in UNCOUNTED_DROP_REASONS
+    assert DROP_NOT_IN_AUDIENCE in UNCOUNTED_DROP_REASONS
 
 
 def test_decide_handles_several_targets_in_one_call() -> None:

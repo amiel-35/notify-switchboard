@@ -224,6 +224,28 @@ async def test_prefixed_recursive_output_is_still_rejected(
     assert dropped.attributes["reasons"]["recursion"] == 1
 
 
+async def test_audience_member_absent_from_persons_is_a_counted_drop(
+    hass: HomeAssistant,
+) -> None:
+    """A row naming somebody the table does not know is `unknown_person`."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", audience=["person.alice", "person.ghost"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.state == "1"
+    assert dropped.attributes["reasons"] == {"unknown_person": 1}
+
+
 async def test_non_companion_output_gets_no_buttons(hass: HomeAssistant) -> None:
     """Only `mobile_app_*` outputs receive Companion actions."""
     calls = async_mock_service(hass, "notify", "telegram_family")

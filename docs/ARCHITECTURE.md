@@ -71,6 +71,11 @@ Decisions taken in Sprint 1, where the contract left room:
   was quiet, but `sensor.switchboard_dropped_today` ignores that reason: the
   contract says such a person is "not considered", and counting them would
   make the daily figure meaningless in a house with several people.
+- **`unknown_person` is counted.** A row whose `audience` names somebody the
+  persons table does not know about (a hand-edited `.storage`, a person
+  deleted after the row was written) is a real loss: the row asked for that
+  person to be notified and nobody was. It is a separate reason from
+  `not_in_audience` and it counts towards `sensor.switchboard_dropped_today`.
 - **A partially recursive output list still delivers.** If a person has one
   `switchboard_*` output and one real one, the real one is used and a
   `recursion` drop is recorded alongside.

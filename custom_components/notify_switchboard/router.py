@@ -46,6 +46,7 @@ from .const import (
     DROP_RECURSION,
     DROP_SILENCED,
     DROP_SNOOZED,
+    DROP_UNKNOWN_PERSON,
     DROP_UNKNOWN_TARGET,
     LEGACY_SERVICE_NAME,
     PRESENCE_AWAY_ONLY,
@@ -359,7 +360,9 @@ def decide(
             if person is None:
                 # The row names somebody the switchboard does not know about;
                 # the options flow rejects this, a hand-edited file may not.
-                dropped.append(DroppedDelivery(person_id, slug, DROP_NOT_IN_AUDIENCE))
+                # Unlike `not_in_audience` this *is* a loss: the row expected
+                # that person to be notified and nobody was, so it is counted.
+                dropped.append(DroppedDelivery(person_id, slug, DROP_UNKNOWN_PERSON))
                 continue
 
             if not presence_allows(

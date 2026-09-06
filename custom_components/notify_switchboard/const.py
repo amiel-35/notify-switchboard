@@ -105,12 +105,14 @@ VALID_PRESENCE_RULES: Final[tuple[str, ...]] = (
 # ---------------------------------------------------------------------------
 
 DROP_NOT_IN_AUDIENCE: Final = "not_in_audience"
+DROP_UNKNOWN_PERSON: Final = "unknown_person"
 DROP_PRESENCE: Final = "presence"
 DROP_SILENCED: Final = "silenced"
 DROP_SNOOZED: Final = "snoozed"
 DROP_RECURSION: Final = "recursion"
 DROP_UNKNOWN_TARGET: Final = "unknown_target"
 DROP_NO_OUTPUTS: Final = "no_outputs"
+DROP_DELIVERY_FAILED: Final = "delivery_failed"
 
 # `not_in_audience` is recorded in the decision for diagnostics but is not a
 # drop for the user: the contract says such a person is "not considered".
