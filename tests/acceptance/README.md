@@ -14,6 +14,14 @@ modifying them**. When a test file is copied into the real
 `amiel-35/notify-switchboard` repository, it lives at `tests/acceptance/` at
 the repo root, next to `custom_components/notify_switchboard/`.
 
+Sprint 2 (`test_s2_services.py`, `test_s2_row_texts.py`) is the executable
+specification for the v0.2 addendum against `docs/contract.md` §"UI services
+(v0.2, ADR-0016)" / §"Per-row texts (v0.2, ADR-0016)" and
+`docs/sprints/sprint-2-brief.md`, written the same way and against the same
+discipline: before the Sprint 2 implementation exists. Every Sprint 1 test
+file must keep passing unmodified once Sprint 2's rows/fixtures exist —
+Sprint 2 only ever *adds* optional, default-`None` fields.
+
 Verified against: Home Assistant 2026.9.1,
 `pytest-homeassistant-custom-component` 0.13.364, Python 3.14, using the venv
 at `/Users/amiellavon/Projets/_ref/venv-ha-2026.9` and the core clone at
@@ -71,6 +79,9 @@ entry.options = {
                 "channel": "family"
             },  # dict merged under caller's data (caller wins)
             "observer_mode": False,  # bool
+            "message": None,  # str | None; template, v0.2 addendum (ADR-0016)
+            "done_message": None,  # str | None; template, v0.2 addendum (ADR-0016)
+            "default_title": None,  # str | None; v0.2 addendum (ADR-0016)
         },
         ...,
     ],
@@ -80,6 +91,27 @@ entry.options = {
 ```
 
 `ConfigEntry.version = 1`, `minor_version = 1` (brief item 12).
+
+### v0.2 addendum (ADR-0016, Sprint 2): `message`, `done_message`, `default_title`
+
+Three optional per-row keys, added for Sprint 2 and built by `make_target`
+with a default of `None` for all three, so every Sprint 1 test that calls
+`make_target` without them keeps building the exact same row dict it always
+has (this is asserted by re-running the whole S1 suite unmodified — see
+"Running" below).
+
+- `message` — a template string, rendered with the row's alert's current
+  state exposed as `alert` in the template context (or `None` if the row has
+  no `alert_entity`, or that entity does not currently exist). Read by
+  observer mode on `idle -> on`, ahead of the row's bare `name` and behind
+  the alert's own `message` attribute when present (see `test_s2_row_texts.py`).
+- `done_message` — the same idea for the `on|off -> idle` transition, ahead
+  of the translated `common.back_to_normal` and behind the alert's own
+  `done_message` attribute when present.
+- `default_title` — used as the outgoing `title` when the caller did not
+  supply one (a legacy `notify.switchboard[_<slug>]` call without `title`,
+  or any observer-mode-generated message, which never had a caller to omit
+  one from).
 
 ## What the tests build state-wise, and why
 

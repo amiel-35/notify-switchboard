@@ -1,9 +1,15 @@
-"""Contract test (ADR-011): public names frozen by docs/notify-switchboard-contract-v0.md.
+"""Contract test (ADR-011, extended by ADR-0016): public names frozen by
+docs/contract.md.
 
 This is the one test file that mirrors what will become the guarded
 `tests/acceptance/test_contract.py` in the real repository. It only checks
 existence and shape of the public surface — never internal behaviour (that is
-covered by test_s1_*.py).
+covered by test_s1_*.py / test_s2_*.py).
+
+Extended for the v0.2 addendum (ADR-0016): the contract change that sprint
+explicitly authorized was adding the five `notify_switchboard.*` UI services,
+so this file is allowed to grow an assertion that they exist after setup —
+the same discipline that guards the v0 names.
 """
 
 from __future__ import annotations
@@ -76,3 +82,20 @@ async def test_notify_entity_degraded_path_exists(
 async def test_domain_is_notify_switchboard() -> None:
     """The integration domain must never change without a major version (ADR-011)."""
     assert DOMAIN == "notify_switchboard"
+
+
+async def test_ui_services_exist_after_setup(hass, enable_custom_integrations, install):
+    """v0.2 addendum (ADR-0016): the five UI services are registered after setup."""
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Fuite d'eau", audience=["person.alice"])],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    for service in ("acknowledge", "snooze", "unsnooze", "silence", "unsilence"):
+        assert hass.services.has_service(DOMAIN, service), (
+            f"{DOMAIN}.{service} must exist after setup (contract v0.2, ADR-0016)"
+        )

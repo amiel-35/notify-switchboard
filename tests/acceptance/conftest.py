@@ -66,8 +66,17 @@ def make_target(
     snooze_minutes: list[int] | None = None,
     default_data: dict[str, Any] | None = None,
     observer_mode: bool = False,
+    message: str | None = None,
+    done_message: str | None = None,
+    default_title: str | None = None,
 ) -> dict[str, Any]:
-    """Build one row of `entry.options["targets"]` (the routing table)."""
+    """Build one row of `entry.options["targets"]` (the routing table).
+
+    `message`, `done_message` and `default_title` are the v0.2 addendum
+    (ADR-0016, `docs/contract.md` "Per-row texts"): optional per-row texts,
+    `None` by default so every Sprint 1 target keeps building the exact same
+    row it always has.
+    """
     return {
         "slug": slug,
         "name": name,
@@ -80,6 +89,9 @@ def make_target(
         "snooze_minutes": list(snooze_minutes or []),
         "default_data": dict(default_data or {}),
         "observer_mode": observer_mode,
+        "message": message,
+        "done_message": done_message,
+        "default_title": default_title,
     }
 
 
