@@ -69,7 +69,13 @@ ACTION_PARTS_SNOOZE = 4
 
 @dataclass(frozen=True, slots=True)
 class PersonConfig:
-    """One row of `entry.options["persons"]`."""
+    """One row of `entry.options["persons"]`.
+
+    `outputs` are always stored **without** the `notify.` prefix: the options
+    flow accepts both spellings and `parse_person` normalises them, so
+    `notify.mobile_app_x` and `mobile_app_x` are the same output everywhere
+    (person resolution, Companion-button gating, recursion check).
+    """
 
     entity_id: str
     outputs: tuple[str, ...] = ()
@@ -114,8 +120,9 @@ class RoutingTable:
 
     def person_for_output(self, output: str) -> PersonConfig | None:
         """Return the single person owning `output`, or None if ambiguous."""
+        wanted = normalise_output(output)
         owners = [
-            person for person in self.persons.values() if output in person.outputs
+            person for person in self.persons.values() if wanted in person.outputs
         ]
         if len(owners) == 1:
             return owners[0]
@@ -195,11 +202,22 @@ def parse_wake_time(raw: Any) -> time | None:
     return dt_util.parse_time(str(raw))
 
 
+def normalise_output(raw: Any) -> str:
+    """Return an output service name without its `notify.` prefix.
+
+    Users write either `mobile_app_x` or `notify.mobile_app_x`; both name the
+    same service, so everything downstream compares the bare form.
+    """
+    return str(raw).removeprefix(NOTIFY_PREFIX)
+
+
 def parse_person(raw: dict[str, Any]) -> PersonConfig:
     """Build a `PersonConfig` from one raw options row."""
     return PersonConfig(
         entity_id=str(raw["entity_id"]),
-        outputs=tuple(str(output) for output in raw.get(CONF_OUTPUTS) or ()),
+        outputs=tuple(
+            normalise_output(output) for output in raw.get(CONF_OUTPUTS) or ()
+        ),
         silence_entities=tuple(
             str(entity) for entity in raw.get(CONF_SILENCE_ENTITIES) or ()
         ),

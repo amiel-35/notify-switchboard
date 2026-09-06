@@ -165,6 +165,65 @@ async def test_output_reappearing_clears_the_miss_counter(
     assert entry.runtime_data.switchboard.missing_outputs == {}
 
 
+async def test_output_written_with_the_notify_prefix_is_equivalent(
+    hass: HomeAssistant,
+) -> None:
+    """`notify.mobile_app_alice` delivers and gets buttons like `mobile_app_alice`."""
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["notify.mobile_app_alice"])],
+        [
+            make_target(
+                "leak",
+                alert_entity="alert.leak",
+                allow_acknowledge=True,
+                snooze_minutes=[15],
+                default_priority="high",
+            )
+        ],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    data = calls[0].data["data"]
+    assert [action["action"] for action in data["actions"]] == [
+        "switchboard:ack:leak",
+        "switchboard:snooze:leak:15",
+    ]
+    assert data["authenticationRequired"] is True
+    # The table stores the bare service name, so person resolution matches it.
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard.table.persons["person.alice"].outputs == ("mobile_app_alice",)
+    owner = switchboard.table.person_for_output("mobile_app_alice")
+    assert owner is not None and owner.entity_id == "person.alice"
+
+
+async def test_prefixed_recursive_output_is_still_rejected(
+    hass: HomeAssistant,
+) -> None:
+    """`notify.switchboard_loop` recurses just as much as `switchboard_loop`."""
+    hass.states.async_set("person.eve", "home")
+    await install(
+        hass,
+        [make_person("person.eve", ["notify.switchboard_loop"])],
+        [make_target("loop", audience=["person.eve"])],
+        "loop",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_loop", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.attributes["reasons"]["recursion"] == 1
+
+
 async def test_non_companion_output_gets_no_buttons(hass: HomeAssistant) -> None:
     """Only `mobile_app_*` outputs receive Companion actions."""
     calls = async_mock_service(hass, "notify", "telegram_family")

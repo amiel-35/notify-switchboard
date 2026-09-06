@@ -111,6 +111,57 @@ def test_parse_person_normalises_every_list() -> None:
     assert parsed.object_id == "alice"
 
 
+def test_parse_person_strips_the_notify_prefix_from_outputs() -> None:
+    """`notify.mobile_app_x` and `mobile_app_x` name the same output."""
+    parsed = parse_person(
+        {
+            "entity_id": "person.alice",
+            "outputs": ["notify.mobile_app_alice", "persistent_notification"],
+        }
+    )
+    assert parsed.outputs == ("mobile_app_alice", "persistent_notification")
+
+
+def test_prefixed_outputs_behave_exactly_like_bare_ones() -> None:
+    """Every consumer of `outputs` sees the same value for both spellings."""
+    prefixed = build_routing_table(
+        {
+            "persons": [
+                {"entity_id": "person.alice", "outputs": ["notify.mobile_app_alice"]}
+            ],
+            "targets": [{"slug": "leak", "name": "Leak", "audience": ["person.alice"]}],
+            "default_target": "leak",
+        }
+    )
+    bare = build_routing_table(
+        {
+            "persons": [{"entity_id": "person.alice", "outputs": ["mobile_app_alice"]}],
+            "targets": [{"slug": "leak", "name": "Leak", "audience": ["person.alice"]}],
+            "default_target": "leak",
+        }
+    )
+    assert prefixed == bare
+
+    # Person resolution (dispatcher `_resolve_persons`) works on the bare name.
+    owner = prefixed.person_for_output("mobile_app_alice")
+    assert owner is not None and owner.entity_id == "person.alice"
+    assert prefixed.person_for_output("notify.mobile_app_alice") == owner
+
+    # Companion-button gating and the recursion check see the bare name too.
+    ctx = context(person_states={"person.alice": "home"})
+    decision = decide(prefixed, request(), ctx)
+    assert decision.routed[0].outputs == ("mobile_app_alice",)
+
+
+def test_parse_person_strips_the_prefix_before_the_recursion_check() -> None:
+    """`notify.switchboard_x` is recursive whichever spelling was configured."""
+    parsed = parse_person(
+        {"entity_id": "person.eve", "outputs": ["notify.switchboard_loop"]}
+    )
+    assert parsed.outputs == ("switchboard_loop",)
+    assert split_outputs(parsed.outputs) == ((), ("switchboard_loop",))
+
+
 def test_person_object_id_without_a_domain() -> None:
     """A malformed entity id still yields a usable object_id."""
     assert person("alice").object_id == "alice"
