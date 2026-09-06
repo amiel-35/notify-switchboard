@@ -58,7 +58,8 @@ Setup takes no input; the routing table is built from the integration's
 options:
 
 1. **Add a person** — pick a `person.*`, list the notify services that reach
-   them (`mobile_app_alice`, without the `notify.` prefix), optionally the
+   them (`mobile_app_alice`; the `notify.` prefix is accepted and stripped),
+   optionally the
    entities whose `on` state means "silent", and a wake time.
 2. **Add a target** — one row per alert: a slug (it becomes
    `notify.switchboard_<slug>`), a name, a default priority, the `alert.*` it
@@ -80,6 +81,14 @@ alert:
     notifiers:
       - switchboard_leak
 ```
+
+## Translations
+
+The interface ships in English, French and Spanish. English and French are
+written by the maintainer; **the Spanish translation
+(`custom_components/notify_switchboard/translations/es.json`) is machine
+translated and has not been reviewed by a native speaker** — corrections and
+new languages are very welcome, one pull request per language.
 
 ## Removal
 
