@@ -1,0 +1,28 @@
+{
+  "title": "Centralita de notificaciones",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar Centralita de notificaciones",
+        "description": "Centralita de notificaciones es un intermediario: no envía ninguna notificación por sí misma. Una vez completada la instalación, usa las opciones para elegir a qué servicios notify reenvía los mensajes."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Centralita de notificaciones ya está configurada. Solo se permite una instancia."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Destinatarios de la Centralita de notificaciones",
+        "description": "Elige los servicios notify a los que Centralita de notificaciones reenvía los mensajes.",
+        "data": {
+          "default_targets": "Destinatarios predeterminados"
+        },
+        "data_description": {
+          "default_targets": "Nombres de servicios notify separados por comas, por ejemplo notify.mobile_app_amiel, notify.persistent_notification"
+        }
+      }
+    }
+  }
+}

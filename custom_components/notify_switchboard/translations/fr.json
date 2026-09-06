@@ -1,0 +1,28 @@
+{
+  "title": "Standard de notification",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurer Standard de notification",
+        "description": "Standard de notification est un relais : il n'envoie aucune notification lui-même. Une fois l'installation terminée, utilisez les options pour choisir vers quels services notify il redirige."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Standard de notification est déjà configuré. Une seule instance est autorisée."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Destinataires du Standard de notification",
+        "description": "Choisissez les services notify vers lesquels Standard de notification redirige les messages.",
+        "data": {
+          "default_targets": "Destinataires par défaut"
+        },
+        "data_description": {
+          "default_targets": "Noms de services notify séparés par des virgules, par exemple notify.mobile_app_amiel, notify.persistent_notification"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "title": "Notify Switchboard",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Notify Switchboard",
+        "description": "Notify Switchboard is a proxy: it does not deliver notifications itself. After setup, use the options to choose which notify services it forwards to."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Notify Switchboard is already configured. Only a single instance is allowed."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Notify Switchboard targets",
+        "description": "Choose the notify services that Notify Switchboard forwards messages to.",
+        "data": {
+          "default_targets": "Default targets"
+        },
+        "data_description": {
+          "default_targets": "Comma-separated notify service names, e.g. notify.mobile_app_amiel, notify.persistent_notification"
+        }
+      }
+    }
+  }
+}

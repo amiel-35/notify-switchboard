@@ -1,0 +1,44 @@
+[project]
+name = "notify-switchboard"
+version = "0.0.1"
+description = "A pure notify proxy for Home Assistant."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.13"
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PL"]
+ignore = [
+  "PLR0913", # too many arguments - HA callback signatures are fixed by the core
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components.notify_switchboard"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+warn_unused_ignores = true
+show_error_codes = true
+files = ["custom_components/notify_switchboard"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "--cov=custom_components.notify_switchboard --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["custom_components.notify_switchboard"]
