@@ -3,14 +3,14 @@
 > **Version 0.2** (06/09/2026, 23h30) — v0.1 relue par un agent Opus à contexte
 > vierge (verdict : go avec corrections) et recoupée avec l'état de l'art
 > (`docs/etat-de-l-art-notifications-ha-2026-09-06.md`). Les corrections sont
-> intégrées ; les ADR 007-013 tracent ce qui a changé. Décisions d'Amiel du
+> intégrées ; les ADR 007-013 tracent ce qui a changé. Décisions du mainteneur du
 > 06/09 : dépôts publics, MIT, code/doc en anglais avec interface fr/es, HA de
 > dev en Docker, sprints = incréments fonctionnels testables, autonomie totale
 > de la session donneuse d'ordre.
 
 ## 1. Pourquoi
 
-Chez nous : 28 alertes, 27 adresses câblées en dur vers un seul iPhone, deux
+Dans la maison de référence : 28 alertes, 27 adresses câblées en dur vers un seul iPhone, deux
 designs concurrents pour un même besoin, aucune règle « qui / quand /
 présence », et des alertes qui meurent en silence quand leur capteur tombe
 (KLIPPBOK, 06/09).
@@ -41,19 +41,19 @@ moteur ; aucun ne complète `alert`, tous le remplacent ou l'ignorent.
    `notify.*` autonomes, pour des *informations* choisies. Ce principe est
    **une règle de configuration documentée**, pas une garantie du code : rien
    n'empêche techniquement de lister un adaptateur voix dans une `alert`
-   (ADR-010). Chez Amiel, la voix n'est pas un canal d'alerte.
+   (ADR-010). Dans la maison de référence, la voix n'est pas un canal d'alerte.
 5. **Sécurité et voix.** Recommandation forte documentée : ne jamais faire
    parler un texte dérivé d'un `alarm_control_panel.*` ou d'un `lock.*`. Le
    routeur reçoit une chaîne déjà rendue et ne peut pas le garantir ; les
    adaptateurs voix offrent une deny-list optionnelle sur `data.source_entity`
    quand il est fourni (ADR-010).
-6. **Générique et configurable.** Rien de spécifique à la maison d'Amiel dans
+6. **Générique et configurable.** Rien de spécifique à la maison de référence dans
    le code. Les classes (`building`, `pets`…) sont des **exemples de doc**,
    jamais des constantes.
 7. **Chaque dépôt vit seul.** Contrats entre eux = ceux de HA.
-8. **Rien sur le Green avant validation.** Dev et tests sur l'instance HA
-   jetable d'inflexion-01 ; déploiement chez Amiel = chantier HA-Familly, avec
-   son accord, après release.
+8. **Rien sur l'instance de production avant validation.** Dev et tests sur l'instance HA
+   jetable du serveur de dev ; déploiement dans la maison de référence = chantier HA-Familly, avec
+   l'accord du mainteneur, après release.
 9. **Clean room.** Notifier Hub est GPL-3.0 : **aucune ligne** n'en est
    reprise. Inspiration d'idées seulement (`confirmation`, `escalate`). Idem
    pour tout dépôt non MIT/Apache/BSD.
@@ -164,10 +164,10 @@ corps de messages. Snoozes persistés via `Store` (survivent au redémarrage).
 | Voix Alexa | **Alexa Notifier** — reporté | **Alexa Devices** (core) expose déjà des entités notify Speak/Announce ; à ne faire que si un besoin non couvert apparaît |
 | Cartes | `notify-switchboard-cards` | bulle sur `alert.*`, tuiles de silence par personne |
 
-Décision d'Amiel : les adaptateurs restent **indépendants et séparés** (un
+Décision du mainteneur : les adaptateurs restent **indépendants et séparés** (un
 dépôt chacun), même si le contrat est identique — un backend commun partagé
 en code est acceptable, pas un dépôt unique. Tous : publics, MIT, anglais ;
-interface `en` (source), `fr` (relu par Amiel), `es` (annoncé « machine
+interface `en` (source), `fr` (relu par le mainteneur), `es` (annoncé « machine
 translated, contributions welcome »).
 
 ## 5. Standards techniques
@@ -202,11 +202,11 @@ translated, contributions welcome »).
   (Keep a Changelog) ; tag `vX.Y.Z` → release GitHub avec le zip.
 - **Git** : `main` protégée, PR-only, squash, commits conventionnels ; **seul
   le donneur d'ordre merge** ; les agents ne touchent pas `.github/workflows`
-  hors sprint dédié. Auteur des commits : Amiel (`amiel-35`), trailer
+  hors sprint dédié. Auteur des commits : le mainteneur (`amiel-35`), trailer
   `Co-Authored-By` pour l'agent.
 - **Gouvernance** : `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
   templates issue/PR. Les PR externes sont revues par le donneur d'ordre et
-  validées par Amiel ; **jamais approuvées par un agent**.
+  validées par le mainteneur ; **jamais approuvées par un agent**.
 - **Vie privée** : aucun secret en dépôt, aucune télémétrie ; diagnostics
   expurgés ; option « ne pas conserver le corps des messages ».
 - **i18n** : `strings.json`/`translations/` pour l'UI ; section `common` +
@@ -216,12 +216,12 @@ translated, contributions welcome »).
 
 | Rôle | Tenu par | Responsabilité |
 |---|---|---|
-| **Donneur d'ordre** | session principale | brief + **tests d'acceptation pytest en échec livrés avec le brief**, découpe, lancement des agents, arbitrage, merge, release, contact Amiel |
+| **Donneur d'ordre** | session principale | brief + **tests d'acceptation pytest en échec livrés avec le brief**, découpe, lancement des agents, arbitrage, merge, release, contact du mainteneur |
 | **Codeur cœur** | agent Opus | routeur : routage, config flow, entités — fait passer les tests d'acceptation **sans les modifier** |
 | **Codeur périphérie** | agent Sonnet | adaptateurs, cartes, blueprints, traductions `es`, docs |
 | **Testeur** | agent Sonnet, séparé | couverture, cas limites, `hassfest` ; ne modifie pas le code produit ; findings |
 | **Relecteur** | agent Opus, contexte vierge | reçoit doctrine + `contract.md` + tous les ADR + diff + sortie CI + `checklist-relecture.md` ; verdict **go / no-go** uniquement |
-| **Intégrateur** | donneur d'ordre | seul autorisé à toucher l'instance de dev et inflexion-01 ; scénarios bout en bout ; tag |
+| **Intégrateur** | donneur d'ordre | seul autorisé à toucher l'instance de dev ; scénarios bout en bout ; tag |
 
 Règles :
 - Les agents reçoivent le brief, la doctrine, `contract.md`, les ADR — jamais
@@ -240,9 +240,9 @@ Règles :
 1. Tests d'acceptation du brief verts sans modification ; CI verte ; couverture tenue.
 2. Relecture *go*.
 3. Déployé sur l'instance de dev par l'intégrateur ; scénario bout en bout consigné.
-4. `en` figé par le donneur d'ordre ; `fr` complet (relecture Amiel demandée à la release) ; `es` complet et étiqueté.
+4. `en` figé par le donneur d'ordre ; `fr` complet (relecture du mainteneur demandée à la release) ; `es` complet et étiqueté.
 5. `contract.md`, `CHANGELOG`, ADR à jour ; tag ; release avec note lisible par un non-technicien.
-6. `known-issues.md` à jour ; roadmap mise à jour ; Amiel prévenu.
+6. `known-issues.md` à jour ; roadmap mise à jour ; le mainteneur prévenu.
 
 ## 7. Roadmap (ADR-012)
 
@@ -250,30 +250,29 @@ Règles :
 |---|---|---|---|
 | S0 | **Socle** (exception assumée : pas fonctionnel) | dépôt public, CI verte sur le squelette, `hassfest` OK, instance de dev joignable, `contract.md` v0 | — |
 | S1 | **Routeur v0.1 = ex-S1+S2 fusionnés** : service legacy + `targets`, table de routage en UI, personnes ↔ services, présence, silence lu (`schedule`/`input_boolean`), priorités, boutons Vu/Snooze sécurisés, snoozes persistés, mode observer, entités, diagnostics, migration | une `alert` de test avec `notifiers: [switchboard_test]` : routée vers la personne présente et pas vers l'absente ; silence bloque sauf `critical` ; « Vu » depuis Companion → `alert.turn_off` (refusé hors allow-list) ; snooze 1 h retient ; redémarrage → snooze conservé ; cible interdisant le snooze → bouton absent | S0 |
-| S2 | **Cartes v0.1** : bulle sur `alert.*` (compte, liste, acquitter, snoozer), tuiles de silence par personne ; accessibilité (§8) | la tablette affiche les `alert.*` actives, acquitte, snooze ; contraste et clavier vérifiés | S1 |
+| S2 | **Cartes v0.1** : bulle sur `alert.*` (compte, liste, acquitter, snoozer), tuiles de silence par personne ; accessibilité (§8) | la tablette murale de la maison de référence affiche les `alert.*` actives, acquitte, snooze ; contraste et clavier vérifiés | S1 |
 | S3 | **Blueprints + doc + quickstart** : « état → alert routée », « événement → info routée », « source indisponible > N min → alert » (le cas KLIPPBOK, ADR-013) | un utilisateur externe installe et route une alerte en 10 min en suivant le README seul | S1 |
 | S4 | **Google Home Notifier v0.1** | « la machine est finie » lue dans la cuisine via `notify.google_home_cuisine`, volume restauré | — |
 | S5 | **AirPlay Notifier v0.1** | annonce lue sur un lecteur AirPlay | — |
 | S6 | **HACS default** : brands, topics, soumission | acceptation HACS | S1-S3 |
 | — | Alexa Notifier | reporté (couvert par Alexa Devices core) | — |
 
-S4/S5 sont indépendants et peuvent s'intercaler dès S0 fini si Amiel veut la
+S4/S5 sont indépendants et peuvent s'intercaler dès S0 fini si le mainteneur veut la
 voix pour la sonnette tôt.
 
 ## 8. Accessibilité des cartes (S2)
 
 Couleurs par variables de thème HA (jamais en dur), information jamais portée
-par la seule couleur (le mur se lit de loin), cibles tactiles ≥ 48 px,
+par la seule couleur (l'écran mural se lit de loin), cibles tactiles ≥ 48 px,
 `aria-label`/rôles sur les boutons, navigation clavier et focus visible, pas
 de troncature à 200 %, `prefers-reduced-motion` respecté.
 
 ## 9. Instance de développement
 
 Conteneur `ha-dev` (`ghcr.io/home-assistant/home-assistant:2026.9.1` — tags
-complets, pas de tag mineur) sur inflexion-01, config
-`/opt/notify-switchboard-dev/config`, sources montées depuis
-`/opt/notify-switchboard-dev/src`, `127.0.0.1:8124` (tunnel SSH). Compte
-`dev` ; token longue durée « claude-dev » sur le Mac (`~/.config/ha/dev-secret`).
+complets, pas de tag mineur) sur le serveur de dev, config et sources
+montées en bind mount depuis le dépôt local, `127.0.0.1:8124` (tunnel SSH).
+Compte `dev` ; token longue durée « claude-dev » sur le Mac (`~/.config/ha/dev-secret`).
 `person`/`schedule` factices ; Companion d'un appareil de test. Rien de la
 maison réelle. **Seul l'intégrateur y touche.**
 
@@ -281,8 +280,8 @@ maison réelle. **Seul l'intégrateur y touche.**
 
 Classes et personnes concernées ; priorités et ce qui lève un silence ; règle
 d'absence ; acquittement vs snooze par cible ; heures de silence par personne ;
-voix pour quelles informations ; Companion chez Niels et Olga. → configuration
-chez Amiel après release.
+voix pour quelles informations ; Companion chez les enfants. → configuration
+dans la maison de référence après release.
 
 ## 11. Risques et parades
 
