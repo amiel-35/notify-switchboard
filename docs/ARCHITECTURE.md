@@ -210,3 +210,69 @@ per sprint.
 
 This repository (`notify-switchboard`) covers S0/S1/S2 of the router; the
 other rows live in sibling repositories per the umbrella doctrine.
+
+## Engineering rules learned
+
+Two operational lessons, orthogonal to any single architectural decision,
+that reviews and incidents turned up during development. They are process
+and engineering discipline rather than choices about the system's shape, so
+they live here rather than in an ADR.
+
+### Legacy `notify` platform lifecycle
+
+Reviews of the suite's Cast and AirPlay voice adapters surfaced the same
+class of bug twice, for the same underlying reason: Home Assistant core
+never retires a legacy `notify.*` service on its own, and never
+re-registers one that already exists (`homeassistant/components/notify/
+legacy.py` returns early in that case). Any integration that registers a
+legacy `notify` platform must therefore handle this itself:
+
+1. Remove its own service in `entry.async_on_unload`, and clear its own
+   entry out of `hass.data[NOTIFY_SERVICES]` — otherwise a config entry
+   reload leaves the old service in place and its options never take
+   effect.
+2. Read the live config entry on every call; never capture options once at
+   setup.
+3. Guard any state shared across calls (volume, timers) with a per-target
+   lock and `try`/`finally`, and cancel timers tied to the entry's
+   lifecycle.
+4. Validate `data` against a schema, normalising `source_entity`
+   (`ensure_list`, cast to `str`, case-folded) and rejecting it outright if
+   it cannot be used (see ADR-0015 for what "rejecting" means to the
+   caller).
+5. Expose one device per config entry, with a `translation_key` rather than
+   a literal `_attr_name`.
+6. Cover, in tests: an options reload, unload/remove, a failed delivery, an
+   overlapping call, and a player already busy.
+
+### One agent, one git worktree
+
+Two agents must never share a working copy. On one occasion an agent
+working on documentation switched the checked-out branch out from under an
+orchestrating session that was mid-commit, which then had to untangle the
+resulting history by hand. The rule since: only the orchestrating session
+works in a repository's primary checkout, and only when no agent is
+currently running against it; every agent — and the orchestrator itself,
+for its own concurrent fixes — works in its own
+`git worktree add <dir> -b <branch> origin/main`, never in a shared copy.
+
+## ADR index
+
+| ADR | Title |
+|---|---|
+| [0001](ADR/0001-native-first.md) | Native first |
+| [0002](ADR/0002-pure-proxy.md) | The router is a pure notify proxy |
+| [0003](ADR/0003-voice-is-a-separate-adapter.md) | Voice is a separate adapter, never wired to alerts by default |
+| [0004](ADR/0004-notifier-hub-rejected-as-base.md) | Notifier Hub rejected as a base |
+| [0005](ADR/0005-public-mit-translated.md) | Public repositories, MIT license, English source with fr/es UI |
+| [0006](ADR/0006-sprints.md) | Sprints are testable increments, not time boxes |
+| [0007](ADR/0007-legacy-notify-service-with-targets.md) | Legacy notify service with per-target `targets`, `NotifyEntity` degraded, observer mode as plan B |
+| [0008](ADR/0008-alert-identity-via-target.md) | Alert identity travels through the target, not through `data` |
+| [0009](ADR/0009-secure-notification-actions.md) | Secure notification actions — allow-list, authentication, audit |
+| [0010](ADR/0010-voice-and-security-are-configuration-rules.md) | "Voice is not an alert" and "no security through voice" are configuration rules, not code guarantees |
+| [0011](ADR/0011-frozen-contract-and-contract-test.md) | Frozen input contract and a contract test |
+| [0012](ADR/0012-roadmap-reordered.md) | Roadmap reordered — acknowledge, cards and blueprints before voice |
+| [0013](ADR/0013-source-unavailability-as-blueprint.md) | Source-unavailability monitoring ships as a blueprint, not in the router |
+| [0014](ADR/0014-cast-notifier-name.md) | The Cast voice adapter is named "Cast Notifier" |
+| [0015](ADR/0015-refusals-raise-service-validation-error.md) | A refused notification raises `ServiceValidationError`, never fails silently |
+| [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-row message texts |
