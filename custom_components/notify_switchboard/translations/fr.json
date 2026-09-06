@@ -23,8 +23,10 @@
         "description": "Ajoutez les personnes que la maison notifie, puis une cible par alerte. Chaque cible devient un service notify.switchboard_[slug] à lister dans les notifiers d'une alerte.",
         "menu_options": {
           "person": "Ajouter ou modifier une personne",
+          "edit_person": "Modifier une personne",
           "remove_person": "Supprimer une personne",
           "target": "Ajouter ou modifier une cible",
+          "edit_target": "Modifier une cible",
           "remove_target": "Supprimer une cible",
           "general": "Cible par défaut"
         }
@@ -43,6 +45,13 @@
           "outputs": "Noms de services notify sans le préfixe notify., par exemple mobile_app_amiel. Un service qui n'existe pas encore est toléré et réessayé.",
           "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire.",
           "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
+        }
+      },
+      "edit_person": {
+        "title": "Modifier une personne",
+        "description": "Choisissez la personne à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "data": {
+          "entity_id": "Personne"
         }
       },
       "remove_person": {
@@ -77,7 +86,7 @@
           "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
           "name": "Affiché aux personnes, et utilisé comme message en mode observateur quand l'alerte n'en porte pas.",
           "class": "Texte libre, uniquement pour regrouper, par exemple bâtiment ou animaux.",
-          "default_priority": "Seul critical lève le silence et les reports d'une personne.",
+          "default_priority": "Seul `critical` lève le silence et les reports d'une personne.",
           "alert_entity": "L'alert.* à laquelle cette ligne est liée. Nécessaire pour le bouton « J'ai vu ».",
           "audience": "Les personnes concernées par cette cible. Les autres ne sont pas notifiées.",
           "presence_rule": "Si l'état person.* doit être à la maison, absent, ou peu importe.",
@@ -88,6 +97,13 @@
           "message": "Modèle facultatif utilisé en mode observateur quand l'alerte se déclenche. L'état de l'alerte est disponible sous alert, par exemple {{ alert.attributes.level }}. Laissez vide pour envoyer le nom.",
           "done_message": "Modèle facultatif utilisé en mode observateur quand l'alerte revient au repos. Laissez vide pour envoyer le texte traduit de retour à la normale.",
           "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur."
+        }
+      },
+      "edit_target": {
+        "title": "Modifier une cible",
+        "description": "Choisissez la ligne de la table de routage à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "data": {
+          "slug": "Cible"
         }
       },
       "remove_target": {
@@ -119,7 +135,7 @@
       "invalid_time": "Utilisez HH:MM ou HH:MM:SS.",
       "invalid_slug": "Utilisez uniquement des minuscules, des chiffres et des tirets bas.",
       "duplicate_slug": "Une autre cible utilise déjà cet identifiant.",
-      "invalid_priority": "Choisissez info, normal, high ou critical.",
+      "invalid_priority": "Choisissez `info`, `normal`, `high` ou `critical`.",
       "invalid_presence_rule": "Choisissez always, home_only ou away_only.",
       "not_an_alert": "Choisissez une entité alert.*.",
       "empty_audience": "Choisissez au moins une personne.",
@@ -129,6 +145,7 @@
     },
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
+      "nothing_to_edit": "Il n'y a encore rien à modifier.",
       "nothing_to_configure": "Ajoutez d'abord une cible."
     }
   },
@@ -148,6 +165,10 @@
     "invalid_service_person": {
       "title": "Une carte ou un script nomme sans cesse une personne inutilisable",
       "description": "Un service notify_switchboard a été refusé plusieurs fois pour {value}, qui n'est pas dans la table ou pas dans l'audience de la cible. Corrigez l'appelant, ou ajoutez cette personne à la table ou à l'audience."
+    },
+    "invalid_service_calls_many": {
+      "title": "Une carte ou un script appelle sans cesse avec des valeurs inexistantes",
+      "description": "Des services notify_switchboard ont été refusés pour plus de {count} cibles ou personnes différentes. Plutôt qu'un avertissement par valeur, celui-ci les représente toutes. Quelque chose produit des noms absents de la table de routage — le plus souvent un modèle qui ne rend pas ce qu'on croit. Corrigez l'appelant ; cet avertissement disparaît au rechargement de l'intégration."
     }
   },
   "exceptions": {
@@ -167,7 +188,7 @@
       "message": "{person} n'est pas dans l'audience de la cible {target}."
     },
     "invalid_silence_minutes": {
-      "message": "Un silence dure au moins une minute ; {minutes} n'est pas une durée."
+      "message": "Un silence dure entre {min} et {max} minutes ; {minutes} n'est ni l'un ni l'autre."
     },
     "no_audience": {
       "message": "La cible {target} n'a personne dans son audience."
@@ -218,7 +239,7 @@
     },
     "silence": {
       "name": "Mettre une personne en silence",
-      "description": "Met quelqu'un en silence pendant un moment, pour toutes les cibles. Ses propres entités de silence ne sont pas touchées ; seul un message critical passe encore.",
+      "description": "Met quelqu'un en silence pendant un moment, pour toutes les cibles. Ses propres entités de silence ne sont pas touchées ; seul un message `critical` passe encore.",
       "fields": {
         "person": {
           "name": "Personne",
@@ -226,7 +247,7 @@
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Durée du silence, au moins une minute."
+          "description": "Durée du silence : de 1 minute à 1440 (un jour)."
         }
       }
     },

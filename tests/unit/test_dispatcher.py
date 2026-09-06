@@ -28,6 +28,7 @@ from custom_components.notify_switchboard.dispatcher import (
     companion_service_name,
     next_wake_time,
 )
+from custom_components.notify_switchboard.store import DeferredMessage
 
 
 def make_person(entity_id: str, outputs: list[str], **overrides: Any) -> dict:
@@ -1195,3 +1196,154 @@ async def test_one_working_output_out_of_two_is_still_a_delivery(
     assert len(ok) == 1
     assert hass.states.get("sensor.switchboard_routed_today").state == "1"
     assert hass.states.get("sensor.switchboard_dropped_today").state == "0"
+
+
+# ---------------------------------------------------------------------------
+# M8: the wake time is a prediction, not a promise
+# ---------------------------------------------------------------------------
+
+
+async def test_a_deferral_is_kept_when_the_person_is_still_silenced_at_wake_time(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The night schedule ran late: the queue must not be pushed at a sleeper.
+
+    Before this, `_async_flush_deferrals` trusted the timer: whatever was queued
+    went out at `wake_time` even if the person's own silence entity was still
+    `on`, which is exactly the notification the deferral existed to avoid.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 07:05 Paris, and `input_boolean.night` is *still* on.
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # The silence lifts; the re-armed timer delivers at the next wake time.
+    hass.states.async_set("input_boolean.night", "off")
+    freezer.move_to(datetime(2026, 9, 12, 5, 5, tzinfo=dt_util.UTC))  # 07:05, next day
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_a_deferral_held_by_a_temporary_silence_is_re_armed_at_its_end(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """ "The next end" is the temporary silence's, when that is sooner."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    # At 07:05 the schedule is over but a 30-minute silence, asked for in the
+    # small hours, still runs. The flush keeps the message and re-arms for the
+    # end of that silence rather than for tomorrow morning.
+    freezer.move_to(datetime(2026, 9, 11, 5, 0, tzinfo=dt_util.UTC))  # 07:00 Paris
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 30}, blocking=True
+    )
+    hass.states.async_set("input_boolean.night", "off")
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 07:31 Paris: the temporary silence has lifted, well before the next 07:00.
+    freezer.move_to(datetime(2026, 9, 11, 5, 31, tzinfo=dt_util.UTC))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+
+
+async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """`critical` bypasses silence everywhere else, so it bypasses the hold too."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    # A `critical` message is never silenced in the first place, so the
+    # deferral is planted directly: this pins the flush rule, not the router's.
+    switchboard = entry.runtime_data.switchboard
+    switchboard.store.deferrals[("person.alice", "leak", "")] = DeferredMessage(
+        person="person.alice",
+        slug="leak",
+        tag="",
+        message="critical",
+        priority="critical",
+        queued_at=dt_util.utcnow(),
+    )
+
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    await switchboard._async_flush_deferrals("person.alice")
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["critical"]
+    assert switchboard.store.deferrals == {}

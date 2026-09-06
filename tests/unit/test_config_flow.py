@@ -85,8 +85,10 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.MENU
     assert set(result["menu_options"]) == {
         "person",
+        "edit_person",
         "remove_person",
         "target",
+        "edit_target",
         "remove_target",
         "general",
     }
@@ -317,3 +319,112 @@ async def test_an_unparsable_row_template_is_rejected_by_the_schema(
         assert field in str(err.value)
 
     assert entry.options[CONF_TARGETS] == []
+
+
+# ---------------------------------------------------------------------------
+# M9: editing a row opens it pre-filled
+# ---------------------------------------------------------------------------
+
+
+def _suggested(schema: Any) -> dict[str, Any]:
+    """Return {field: suggested_value} for every marker that carries one."""
+    return {
+        str(marker): marker.description["suggested_value"]
+        for marker in schema.schema
+        if isinstance(marker.description, dict)
+        and "suggested_value" in marker.description
+    }
+
+
+async def test_editing_a_target_pre_fills_every_field_it_is_about_to_overwrite(
+    hass: HomeAssistant,
+) -> None:
+    """The form writes the whole row, so it must open on the whole stored row.
+
+    Without the suggested values, opening the target form to change one word of
+    `message` reset `done_message`, `default_title`, `snooze_minutes`,
+    `default_data` and the rest to their schema defaults the moment it was
+    submitted.
+    """
+    entry = await _create_entry(hass)
+    await _options_step(hass, entry, "person", _person_input())
+    await _options_step(
+        hass,
+        entry,
+        "target",
+        _target_input(
+            message="Level {{ alert.attributes.level }}",
+            done_message="All clear",
+            default_title="Switchboard",
+            allow_acknowledge=True,
+        ),
+    )
+
+    result = await _options_step(hass, entry, "edit_target", {"slug": "leak"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "target"
+
+    suggested = _suggested(result["data_schema"])
+    assert suggested["slug"] == "leak"
+    assert suggested["name"] == "Fuite d'eau"
+    assert suggested["class"] == "building"
+    assert suggested["audience"] == ["person.alice"]
+    assert suggested["allow_acknowledge"] is True
+    assert suggested["default_data"] == {"channel": "family"}
+    # Stored as a list of ints, edited as the text `parse_snooze_minutes` reads.
+    assert suggested["snooze_minutes"] == "15, 60"
+    # The three v0.2 texts, which is what the review was about.
+    assert suggested["message"] == "Level {{ alert.attributes.level }}"
+    assert suggested["done_message"] == "All clear"
+    assert suggested["default_title"] == "Switchboard"
+
+
+async def test_editing_a_person_pre_fills_their_row(hass: HomeAssistant) -> None:
+    entry = await _create_entry(hass)
+    await _options_step(
+        hass,
+        entry,
+        "person",
+        _person_input(silence_entities=["input_boolean.night"], wake_time="07:00:00"),
+    )
+
+    result = await _options_step(
+        hass, entry, "edit_person", {"entity_id": "person.alice"}
+    )
+    assert result["step_id"] == "person"
+
+    suggested = _suggested(result["data_schema"])
+    assert suggested["entity_id"] == "person.alice"
+    assert suggested["outputs"] == ["mobile_app_alice"]
+    assert suggested["silence_entities"] == ["input_boolean.night"]
+    assert suggested["wake_time"] == "07:00:00"
+
+
+async def test_a_validation_error_gives_back_what_was_typed(
+    hass: HomeAssistant,
+) -> None:
+    """A rejected form must not also lose the eleven fields that were fine."""
+    entry = await _create_entry(hass)
+    await _options_step(hass, entry, "person", _person_input())
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(slug="Not A Slug", name="Kept")
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"slug": "invalid_slug"}
+
+    suggested = _suggested(result["data_schema"])
+    assert suggested["slug"] == "Not A Slug"
+    assert suggested["name"] == "Kept"
+    assert suggested["snooze_minutes"] == "15, 60"
+
+
+async def test_editing_is_refused_while_the_table_is_empty(
+    hass: HomeAssistant,
+) -> None:
+    entry = await _create_entry(hass)
+
+    for step in ("edit_person", "edit_target"):
+        result = await _options_step(hass, entry, step)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "nothing_to_edit"

@@ -10,7 +10,7 @@ template rendering when the alert is missing or the template is broken.
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import homeassistant.helpers.issue_registry as ir
@@ -27,8 +27,15 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.notify_switchboard.const import (
     DOMAIN,
+    ISSUE_INVALID_SERVICE_CALLS_MANY,
     MAX_INVALID_SERVICE_CALLS,
+    MAX_SILENCE_MINUTES,
+    MAX_TRACKED_INVALID_SERVICE_CALLS,
+    MIN_SILENCE_MINUTES,
     UI_SERVICES,
+)
+from custom_components.notify_switchboard.diagnostics import (
+    async_get_config_entry_diagnostics,
 )
 from custom_components.notify_switchboard.router import (
     PersonConfig,
@@ -889,3 +896,332 @@ async def test_observer_mode_without_a_default_title_still_uses_the_row_name(
     await hass.async_block_till_done()
 
     assert calls[0].data["title"] == "Observed"
+
+
+# ---------------------------------------------------------------------------
+# Post-review fixes
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("minutes", [0, MAX_SILENCE_MINUTES + 1, 10**9, 10**15])
+async def test_silence_refuses_a_duration_outside_its_bounds(
+    hass: HomeAssistant, minutes: int
+) -> None:
+    """B1: out-of-range `minutes` is a translated refusal, never an `OverflowError`.
+
+    `dt_util.utcnow() + timedelta(minutes=10**15)` raises `OverflowError`, which
+    is not a `HomeAssistantError`, so before the bound existed a card typo
+    surfaced to the caller as an unhandled exception instead of as the
+    `ServiceValidationError` ADR-0015 promises.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.async_call(
+            DOMAIN,
+            "silence",
+            {"person": "person.alice", "minutes": minutes},
+            blocking=True,
+        )
+
+    assert raised.value.translation_key == "invalid_silence_minutes"
+    assert raised.value.translation_placeholders == {
+        "minutes": str(minutes),
+        "min": str(MIN_SILENCE_MINUTES),
+        "max": str(MAX_SILENCE_MINUTES),
+    }
+    assert entry.runtime_data.switchboard.store.silences == {}
+
+
+@pytest.mark.parametrize("minutes", [MIN_SILENCE_MINUTES, MAX_SILENCE_MINUTES])
+async def test_silence_accepts_both_ends_of_the_range(
+    hass: HomeAssistant, minutes: int
+) -> None:
+    """The bounds are inclusive on both sides."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "silence",
+        {"person": "person.alice", "minutes": minutes},
+        blocking=True,
+    )
+    assert "person.alice" in entry.runtime_data.switchboard.store.silences
+
+
+async def test_many_distinct_invalid_targets_collapse_into_one_issue(
+    hass: HomeAssistant,
+) -> None:
+    """I3: an unbounded caller must not grow the issue registry one row per value."""
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+
+    # Enough distinct slugs to fill the tracking table, each refused often
+    # enough to earn its own issue.
+    for index in range(MAX_TRACKED_INVALID_SERVICE_CALLS):
+        for _ in range(MAX_INVALID_SERVICE_CALLS):
+            with pytest.raises(ServiceValidationError):
+                await hass.services.async_call(
+                    DOMAIN, "acknowledge", {"target": f"stale{index}"}, blocking=True
+                )
+
+    assert registry.async_get_issue(DOMAIN, ISSUE_INVALID_SERVICE_CALLS_MANY) is None
+
+    # One value past the cap: no new per-value issue, one aggregated issue.
+    for _ in range(MAX_INVALID_SERVICE_CALLS):
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN, "acknowledge", {"target": "overflow"}, blocking=True
+            )
+
+    assert registry.async_get_issue(DOMAIN, "invalid_service_target_overflow") is None
+    assert (
+        registry.async_get_issue(DOMAIN, ISSUE_INVALID_SERVICE_CALLS_MANY) is not None
+    )
+    per_value = [
+        issue
+        for issue in registry.issues.values()
+        if issue.domain == DOMAIN and issue.issue_id.startswith("invalid_service_")
+    ]
+    assert len(per_value) == MAX_TRACKED_INVALID_SERVICE_CALLS + 1
+
+
+async def test_a_person_accepted_again_clears_their_repair_without_a_reload(
+    hass: HomeAssistant,
+) -> None:
+    """I3: the issue outlives the refusals, so an accepted call has to delete it.
+
+    The issue is keyed on the person, not on the target that refused them, so
+    any later call the router accepts for that person retires it. If the caller
+    is still broken, three more refusals raise it again.
+    """
+    await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [
+            make_target("leak", snooze_minutes=[15], audience=["person.alice"]),
+            make_target("fountain", snooze_minutes=[15], audience=["person.bob"]),
+        ],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+
+    for _ in range(MAX_INVALID_SERVICE_CALLS):
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN,
+                "snooze",
+                {"target": "leak", "minutes": 15, "person": "person.bob"},
+                blocking=True,
+            )
+    assert registry.async_get_issue(DOMAIN, "invalid_service_person_person.bob")
+
+    await hass.services.async_call(
+        DOMAIN,
+        "snooze",
+        {"target": "fountain", "minutes": 15, "person": "person.bob"},
+        blocking=True,
+    )
+    assert registry.async_get_issue(DOMAIN, "invalid_service_person_person.bob") is None
+
+
+async def test_a_silence_also_clears_a_persons_repair(hass: HomeAssistant) -> None:
+    """I3, the other entry point that fully accepts a person."""
+    await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [make_target("leak", snooze_minutes=[15], audience=["person.alice"])],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+
+    for _ in range(MAX_INVALID_SERVICE_CALLS):
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN,
+                "snooze",
+                {"target": "leak", "minutes": 15, "person": "person.bob"},
+                blocking=True,
+            )
+    assert registry.async_get_issue(DOMAIN, "invalid_service_person_person.bob")
+
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.bob", "minutes": 5}, blocking=True
+    )
+    assert registry.async_get_issue(DOMAIN, "invalid_service_person_person.bob") is None
+
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.bob"}, blocking=True
+    )
+
+
+async def test_a_target_added_back_in_the_options_clears_its_repair(
+    hass: HomeAssistant,
+) -> None:
+    """I3: a reload (what an options change triggers) drops the fixed repairs."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+
+    for _ in range(MAX_INVALID_SERVICE_CALLS):
+        with pytest.raises(ServiceValidationError):
+            await hass.services.async_call(
+                DOMAIN, "acknowledge", {"target": "fountain"}, blocking=True
+            )
+    assert registry.async_get_issue(DOMAIN, "invalid_service_target_fountain")
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak"), make_target("fountain")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert registry.async_get_issue(DOMAIN, "invalid_service_target_fountain") is None
+
+
+async def test_acknowledge_carries_the_callers_context_to_alert_turn_off(
+    hass: HomeAssistant,
+) -> None:
+    """I5: the logbook must credit the person who tapped, not the integration.
+
+    `alert.turn_off` gets a *child* of the caller's context, not the caller's
+    own: `homeassistant/helpers/service.py` turns a non-empty
+    `context.user_id` on an entity service call into an auth lookup plus a
+    per-entity permission check, which would put the row's `allow_acknowledge`
+    allow-list behind the caller's entity permissions. The logbook resolves the
+    parent for attribution.
+    """
+    turn_off = async_mock_service(hass, "alert", "turn_off")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", alert_entity="alert.leak", allow_acknowledge=True)],
+        "leak",
+    )
+
+    caller = Context(user_id="user-42")
+    await hass.services.async_call(
+        DOMAIN, "acknowledge", {"target": "leak"}, blocking=True, context=caller
+    )
+    await hass.async_block_till_done()
+
+    assert len(turn_off) == 1
+    assert turn_off[0].context.parent_id == caller.id
+    assert turn_off[0].context.user_id is None
+
+    # The `acknowledged` event entity keeps the caller's own context: writing
+    # entity state runs no permission check, so the attribution is direct.
+    assert hass.states.get("event.switchboard_delivery").context is caller
+
+
+async def test_snooze_carries_the_callers_context_to_the_delivery_event(
+    hass: HomeAssistant,
+) -> None:
+    """I5, snooze half: the `snoozed` event is attributed to its caller too."""
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", snooze_minutes=[15])],
+        "leak",
+    )
+
+    caller = Context(user_id="user-7")
+    await hass.services.async_call(
+        DOMAIN,
+        "snooze",
+        {"target": "leak", "minutes": 15},
+        blocking=True,
+        context=caller,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("event.switchboard_delivery")
+    assert state.attributes["event_type"] == "snoozed"
+    assert state.context is caller
+
+
+async def test_diagnostics_report_the_temporary_silences(
+    hass: HomeAssistant,
+) -> None:
+    """M7: a silence is as much part of "why was it quiet" as a snooze is."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 30}, blocking=True
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["silences"] == [
+        {
+            "person": "person.alice",
+            "until": entry.runtime_data.switchboard.store.silences[
+                "person.alice"
+            ].isoformat(),
+            "active": True,
+        }
+    ]
+
+
+async def test_a_silence_that_expired_while_unloaded_is_purged_from_the_store_file(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """M11: purging at setup only helps if the purge is written back."""
+    freezer.move_to(datetime(2026, 9, 10, 12, 0, tzinfo=dt_util.UTC))
+    hass_storage["notify_switchboard.data"] = {
+        "version": 1,
+        "minor_version": 3,
+        "key": "notify_switchboard.data",
+        "data": {
+            "snoozes": [],
+            "deferrals": [],
+            "silences": [
+                {
+                    "person": "person.alice",
+                    "until": datetime(
+                        2026, 9, 10, 11, 0, tzinfo=dt_util.UTC
+                    ).isoformat(),
+                }
+            ],
+        },
+    }
+
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    assert hass_storage["notify_switchboard.data"]["data"]["silences"] == []

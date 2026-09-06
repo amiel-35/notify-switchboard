@@ -87,8 +87,12 @@ def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> No
     """
 
     async def _acknowledge(call: ServiceCall) -> None:
+        # `call.context` is forwarded, not just its `user_id`: the logbook
+        # attributes `alert.turn_off` to whoever owns the context, so a card
+        # tap shows up as that person acknowledging rather than as the
+        # integration doing it on its own.
         await switchboard.async_service_acknowledge(
-            call.data[ATTR_TARGET], call.context.user_id
+            call.data[ATTR_TARGET], call.context.user_id, call.context
         )
 
     async def _snooze(call: ServiceCall) -> None:
@@ -97,6 +101,7 @@ def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> No
             call.data[ATTR_MINUTES],
             call.data.get(ATTR_PERSON),
             call.context.user_id,
+            call.context,
         )
 
     async def _unsnooze(call: ServiceCall) -> None:

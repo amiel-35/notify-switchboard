@@ -211,6 +211,15 @@ ERROR_NO_AUDIENCE: Final = "no_audience"
 # `silence(minutes: 0)` is refused, zero has no meaning).
 MIN_SILENCE_MINUTES: Final = 1
 
+# The longest temporary silence, in minutes: one day, the same ceiling
+# `services.yaml` already puts on the `minutes` number selector. An upper bound
+# is not cosmetic: `dt_util.utcnow() + timedelta(minutes=minutes)` raises
+# `OverflowError` (a plain `Exception`, not a `HomeAssistantError`) as soon as
+# the result leaves `datetime`'s range, so an unbounded `minutes` turns a
+# caller's typo into a 500 instead of a translated refusal. Beyond a day, a
+# silence is a schedule -- that is what a person's `silence_entities` are for.
+MAX_SILENCE_MINUTES: Final = 1440
+
 # ---------------------------------------------------------------------------
 # Robustness
 # ---------------------------------------------------------------------------
@@ -222,7 +231,25 @@ MAX_CONSECUTIVE_OUTPUT_MISSES: Final = 3
 # raises a `repairs` issue (sprint-2 brief item 7). One refused call is already
 # reported to its caller as a `ServiceValidationError`; a card wired to a stale
 # slug keeps hitting it, and that is what deserves a repair.
+#
+# The count is **cumulative, not consecutive**: it is only ever reset when that
+# exact slug/person becomes valid again (the row is added back, the person joins
+# the audience), at which point the issue is deleted too. Nothing else clears
+# it, so three refusals a week apart raise the issue just as three in a row do
+# -- which is the point, since a card wired to a stale slug fires whenever
+# somebody taps it, not in bursts.
 MAX_INVALID_SERVICE_CALLS: Final = 3
+
+# How many *distinct* invalid targets/persons are tracked individually. A caller
+# that generates a fresh bad value on every call (a template gone wrong, a fuzz
+# test) would otherwise grow the counter dict and the issue registry without
+# bound, one persisted `repairs` issue per value. Past this many distinct
+# values, no new per-value issue is raised and a single aggregated one takes
+# over.
+MAX_TRACKED_INVALID_SERVICE_CALLS: Final = 20
+
+# The aggregated `repairs` issue id/translation key used past that bound.
+ISSUE_INVALID_SERVICE_CALLS_MANY: Final = "invalid_service_calls_many"
 
 # Number of decisions kept in memory for diagnostics.
 DIAGNOSTICS_DECISION_LOG_SIZE: Final = 20

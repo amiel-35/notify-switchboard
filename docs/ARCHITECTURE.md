@@ -37,7 +37,7 @@ entities. There is no intermediate "house" sensor.
 |---|---|
 | `router.py` | **Pure**: routing table, decision engine, action ids. No `hass`. |
 | `dispatcher.py` | Every side effect: service calls, buttons, callbacks, observer mode, deferrals, counters, repairs. |
-| `store.py` | `Store`-backed snoozes and night deferrals. |
+| `store.py` | `Store`-backed snoozes, night deferrals and temporary silences. |
 | `legacy.py` | `notify.switchboard` and `notify.switchboard_<slug>`. |
 | `services.py` | The five `notify_switchboard.*` UI services (v0.2, ADR-0016): schemas and registration only, every decision delegated to `dispatcher.py`. |
 | `notify.py` | The degraded `NotifyEntity`. |
@@ -84,9 +84,16 @@ Decisions taken in Sprint 1, where the contract left room:
   therefore not counted as a drop. Deferrals are de-duplicated on
   `(person, target, tag)`; an untagged message de-duplicates on
   `(person, target)`.
-- **Deferred deliveries do not re-run the decision.** `wake_time` is by
-  definition the end of the night silence, so the queued message is handed
-  straight to the person's outputs.
+- **Deferred deliveries re-check the silence, and nothing else.** `wake_time`
+  is a *prediction* that the night is over, not a promise: a schedule that runs
+  late, a `notify_switchboard.silence` set in the small hours or a restart
+  spanning the night would otherwise push the whole queue at somebody still
+  asleep. So `_async_flush_deferrals` re-reads `is_person_silenced` and keeps a
+  still-silenced message queued, re-arming for whichever comes first, the end of
+  the temporary silence or the next wake time (`_async_rearm_deferral`).
+  `critical` is delivered regardless, as it is everywhere else. The rest of the
+  decision — audience, presence, snooze — is **not** re-run: the queued message
+  goes straight to the person's outputs. See `docs/known-issues.md`.
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
   right local hour (`dispatcher.next_wake_time`).
@@ -151,10 +158,43 @@ Decisions taken in Sprint 2, where the contract left room:
   `vol.Invalid` as-is, and a `vol.Invalid` is not a `ServiceValidationError`.
   So `minutes: 0`, a duration the row does not offer, an unknown slug and an
   unknown person are all checked in the handler, never in the schema.
-- **A recurring refusal raises a `repairs` issue.** One bad call is answered to
-  its caller; the same unknown target or person refused
-  `MAX_INVALID_SERVICE_CALLS` times is a card nobody fixed, and gets an issue —
-  the same posture as `MAX_CONSECUTIVE_OUTPUT_MISSES`.
+- **A recurring refusal raises a `repairs` issue, and fixing the cause clears
+  it.** One bad call is answered to its caller; the same unknown target or
+  person refused `MAX_INVALID_SERVICE_CALLS` times is a card nobody fixed, and
+  gets an issue — the same posture as `MAX_CONSECUTIVE_OUTPUT_MISSES`, with two
+  differences that matter. The count is **cumulative, not consecutive**: three
+  refusals a week apart raise the issue just as three in a row do, because a
+  card wired to a stale slug fires whenever somebody taps it. And an issue
+  outlives the refusals that raised it, so it is deleted explicitly — when the
+  same slug or person is accepted again, and at setup for every slug and person
+  the (reloaded) table now knows about, which is what an options-flow fix
+  amounts to.
+- **Only `MAX_TRACKED_INVALID_SERVICE_CALLS` distinct bad values are tracked.**
+  A caller producing a fresh invalid value on every call — a template rendering
+  to garbage — would otherwise grow the counter dict and the *persisted* issue
+  registry without bound. Past the cap, no new per-value issue is raised and a
+  single aggregated `invalid_service_calls_many` stands for the rest.
+- **Bounded arithmetic on `silence(minutes:)`.** `MIN_SILENCE_MINUTES ≤ minutes
+  ≤ MAX_SILENCE_MINUTES` (1 … 1440) is enforced in the handler. The lower bound
+  is ADR-0016's rule; the upper one exists because
+  `dt_util.utcnow() + timedelta(minutes=...)` raises `OverflowError` — a plain
+  `Exception`, not a `HomeAssistantError` — once the result leaves `datetime`'s
+  range, which would reach the caller as a crash rather than as the translated
+  refusal ADR-0015 promises.
+- **The caller's context is carried, but not into the authorisation.**
+  `alert.turn_off` gets a **child** of the caller's `Context`, not the caller's
+  own: a non-empty `context.user_id` on an entity service call makes
+  `homeassistant/helpers/service.py` run an auth lookup and a per-entity
+  permission check, which would put the row's `allow_acknowledge` allow-list
+  behind whatever entity policy the calling account has. The logbook resolves
+  the parent context for attribution
+  (`homeassistant/components/logbook/processor.py`). The
+  `event.switchboard_delivery` entity, whose state write runs no permission
+  check, gets the caller's context directly.
+- **The five services are callable by any user, on purpose.** The wall tablet
+  runs under a non-admin account and its cards are the main caller; the
+  allow-list, not the caller's role, is what bounds them. See the addendum to
+  ADR-0016 and `docs/known-issues.md`.
 
 ### The two silence sources
 
@@ -179,7 +219,9 @@ Night deferral is deliberately **not** extended to temporary silence: a
 message silenced only by a `notify_switchboard.silence` is dropped, because
 `wake_time` is the end of the *night*, not the end of an hour of requested
 quiet. When a configured night silence is also active, the message is deferred
-as before — nothing is lost.
+as before — nothing is lost. A temporary silence still running when that
+deferral comes due holds it back (both sources are read at flush time), and the
+flush is then re-armed for the end of the silence.
 
 ### Per-row texts and the template context
 

@@ -23,8 +23,10 @@
         "description": "Add the people this house notifies, then one target per alert. Each target becomes a notify.switchboard_[slug] service you can list under an alert's notifiers.",
         "menu_options": {
           "person": "Add or update a person",
+          "edit_person": "Edit a person",
           "remove_person": "Remove a person",
           "target": "Add or update a target",
+          "edit_target": "Edit a target",
           "remove_target": "Remove a target",
           "general": "Default target"
         }
@@ -43,6 +45,13 @@
           "outputs": "Notify service names without the notify. prefix, for example mobile_app_alice. A service that does not exist yet is tolerated and retried.",
           "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor.",
           "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+        }
+      },
+      "edit_person": {
+        "title": "Edit a person",
+        "description": "Pick the person to edit. The form opens on their stored settings.",
+        "data": {
+          "entity_id": "Person"
         }
       },
       "remove_person": {
@@ -90,6 +99,13 @@
           "default_title": "Title used when the caller gives none, and for every message observer mode sends."
         }
       },
+      "edit_target": {
+        "title": "Edit a target",
+        "description": "Pick the routing-table row to edit. The form opens on its stored settings.",
+        "data": {
+          "slug": "Target"
+        }
+      },
       "remove_target": {
         "title": "Remove a target",
         "data": {
@@ -129,6 +145,7 @@
     },
     "abort": {
       "nothing_to_remove": "There is nothing to remove yet.",
+      "nothing_to_edit": "There is nothing to edit yet.",
       "nothing_to_configure": "Add a target first."
     }
   },
@@ -148,6 +165,10 @@
     "invalid_service_person": {
       "title": "A card or script keeps naming an unusable person",
       "description": "A notify_switchboard service has been refused several times for {value}, who is either not in the table or not in the target's audience. Fix the caller, or add that person to the table or to the audience."
+    },
+    "invalid_service_calls_many": {
+      "title": "A card or script keeps calling with values that do not exist",
+      "description": "notify_switchboard services have now been refused for more than {count} different targets or persons. Rather than one warning per value, this single issue stands for all of them. Something is generating names that are not in the routing table — most often a template that renders to the wrong thing. Fix the caller; this warning goes away when the integration is reloaded."
     }
   },
   "exceptions": {
@@ -167,7 +188,7 @@
       "message": "{person} is not in the audience of the target {target}."
     },
     "invalid_silence_minutes": {
-      "message": "A silence lasts at least one minute; {minutes} is not a duration."
+      "message": "A silence lasts between {min} and {max} minutes; {minutes} is neither."
     },
     "no_audience": {
       "message": "The target {target} has nobody in its audience."
@@ -226,7 +247,7 @@
         },
         "minutes": {
           "name": "Minutes",
-          "description": "How long the silence lasts, at least one minute."
+          "description": "How long the silence lasts: from 1 minute to 1440 (a day)."
         }
       }
     },

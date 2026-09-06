@@ -23,8 +23,10 @@
         "description": "Añade a las personas a las que avisa la casa y luego un destino por alerta. Cada destino se convierte en un servicio notify.switchboard_[slug] que puedes indicar en los notifiers de una alerta.",
         "menu_options": {
           "person": "Añadir o modificar una persona",
+          "edit_person": "Editar una persona",
           "remove_person": "Eliminar una persona",
           "target": "Añadir o modificar un destino",
+          "edit_target": "Editar un destino",
           "remove_target": "Eliminar un destino",
           "general": "Destino predeterminado"
         }
@@ -43,6 +45,13 @@
           "outputs": "Nombres de servicios notify sin el prefijo notify., por ejemplo mobile_app_alice. Un servicio que aún no existe se tolera y se reintenta.",
           "silence_entities": "Cualquier entidad cuyo estado on signifique silencio: un schedule, un input_boolean, un sensor binario.",
           "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse."
+        }
+      },
+      "edit_person": {
+        "title": "Editar una persona",
+        "description": "Elige la persona que quieres editar. El formulario se abre con sus ajustes guardados.",
+        "data": {
+          "entity_id": "Persona"
         }
       },
       "remove_person": {
@@ -90,6 +99,13 @@
           "default_title": "Título usado cuando quien llama no da ninguno, y para todos los mensajes que envía el modo observador."
         }
       },
+      "edit_target": {
+        "title": "Editar un destino",
+        "description": "Elige la fila de la tabla de enrutamiento que quieres editar. El formulario se abre con sus ajustes guardados.",
+        "data": {
+          "slug": "Destino"
+        }
+      },
       "remove_target": {
         "title": "Eliminar un destino",
         "data": {
@@ -129,6 +145,7 @@
     },
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",
+      "nothing_to_edit": "Todavía no hay nada que editar.",
       "nothing_to_configure": "Añade primero un destino."
     }
   },
@@ -148,6 +165,10 @@
     "invalid_service_person": {
       "title": "Una tarjeta o un script nombra sin parar a una persona inutilizable",
       "description": "Un servicio notify_switchboard ha sido rechazado varias veces para {value}, que no está en la tabla o no está en la audiencia del destino. Corrige a quien llama, o añade a esa persona a la tabla o a la audiencia."
+    },
+    "invalid_service_calls_many": {
+      "title": "Una tarjeta o un script llama sin parar con valores que no existen",
+      "description": "Los servicios notify_switchboard se han rechazado ya para más de {count} destinos o personas distintos. En lugar de un aviso por valor, este único problema los representa a todos. Algo está generando nombres que no están en la tabla de enrutamiento — casi siempre una plantilla que no renderiza lo que se cree. Corrige a quien llama; este aviso desaparece al recargar la integración."
     }
   },
   "exceptions": {
@@ -167,7 +188,7 @@
       "message": "{person} no está en la audiencia del destino {target}."
     },
     "invalid_silence_minutes": {
-      "message": "Un silencio dura al menos un minuto; {minutes} no es una duración."
+      "message": "Un silencio dura entre {min} y {max} minutos; {minutes} no es ninguno de los dos."
     },
     "no_audience": {
       "message": "El destino {target} no tiene a nadie en su audiencia."
@@ -226,7 +247,7 @@
         },
         "minutes": {
           "name": "Minutos",
-          "description": "Duración del silencio, al menos un minuto."
+          "description": "Duración del silencio: de 1 minuto a 1440 (un día)."
         }
       }
     },

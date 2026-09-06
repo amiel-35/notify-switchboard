@@ -84,6 +84,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         """Start from an empty working copy; it is filled on the first step."""
         self._options: dict[str, Any] = {}
+        # Set by `edit_person` / `edit_target` so the form that follows opens
+        # on the stored row instead of on an empty one.
+        self._editing_person: str | None = None
+        self._editing_slug: str | None = None
 
     # ------------------------------------------------------------------
     # Helpers
@@ -130,12 +134,52 @@ class SwitchboardOptionsFlow(OptionsFlow):
             step_id="init",
             menu_options=[
                 "person",
+                "edit_person",
                 "remove_person",
                 "target",
+                "edit_target",
                 "remove_target",
                 "general",
             ],
         )
+
+    # ------------------------------------------------------------------
+    # Pre-filling an existing row
+    # ------------------------------------------------------------------
+
+    def _suggested_person(self) -> dict[str, Any] | None:
+        """Return the stored values of the person row being edited."""
+        if self._editing_person is None:
+            return None
+        for row in self._persons:
+            if row["entity_id"] == self._editing_person:
+                return {
+                    key: value for key, value in row.items() if value not in (None, [])
+                }
+        return None
+
+    def _suggested_target(self) -> dict[str, Any] | None:
+        """Return the stored values of the target row being edited.
+
+        `snooze_minutes` is stored as a list of integers but edited as the
+        comma-separated text `parse_snooze_minutes` reads back, so it is
+        rendered here rather than handed over raw — a suggested value is put
+        straight into the field the user sees.
+        """
+        if self._editing_slug is None:
+            return None
+        for row in self._targets:
+            if row[CONF_SLUG] != self._editing_slug:
+                continue
+            suggested = {
+                key: value for key, value in row.items() if value not in (None, [])
+            }
+            suggested[CONF_AUDIENCE] = list(row.get(CONF_AUDIENCE) or [])
+            suggested[CONF_SNOOZE_MINUTES] = ", ".join(
+                str(minutes) for minutes in row.get(CONF_SNOOZE_MINUTES) or []
+            )
+            return suggested
+        return None
 
     # ------------------------------------------------------------------
     # Persons
@@ -195,7 +239,42 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="person", data_schema=schema, errors=errors)
+        # Whatever the user last typed comes back on a validation error, and an
+        # `edit_person` opens the stored row: an options form that forgets the
+        # values it is about to overwrite makes editing one field mean retyping
+        # all of them.
+        return self.async_show_form(
+            step_id="person",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input if user_input is not None else self._suggested_person(),
+            ),
+            errors=errors,
+        )
+
+    async def async_step_edit_person(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick which person to edit, then open the person form pre-filled."""
+        self._load()
+        persons = self._persons
+        if not persons:
+            return self.async_abort(reason="nothing_to_edit")
+
+        if user_input is not None:
+            self._editing_person = user_input["entity_id"]
+            return await self.async_step_person()
+
+        schema = vol.Schema(
+            {
+                vol.Required("entity_id"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[row["entity_id"] for row in persons]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_person", data_schema=schema)
 
     async def async_step_remove_person(
         self, user_input: dict[str, Any] | None = None
@@ -338,7 +417,42 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="target", data_schema=schema, errors=errors)
+        # Same reasoning as `person`: the three v0.2 texts (`message`,
+        # `done_message`, `default_title`) are exactly the fields somebody
+        # comes back to tweak, and every other field of the row would otherwise
+        # have to be retyped alongside them or be silently reset to its default.
+        return self.async_show_form(
+            step_id="target",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input if user_input is not None else self._suggested_target(),
+            ),
+            errors=errors,
+        )
+
+    async def async_step_edit_target(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick which routing-table row to edit, then open it pre-filled."""
+        self._load()
+        targets = self._targets
+        if not targets:
+            return self.async_abort(reason="nothing_to_edit")
+
+        if user_input is not None:
+            self._editing_slug = user_input[CONF_SLUG]
+            return await self.async_step_target()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SLUG): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[row[CONF_SLUG] for row in targets]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_target", data_schema=schema)
 
     async def async_step_remove_target(
         self, user_input: dict[str, Any] | None = None
