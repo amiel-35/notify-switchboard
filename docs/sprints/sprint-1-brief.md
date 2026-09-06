@@ -95,3 +95,13 @@ All acceptance tests green unmodified; your own unit tests for `router.py`
 updated; `docs/ARCHITECTURE.md` updated where behaviour was decided; PR
 description lists every core API used with its file path in the core clone.
 Work on branch `feat/s1-router`; commit conventionally; do not merge.
+
+## Lessons from neighbouring projects (see `docs/research/`, French)
+
+- Slugs: normalise with `homeassistant.util.slugify`, reject collisions in the flow; test accents and apostrophes.
+- Nothing in RAM only: snoozes, deferrals, tag de-duplication go through `Store`.
+- Never touch the recorder database directly.
+- A message outside its window is never lost: deferred, or counted as a drop with a reason.
+- No custom panel; config flow + options flow only. Validate the full schema before writing options (concurrent edits).
+- i18n from v0.1 (`en`, `fr`, `es`).
+- Keep the door open for a "script" output later (a `notify` group or a notify facade of a script) — a frequent request elsewhere; do not implement now.
