@@ -50,6 +50,7 @@ from .const import (
     ACTION_ACKNOWLEDGE,
     ATTR_ACTIONS,
     ATTR_AUTHENTICATION_REQUIRED,
+    ATTR_USER_ID,
     AUTHENTICATED_PRIORITIES,
     COMPANION_OUTPUT_PREFIX,
     DELIVERY_EVENT_TYPES,
@@ -540,6 +541,26 @@ class Switchboard:
                 target, action.minutes, event.data.get("device_id"), user_id
             )
 
+    def _person_for_user_id(self, user_id: str | None) -> str | None:
+        """Return the `person.*` whose `user_id` attribute is `user_id`.
+
+        `mobile_app` re-fires a Companion action with the registration's own
+        context (`homeassistant/components/mobile_app/webhook.py`,
+        `webhook_fire_event` -> `context=registration_context(config_entry.data)`,
+        which is `Context(user_id=registration[CONF_USER_ID])` in
+        `mobile_app/helpers.py`), and a person entity exposes the user it is
+        linked to as a state attribute (`homeassistant/components/person/
+        __init__.py`, `PersonEntityStateAttribute.USER_ID`). That pair is a
+        far stronger signal than any name-based device match.
+        """
+        if not user_id:
+            return None
+        for entity_id in self.table.persons:
+            state = self.hass.states.get(entity_id)
+            if state is not None and state.attributes.get(ATTR_USER_ID) == user_id:
+                return entity_id
+        return None
+
     async def _async_acknowledge(
         self, target: TargetConfig, user_id: str | None
     ) -> None:
@@ -577,7 +598,7 @@ class Switchboard:
         user_id: str | None,
     ) -> None:
         """Store a snooze for (person, target) with an expiry."""
-        persons = self._resolve_persons(target, device_id)
+        persons = self._resolve_persons(target, device_id, user_id)
         if not persons:
             _LOGGER.warning(
                 "Snooze for %s ignored: no person in the audience (user_id=%s)",
@@ -603,20 +624,31 @@ class Switchboard:
         )
         self._async_notify_entities()
 
-    def _resolve_persons(self, target: TargetConfig, device_id: Any) -> list[str]:
+    def _resolve_persons(
+        self, target: TargetConfig, device_id: Any, user_id: str | None = None
+    ) -> list[str]:
         """Resolve the acting person, falling back to the row's audience.
 
-        The `device_id` in a Companion event is the mobile_app registration id;
-        it is matched against the device registry, then against the notify
-        service name a person lists as an output. When that fails (the
-        documented ambiguous case, brief item 6), every person in the row's
-        audience is snoozed.
+        Three paths, strongest first (brief item 6):
+
+        1. `event.context.user_id` -> the `person.*` linked to that Home
+           Assistant user. Companion actions arrive with the registration's
+           context, so this is authoritative when the person is linked.
+        2. The `device_id` in the event, looked up in the device registry and
+           turned into the `mobile_app_<name>` service name a person lists as
+           an output.
+        3. The documented ambiguous case: snooze every person in the row's
+           audience and log it.
         """
         known = [
             person_id
             for person_id in target.audience
             if person_id in self.table.persons
         ]
+
+        if (owner := self._person_for_user_id(user_id)) is not None and owner in known:
+            return [owner]
+
         if not isinstance(device_id, str) or not device_id:
             return known
 
@@ -628,17 +660,16 @@ class Switchboard:
             return known
 
         candidates: set[str] = set()
-        if device.name:
-            candidates.add(f"{COMPANION_OUTPUT_PREFIX}{slugify(device.name)}")
-        if device.name_by_user:
-            candidates.add(f"{COMPANION_OUTPUT_PREFIX}{slugify(device.name_by_user)}")
+        for name in (device.name, device.name_by_user):
+            if name:
+                candidates.add(companion_service_name(name))
         for entry_id in device.config_entries:
             entry = self.hass.config_entries.async_get_entry(entry_id)
             if entry is None or entry.domain != MOBILE_APP_DOMAIN:
                 continue
             name = entry.data.get("device_name")
             if name:
-                candidates.add(f"{COMPANION_OUTPUT_PREFIX}{slugify(str(name))}")
+                candidates.add(companion_service_name(str(name)))
 
         for candidate in candidates:
             person = self.table.person_for_output(candidate)
@@ -792,6 +823,20 @@ class Switchboard:
             translation_key="missing_output",
             translation_placeholders={"output": output},
         )
+
+
+def companion_service_name(device_name: str) -> str:
+    """Return the legacy notify service name `mobile_app` gives a device.
+
+    Core slugifies the *whole* `<prefix>_<target>` string
+    (`homeassistant/components/notify/legacy.py`,
+    `BaseNotificationService.async_register_services`:
+    `slugify(f"{self._target_service_name_prefix}_{name}")`), so a device
+    called "Alice's iPhone" becomes `mobile_app_alice_s_iphone`, not
+    `mobile_app_` + a separately slugified tail. Composing it any other way
+    silently fails to match on names ending in a separator.
+    """
+    return slugify(f"{COMPANION_OUTPUT_PREFIX}{device_name}")
 
 
 def next_wake_time(local_now: datetime, wake: Any) -> datetime:

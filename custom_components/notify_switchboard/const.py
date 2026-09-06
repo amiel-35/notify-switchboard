@@ -61,6 +61,12 @@ ATTR_AUTHENTICATION_REQUIRED: Final = "authenticationRequired"
 # Attribute of `sensor.switchboard_dropped_today`.
 ATTR_REASONS: Final = "reasons"
 
+# State attribute of a `person.*` entity holding the Home Assistant user it is
+# linked to (`homeassistant/components/person/const.py`,
+# `PersonEntityStateAttribute.USER_ID`). Spelled out here rather than imported
+# so the integration keeps no dependency on the `person` component.
+ATTR_USER_ID: Final = "user_id"
+
 # ---------------------------------------------------------------------------
 # Priorities
 # ---------------------------------------------------------------------------

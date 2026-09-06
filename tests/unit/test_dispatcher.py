@@ -10,7 +10,7 @@ import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
@@ -576,6 +576,85 @@ async def test_migration_is_a_no_op_at_version_1(hass: HomeAssistant) -> None:
     future = MockConfigEntry(domain=DOMAIN, version=2, minor_version=1, options={})
     future.add_to_hass(hass)
     assert await async_migrate_entry(hass, future) is False
+
+
+async def test_snooze_resolves_the_acting_person_from_the_context_user_id(
+    hass: HomeAssistant,
+) -> None:
+    """`context.user_id` beats every other clue: only that person is snoozed.
+
+    `mobile_app` re-fires the Companion action with
+    `context=registration_context(config_entry.data)`
+    (`homeassistant/components/mobile_app/webhook.py`), and a person exposes
+    the user it is linked to as a `user_id` attribute
+    (`homeassistant/components/person/const.py`).
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home", {"user_id": "user-alice"})
+    hass.states.async_set("person.bob", "home", {"user_id": "user-bob"})
+
+    entry = await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [
+            make_target(
+                "leak", audience=["person.alice", "person.bob"], snooze_minutes=[30]
+            )
+        ],
+        "leak",
+    )
+
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        # No device_id at all: the user id is enough.
+        {"action": "switchboard:snooze:leak:30"},
+        context=Context(user_id="user-bob"),
+    )
+    await hass.async_block_till_done()
+
+    assert list(entry.runtime_data.switchboard.store.snoozes) == [
+        ("person.bob", "leak")
+    ]
+
+
+async def test_snooze_falls_back_when_no_person_matches_the_user_id(
+    hass: HomeAssistant,
+) -> None:
+    """An unlinked user id resolves nothing and the audience is snoozed."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home", {"user_id": "user-alice"})
+    hass.states.async_set("person.bob", "home")
+
+    entry = await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [
+            make_target(
+                "leak", audience=["person.alice", "person.bob"], snooze_minutes=[30]
+            )
+        ],
+        "leak",
+    )
+
+    hass.bus.async_fire(
+        "mobile_app_notification_action",
+        {"action": "switchboard:snooze:leak:30"},
+        context=Context(user_id="nobody-here"),
+    )
+    await hass.async_block_till_done()
+
+    assert sorted(entry.runtime_data.switchboard.store.snoozes) == [
+        ("person.alice", "leak"),
+        ("person.bob", "leak"),
+    ]
 
 
 async def test_snooze_resolves_the_acting_person_from_the_device_registry(
