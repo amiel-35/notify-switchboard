@@ -1,0 +1,85 @@
+blueprint:
+  name: "Notify Switchboard: appliance cycle finished"
+  description: >-
+    A washing machine, dishwasher, or dryer's "running" binary_sensor going
+    from on to off is a one-off fact, not a lasting condition — an
+    information, not an `alert:` (doctrine.md §2.2). This blueprint sends
+    that information through Notify Switchboard's per-target service
+    (`notify.switchboard_<target>`, docs/contract.md), with `data.source_entity`
+    set to the appliance's running sensor.
+  domain: automation
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/blueprints/automation/notify_switchboard/cycle_finished_information.yaml
+  input:
+    cycle_entity:
+      name: Appliance "running" sensor
+      description: >-
+        A binary_sensor (or any entity) that is "on" while the appliance runs
+        and "off" once its cycle is finished.
+      selector:
+        entity:
+          filter:
+            domain: binary_sensor
+    target_slug:
+      name: Switchboard target slug
+      description: >-
+        The `slug` of the Notify Switchboard routing-table row to notify.
+        The service called is `notify.switchboard_<slug>`.
+      selector:
+        text: {}
+    message:
+      name: Message
+      description: The notification text.
+      default: "{{ trigger.to_state.name }} has finished."
+      selector:
+        template: {}
+    title:
+      name: Title (optional)
+      default: ""
+      selector:
+        text: {}
+    priority:
+      name: Priority
+      default: info
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: info
+              label: Info
+            - value: normal
+              label: Normal
+            - value: high
+              label: High
+            - value: critical
+              label: Critical
+    tag:
+      name: Tag (optional)
+      description: >-
+        Passed through as `data.tag`, used by Notify Switchboard for
+        de-duplication (docs/contract.md). Leave empty if you do not need it.
+      default: ""
+      selector:
+        text: {}
+
+mode: queued
+max: 10
+
+variables:
+  target_slug: !input target_slug
+  cycle_tag: !input tag
+
+triggers:
+  - trigger: state
+    entity_id: !input cycle_entity
+    from: "on"
+    to: "off"
+
+actions:
+  - action: "notify.switchboard_{{ target_slug }}"
+    data:
+      message: !input message
+      title: !input title
+      data:
+        priority: !input priority
+        source_entity: !input cycle_entity
+        tag: "{{ cycle_tag }}"

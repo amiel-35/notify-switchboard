@@ -1,0 +1,79 @@
+# Notify Switchboard — example: persistent "source unavailable" alert (ADR-013).
+#
+# This is the *persistent* variant of the source-unavailability watchdog: an
+# `alert:` that stays on (repeats, can be acknowledged, has a done_message)
+# for as long as at least one of the watched entities is unavailable/unknown.
+# For a one-off "it went unavailable" notification instead, use the
+# `source_unavailable_watchdog` blueprint
+# (blueprints/automation/notify_switchboard/source_unavailable_watchdog.yaml).
+#
+# Since `alert:` can only watch ONE entity/state pair, and we want to watch
+# several source entities at once (the KLIPPBOK case: several sensors can
+# each go silent independently), the pattern is:
+#   1. a template `binary_sensor` that is "on" whenever ANY watched entity has
+#      been unavailable/unknown for more than N minutes (the templating and
+#      `delay_on` fields below are verified against
+#      `homeassistant/components/template/binary_sensor.py` in Home Assistant
+#      core);
+#   2. a normal `alert:` that watches that single binary_sensor, exactly like
+#      docs/examples/alert_leak.yaml.
+#
+# Replace the entity list and the 15-minute threshold with your own sources
+# and tolerance.
+
+template:
+  - binary_sensor:
+      - name: "Any watched source unavailable"
+        unique_id: notify_switchboard_example_source_unavailable
+        device_class: problem
+        # True the instant any watched entity is unavailable/unknown; the
+        # `delay_on` below is what turns this into "> 15 minutes", not this
+        # expression.
+        state: >-
+          {{ expand(
+               'sensor.rain_gauge',
+               'sensor.boiler_flow_temp',
+               'binary_sensor.mailbox'
+             ) | selectattr('state', 'in', ['unavailable', 'unknown']) | list | count > 0 }}
+        # Only turn "on" (and therefore only let the alert below start) once
+        # the condition above has held continuously for this long. A single
+        # restart or a few seconds of unavailability during a HA restart will
+        # not trigger it.
+        delay_on:
+          minutes: 15
+
+alert:
+  source_unavailable:
+    name: "A monitored source has gone silent"
+    entity_id: binary_sensor.any_watched_source_unavailable
+    # state: "on"                     # default
+    repeat:
+      - 60                            # re-notify hourly while still unavailable
+    can_acknowledge: true
+    skip_first: false
+    message: >-
+      At least one monitored sensor has been unavailable or unknown for more
+      than 15 minutes. Check Settings -> Devices & services for the affected
+      device.
+    done_message: "All monitored sources are reporting again."
+    title: "Source unavailable"
+    notifiers:
+      - switchboard_source_unavailable   # -> notify.switchboard_source_unavailable
+
+# Matching routing-table row:
+#
+# | Field             | Value                                    |
+# |--------------------|------------------------------------------|
+# | slug               | source_unavailable                        |
+# | alert_entity       | alert.source_unavailable                  |
+# | audience           | whoever is responsible for the HA install (e.g. person.alice) |
+# | snooze_minutes     | [60, 240]                                  |
+# | allow_acknowledge  | true                                      |
+#
+# `data.source_entity` is not available here: unlike the blueprint, `alert:`
+# has no per-firing dynamic attribute to name *which* entity went unavailable
+# (see the "Contract ambiguities" note in tests/acceptance/README.md — a real
+# `alert.*` entity exposes no extra_state_attributes). If naming the specific
+# entity in the notification matters more than a single persistent alert,
+# use the `source_unavailable_watchdog` blueprint instead, which fires once
+# per entity and sets `data.source_entity` accordingly.
