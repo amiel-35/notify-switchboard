@@ -48,7 +48,7 @@ Setup takes no input. Then open the integration's options to set the
 **default targets**: a comma-separated list of notify service names, e.g.
 
 ```
-notify.mobile_app_amiel, notify.persistent_notification
+notify.mobile_app_maintainer, notify.persistent_notification
 ```
 
 ## Removal
@@ -65,4 +65,4 @@ pass-through.
 
 ## License
 
-[MIT](LICENSE) © 2026 Amiel Lavon
+[MIT](LICENSE) © 2026 the maintainer

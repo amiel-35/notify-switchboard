@@ -3,8 +3,8 @@
 > For the coding agent. English. You receive: this brief, `docs/ARCHITECTURE.md`,
 > `docs/contract.md`, the ADRs, the acceptance tests (already in `tests/acceptance/`,
 > currently failing), and a local clone of Home Assistant core 2026.9.1 at
-> `/Users/amiellavon/Projets/_ref/home-assistant-core`. Python/tooling venv:
-> `/Users/amiellavon/Projets/_ref/venv-ha-2026.9`. You never touch the dev HA
+> `$HA_CORE_SRC`. Python/tooling venv: `$VENV`. The orchestrator provides both
+> paths before the sprint starts. You never touch the dev HA
 > instance, `.github/workflows`, or `docs/contract.md`.
 
 ## Goal

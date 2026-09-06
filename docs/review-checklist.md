@@ -12,7 +12,7 @@ everything else is a finding (blocking or accepted).
 - [ ] Voice adapters not wired to any alert by default in examples or blueprints.
 
 ## B. Home Assistant API correctness (hallucination guard)
-- [ ] Every core API used is cited with a path in `/Users/amiellavon/Projets/_ref/home-assistant-core` (2026.9.1) in the PR description; spot-check at least three.
+- [ ] Every core API used is cited with a path in `$HA_CORE_SRC` (2026.9.1) in the PR description; spot-check at least three.
 - [ ] Legacy notify platform: `async_get_service` signature, `BaseNotificationService.async_send_message(message, **kwargs)`, `targets` property returning a mapping.
 - [ ] `NotifyEntity` used only with `message`/`title`; no invented kwargs.
 - [ ] `ConfigEntry.runtime_data` typed; `async_forward_entry_setups` / `async_unload_platforms` paired.
