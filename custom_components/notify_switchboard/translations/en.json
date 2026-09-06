@@ -132,8 +132,8 @@
       "description": "Something called notify.switchboard with the target {slug}, which is not in the routing table. The message was dropped. Add the target, or fix the caller."
     },
     "missing_output": {
-      "title": "Notify service missing",
-      "description": "The notify service {output} has been missing for several notifications in a row. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
+      "title": "Notify service unusable",
+      "description": "The notify service {output} has failed for several notifications in a row: it does not exist, or every call to it raised. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
     }
   }
 }

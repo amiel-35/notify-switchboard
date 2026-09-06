@@ -56,6 +56,7 @@ from .const import (
     DELIVERY_EVENT_TYPES,
     DIAGNOSTICS_DECISION_LOG_SIZE,
     DOMAIN,
+    DROP_DELIVERY_FAILED,
     DROP_SILENCED,
     DROP_UNKNOWN_TARGET,
     EVENT_MOBILE_APP_NOTIFICATION_ACTION,
@@ -126,7 +127,9 @@ class Switchboard:
 
         self._unsubs: list[CALLBACK_TYPE] = []
         self._deferral_unsubs: dict[str, CALLBACK_TYPE] = {}
-        self.missing_outputs: dict[str, int] = {}
+        # Consecutive failures per output service: a service that does not
+        # exist and one that keeps raising both count here.
+        self.failing_outputs: dict[str, int] = {}
         self._reported_unknown_targets: set[str] = set()
         self._labels: dict[str, str] | None = None
 
@@ -337,6 +340,14 @@ class Switchboard:
             ):
                 delivered = True
 
+        if not delivered:
+            # Every output of this person failed or does not exist: the
+            # message reached nobody, so it is a drop, not a delivery.
+            # Counting it as routed would make the daily figure a count of
+            # *intentions* rather than of notifications that went out.
+            self._async_count_drop(DROP_DELIVERY_FAILED, routed.person, routed.slug)
+            return
+
         self.routed_today += 1
         self.last_notification[routed.person] = dt_util.utcnow()
         self._async_fire_delivery_event(
@@ -345,7 +356,7 @@ class Switchboard:
                 "person": routed.person,
                 "target": routed.slug,
                 "priority": routed.priority,
-                "delivered": delivered,
+                "delivered": True,
             },
         )
 
@@ -384,18 +395,13 @@ class Switchboard:
         domain = domain or NOTIFY_DOMAIN
 
         if not self.hass.services.has_service(domain, service):
-            misses = self.missing_outputs.get(output, 0) + 1
-            self.missing_outputs[output] = misses
-            if misses > MAX_CONSECUTIVE_OUTPUT_MISSES:
-                self._async_report_missing_output(output)
+            self._async_record_output_failure(output)
             _LOGGER.warning(
                 "Output %s.%s does not exist (yet); will retry on the next call",
                 domain,
                 service,
             )
             return False
-
-        self.missing_outputs.pop(output, None)
 
         service_data: dict[str, Any] = {"message": message}
         if title is not None:
@@ -416,6 +422,7 @@ class Switchboard:
             _LOGGER.error(
                 "Output %s.%s failed for target %s: %s", domain, service, slug, err
             )
+            self._async_record_output_failure(output)
             return False
         except Exception:  # noqa: BLE001 - an output must never break the others
             _LOGGER.exception(
@@ -424,8 +431,26 @@ class Switchboard:
                 service,
                 slug,
             )
+            self._async_record_output_failure(output)
             return False
+
+        self.failing_outputs.pop(output, None)
         return True
+
+    @callback
+    def _async_record_output_failure(self, output: str) -> None:
+        """Count one consecutive failure of an output and repair if durable.
+
+        An output that exists but keeps raising is exactly as useless as one
+        that does not exist, so both feed the same counter and the same
+        `repairs` issue: tolerated `MAX_CONSECUTIVE_OUTPUT_MISSES` times (load
+        order, a transient push error), reported on the next one. Any success
+        clears the counter.
+        """
+        failures = self.failing_outputs.get(output, 0) + 1
+        self.failing_outputs[output] = failures
+        if failures > MAX_CONSECUTIVE_OUTPUT_MISSES:
+            self._async_report_missing_output(output)
 
     # ------------------------------------------------------------------
     # Night deferral (brief item 7)

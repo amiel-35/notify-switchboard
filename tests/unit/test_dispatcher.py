@@ -11,6 +11,7 @@ import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
 from homeassistant.core import Context, HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
@@ -137,9 +138,13 @@ async def test_missing_output_is_tolerated_then_repaired(hass: HomeAssistant) ->
     await hass.async_block_till_done()
     assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
 
-    # The output is still counted as routed: the decision was to route it.
-    assert hass.states.get("sensor.switchboard_routed_today").state == "4"
-    assert entry.runtime_data.switchboard.missing_outputs["mobile_app_ghost"] == 4
+    # Nothing was ever delivered, so nothing is counted as routed: the four
+    # calls are four `delivery_failed` drops.
+    assert hass.states.get("sensor.switchboard_routed_today").state == "0"
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.state == "4"
+    assert dropped.attributes["reasons"] == {"delivery_failed": 4}
+    assert entry.runtime_data.switchboard.failing_outputs["mobile_app_ghost"] == 4
 
 
 async def test_output_reappearing_clears_the_miss_counter(
@@ -157,7 +162,7 @@ async def test_output_reappearing_clears_the_miss_counter(
         "notify", "switchboard_leak", {"message": "m"}, blocking=True
     )
     await hass.async_block_till_done()
-    assert entry.runtime_data.switchboard.missing_outputs == {"mobile_app_late": 1}
+    assert entry.runtime_data.switchboard.failing_outputs == {"mobile_app_late": 1}
 
     calls = async_mock_service(hass, "notify", "mobile_app_late")
     await hass.services.async_call(
@@ -165,7 +170,7 @@ async def test_output_reappearing_clears_the_miss_counter(
     )
     await hass.async_block_till_done()
     assert len(calls) == 1
-    assert entry.runtime_data.switchboard.missing_outputs == {}
+    assert entry.runtime_data.switchboard.failing_outputs == {}
 
 
 async def test_output_written_with_the_notify_prefix_is_equivalent(
@@ -803,15 +808,19 @@ async def test_unknown_target_repair_is_raised_once(hass: HomeAssistant) -> None
     assert dropped.attributes["reasons"] == {"unknown_target": 2}
 
 
-async def test_a_failing_output_is_logged_and_the_delivery_still_counts(
+async def test_a_failing_output_is_logged_and_counted_as_a_drop(
     hass: HomeAssistant,
 ) -> None:
-    """An unexpected exception from an output cannot break the router."""
+    """An unexpected exception from an output cannot break the router.
+
+    It is also not a delivery: nobody received anything, so it is a
+    `delivery_failed` drop rather than a routed notification.
+    """
     async_mock_service(
         hass, "notify", "mobile_app_alice", raise_exception=RuntimeError("boom")
     )
     hass.states.async_set("person.alice", "home")
-    await install(
+    entry = await install(
         hass,
         [make_person("person.alice", ["mobile_app_alice"])],
         [make_target("leak")],
@@ -821,4 +830,93 @@ async def test_a_failing_output_is_logged_and_the_delivery_still_counts(
         "notify", "switchboard_leak", {"message": "m"}, blocking=True
     )
     await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.switchboard_routed_today").state == "0"
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.state == "1"
+    assert dropped.attributes["reasons"] == {"delivery_failed": 1}
+    assert entry.runtime_data.switchboard.failing_outputs == {"mobile_app_alice": 1}
+
+
+async def test_an_output_that_keeps_raising_raises_the_repair(
+    hass: HomeAssistant,
+) -> None:
+    """An output that exists but always fails is repaired like a missing one."""
+    async_mock_service(
+        hass,
+        "notify",
+        "mobile_app_alice",
+        raise_exception=HomeAssistantError("push refused"),
+    )
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+
+    for _ in range(3):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_alice") not in registry.issues
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_alice") in registry.issues
+    assert entry.runtime_data.switchboard.failing_outputs["mobile_app_alice"] == 4
+
+
+async def test_a_successful_call_clears_the_failure_counter(
+    hass: HomeAssistant,
+) -> None:
+    """One delivery that works resets the consecutive-failure count."""
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_flaky"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data.switchboard.failing_outputs == {"mobile_app_flaky": 1}
+
+    async_mock_service(hass, "notify", "mobile_app_flaky")
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data.switchboard.failing_outputs == {}
+
+
+async def test_one_working_output_out_of_two_is_still_a_delivery(
+    hass: HomeAssistant,
+) -> None:
+    """`delivered` is False only when *every* output of a person failed."""
+    async_mock_service(
+        hass, "notify", "mobile_app_alice", raise_exception=HomeAssistantError("boom")
+    )
+    ok = async_mock_service(hass, "notify", "telegram_family")
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice", "telegram_family"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert len(ok) == 1
     assert hass.states.get("sensor.switchboard_routed_today").state == "1"
+    assert hass.states.get("sensor.switchboard_dropped_today").state == "0"

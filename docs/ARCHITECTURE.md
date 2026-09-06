@@ -110,8 +110,15 @@ Decisions taken in Sprint 1, where the contract left room:
   user may reasonably write behave identically for person resolution, for
   Companion-button gating and for the recursion check.
 - **An output that does not exist is tolerated three times** (load order) and
-  raises one `repairs` issue on the fourth consecutive miss. The counter is
-  cleared as soon as the service appears.
+  raises one `repairs` issue on the fourth consecutive miss. An output that
+  *does* exist but raises on every call feeds the same counter and the same
+  issue: from the user's point of view it is just as unusable. Any successful
+  call clears the counter (`Switchboard.failing_outputs`).
+- **A delivery where every output failed is a drop, not a routed message.**
+  `sensor.switchboard_routed_today` counts notifications that actually went
+  out; when no output of a person accepted the call, the reason
+  `delivery_failed` is counted on `sensor.switchboard_dropped_today` instead.
+  One working output out of several is still a delivery.
 
 ## Why both a legacy service and an entity
 

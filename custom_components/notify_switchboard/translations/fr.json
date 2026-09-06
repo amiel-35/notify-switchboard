@@ -132,8 +132,8 @@
       "description": "Quelque chose a appelé notify.switchboard avec la cible {slug}, qui n'est pas dans la table de routage. Le message a été écarté. Ajoutez la cible, ou corrigez l'appelant."
     },
     "missing_output": {
-      "title": "Service notify absent",
-      "description": "Le service notify {output} est absent depuis plusieurs notifications d'affilée. Les messages qui lui sont destinés sont perdus. Réparez le service, ou retirez-le des sorties de la personne."
+      "title": "Service notify inutilisable",
+      "description": "Le service notify {output} échoue depuis plusieurs notifications d'affilée : il n'existe pas, ou chaque appel a levé une erreur. Les messages qui lui sont destinés sont perdus. Réparez le service, ou retirez-le des sorties de la personne."
     }
   }
 }

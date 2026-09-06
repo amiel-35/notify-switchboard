@@ -132,8 +132,8 @@
       "description": "Algo ha llamado a notify.switchboard con el destino {slug}, que no está en la tabla de enrutamiento. El mensaje se descartó. Añade el destino o corrige a quien llama."
     },
     "missing_output": {
-      "title": "Falta el servicio notify",
-      "description": "El servicio notify {output} lleva varias notificaciones seguidas sin existir. Los mensajes dirigidos a él se pierden. Repara el servicio o quítalo de las salidas de la persona."
+      "title": "Servicio notify inutilizable",
+      "description": "El servicio notify {output} lleva varias notificaciones seguidas fallando: no existe, o todas las llamadas han dado error. Los mensajes dirigidos a él se pierden. Repara el servicio o quítalo de las salidas de la persona."
     }
   }
 }

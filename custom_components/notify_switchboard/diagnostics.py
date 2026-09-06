@@ -50,7 +50,7 @@ async def async_get_config_entry_diagnostics(
             async_redact_data(deferral.as_dict(), TO_REDACT)
             for deferral in switchboard.store.deferrals.values()
         ],
-        "missing_outputs": dict(switchboard.missing_outputs),
+        "failing_outputs": dict(switchboard.failing_outputs),
         "last_decisions": [
             async_redact_data(decision, TO_REDACT)
             for decision in switchboard.decision_log
