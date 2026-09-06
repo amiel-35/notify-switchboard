@@ -1,10 +1,15 @@
 {
   "title": "Notify Switchboard",
+  "common": {
+    "acknowledge": "Acknowledge",
+    "snooze_minutes": "Snooze {minutes} min",
+    "back_to_normal": "Back to normal"
+  },
   "config": {
     "step": {
       "user": {
         "title": "Set up Notify Switchboard",
-        "description": "Notify Switchboard is a proxy: it does not deliver notifications itself. After setup, use the options to choose which notify services it forwards to."
+        "description": "Notify Switchboard is a proxy: it never delivers a notification itself. Once it is set up, build the routing table from its options: people and their notify services first, then one target per alert."
       }
     },
     "abort": {
@@ -14,15 +19,121 @@
   "options": {
     "step": {
       "init": {
-        "title": "Notify Switchboard targets",
-        "description": "Choose the notify services that Notify Switchboard forwards messages to.",
+        "title": "Notify Switchboard",
+        "description": "Add the people this house notifies, then one target per alert. Each target becomes a notify.switchboard_<slug> service you can list under an alert's notifiers.",
+        "menu_options": {
+          "person": "Add or update a person",
+          "remove_person": "Remove a person",
+          "target": "Add or update a target",
+          "remove_target": "Remove a target",
+          "general": "Default target"
+        }
+      },
+      "person": {
+        "title": "Person",
+        "description": "Which notify services reach this person, and when they are silent.",
         "data": {
-          "default_targets": "Default targets"
+          "entity_id": "Person",
+          "outputs": "Notify services",
+          "silence_entities": "Silence entities",
+          "wake_time": "Wake time"
         },
         "data_description": {
-          "default_targets": "Comma-separated notify service names, e.g. notify.mobile_app_amiel, notify.persistent_notification"
+          "entity_id": "The person.* entity whose presence decides whether this person is notified.",
+          "outputs": "Notify service names without the notify. prefix, for example mobile_app_alice. A service that does not exist yet is tolerated and retried.",
+          "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor.",
+          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+        }
+      },
+      "remove_person": {
+        "title": "Remove a person",
+        "data": {
+          "entity_id": "Person"
+        },
+        "data_description": {
+          "entity_id": "The person is also removed from every target's audience."
+        }
+      },
+      "target": {
+        "title": "Target",
+        "description": "One row of the routing table. It becomes notify.switchboard_<slug>.",
+        "data": {
+          "slug": "Slug",
+          "name": "Name",
+          "class": "Class",
+          "default_priority": "Default priority",
+          "alert_entity": "Alert",
+          "audience": "Audience",
+          "presence_rule": "Presence rule",
+          "allow_acknowledge": "Allow acknowledgement",
+          "snooze_minutes": "Snooze durations",
+          "default_data": "Default data",
+          "observer_mode": "Observer mode"
+        },
+        "data_description": {
+          "slug": "Lowercase, no spaces. Renaming it breaks every alert that lists the old service.",
+          "name": "Shown to people, and used as the message in observer mode when the alert carries none.",
+          "class": "Free text used for grouping only, for example building or pets.",
+          "default_priority": "Only critical bypasses a person's silence and snoozes.",
+          "alert_entity": "The alert.* this row is tied to. Required for the Acknowledge button.",
+          "audience": "The people considered for this target. Anyone else is not notified.",
+          "presence_rule": "Whether the person's person.* state has to be home, away, or does not matter.",
+          "allow_acknowledge": "Adds an Acknowledge button that turns the alert off.",
+          "snooze_minutes": "Comma-separated minutes, for example 15, 60. Leave empty for no snooze button.",
+          "default_data": "Merged under the caller's data; the caller wins on conflicting keys.",
+          "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier."
+        }
+      },
+      "remove_target": {
+        "title": "Remove a target",
+        "data": {
+          "slug": "Target"
+        },
+        "data_description": {
+          "slug": "The notify.switchboard_<slug> service disappears with it."
+        }
+      },
+      "general": {
+        "title": "Default target",
+        "data": {
+          "default_target": "Default target"
+        },
+        "data_description": {
+          "default_target": "Used by notify.switchboard when no target is given, and by the notify entity."
         }
       }
+    },
+    "error": {
+      "not_a_person": "Pick a person.* entity.",
+      "duplicate_person": "This person is already in the table.",
+      "no_outputs": "Give at least one notify service.",
+      "recursive_output": "An output cannot point back at Notify Switchboard.",
+      "invalid_output": "A notify service name contains characters a service name cannot hold.",
+      "invalid_entity": "This is not an entity id.",
+      "invalid_time": "Use HH:MM or HH:MM:SS.",
+      "invalid_slug": "Use lowercase letters, digits and underscores only.",
+      "duplicate_slug": "Another target already uses this slug.",
+      "invalid_priority": "Pick one of info, normal, high, critical.",
+      "invalid_presence_rule": "Pick one of always, home_only, away_only.",
+      "not_an_alert": "Pick an alert.* entity.",
+      "empty_audience": "Pick at least one person.",
+      "unknown_person": "This target names somebody who is not in the table.",
+      "invalid_snooze_minutes": "Use comma-separated positive whole minutes.",
+      "invalid_default_data": "Default data must be an object."
+    },
+    "abort": {
+      "nothing_to_remove": "There is nothing to remove yet.",
+      "nothing_to_configure": "Add a target first."
+    }
+  },
+  "issues": {
+    "unknown_target": {
+      "title": "Unknown Notify Switchboard target",
+      "description": "Something called notify.switchboard with the target {slug}, which is not in the routing table. The message was dropped. Add the target, or fix the caller."
+    },
+    "missing_output": {
+      "title": "Notify service missing",
+      "description": "The notify service {output} has been missing for several notifications in a row. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
     }
   }
 }

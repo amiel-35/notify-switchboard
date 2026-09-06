@@ -1,10 +1,15 @@
 {
   "title": "Centralita de notificaciones",
+  "common": {
+    "acknowledge": "Visto",
+    "snooze_minutes": "Posponer {minutes} min",
+    "back_to_normal": "Todo ha vuelto a la normalidad"
+  },
   "config": {
     "step": {
       "user": {
         "title": "Configurar Centralita de notificaciones",
-        "description": "Centralita de notificaciones es un intermediario: no envía ninguna notificación por sí misma. Una vez completada la instalación, usa las opciones para elegir a qué servicios notify reenvía los mensajes."
+        "description": "Centralita de notificaciones es un intermediario: nunca envía una notificación por sí misma. Una vez instalada, crea la tabla de enrutamiento desde sus opciones: primero las personas y sus servicios notify, después un destino por alerta."
       }
     },
     "abort": {
@@ -14,15 +19,121 @@
   "options": {
     "step": {
       "init": {
-        "title": "Destinatarios de la Centralita de notificaciones",
-        "description": "Elige los servicios notify a los que Centralita de notificaciones reenvía los mensajes.",
+        "title": "Centralita de notificaciones",
+        "description": "Añade a las personas a las que avisa la casa y luego un destino por alerta. Cada destino se convierte en un servicio notify.switchboard_<slug> que puedes indicar en los notifiers de una alerta.",
+        "menu_options": {
+          "person": "Añadir o modificar una persona",
+          "remove_person": "Eliminar una persona",
+          "target": "Añadir o modificar un destino",
+          "remove_target": "Eliminar un destino",
+          "general": "Destino predeterminado"
+        }
+      },
+      "person": {
+        "title": "Persona",
+        "description": "Qué servicios notify llegan a esta persona y cuándo está en silencio.",
         "data": {
-          "default_targets": "Destinatarios predeterminados"
+          "entity_id": "Persona",
+          "outputs": "Servicios notify",
+          "silence_entities": "Entidades de silencio",
+          "wake_time": "Hora de despertar"
         },
         "data_description": {
-          "default_targets": "Nombres de servicios notify separados por comas, por ejemplo notify.mobile_app_amiel, notify.persistent_notification"
+          "entity_id": "La entidad person.* cuya presencia decide si se avisa a esta persona.",
+          "outputs": "Nombres de servicios notify sin el prefijo notify., por ejemplo mobile_app_alice. Un servicio que aún no existe se tolera y se reintenta.",
+          "silence_entities": "Cualquier entidad cuyo estado on signifique silencio: un schedule, un input_boolean, un sensor binario.",
+          "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse."
+        }
+      },
+      "remove_person": {
+        "title": "Eliminar una persona",
+        "data": {
+          "entity_id": "Persona"
+        },
+        "data_description": {
+          "entity_id": "La persona también se elimina de la audiencia de todos los destinos."
+        }
+      },
+      "target": {
+        "title": "Destino",
+        "description": "Una fila de la tabla de enrutamiento. Se convierte en notify.switchboard_<slug>.",
+        "data": {
+          "slug": "Identificador",
+          "name": "Nombre",
+          "class": "Clase",
+          "default_priority": "Prioridad predeterminada",
+          "alert_entity": "Alerta",
+          "audience": "Audiencia",
+          "presence_rule": "Regla de presencia",
+          "allow_acknowledge": "Permitir confirmación",
+          "snooze_minutes": "Duraciones de posposición",
+          "default_data": "Datos predeterminados",
+          "observer_mode": "Modo observador"
+        },
+        "data_description": {
+          "slug": "En minúsculas, sin espacios. Cambiarlo rompe todas las alertas que usan el servicio anterior.",
+          "name": "Se muestra a las personas y se usa como mensaje en modo observador cuando la alerta no lleva ninguno.",
+          "class": "Texto libre, solo para agrupar, por ejemplo edificio o mascotas.",
+          "default_priority": "Solo critical salta el silencio y las posposiciones de una persona.",
+          "alert_entity": "La alert.* asociada a esta fila. Necesaria para el botón Visto.",
+          "audience": "Las personas que atañe este destino. A las demás no se les avisa.",
+          "presence_rule": "Si el estado person.* debe ser en casa, fuera, o da igual.",
+          "allow_acknowledge": "Añade un botón Visto que apaga la alerta.",
+          "snooze_minutes": "Minutos separados por comas, por ejemplo 15, 60. Déjalo vacío para no ofrecer posposición.",
+          "default_data": "Se fusiona bajo el data de quien llama; en caso de conflicto gana quien llama.",
+          "observer_mode": "Vigilar el estado de la alerta en lugar de esperar a ser llamado como notifier."
+        }
+      },
+      "remove_target": {
+        "title": "Eliminar un destino",
+        "data": {
+          "slug": "Destino"
+        },
+        "data_description": {
+          "slug": "El servicio notify.switchboard_<slug> desaparece con él."
+        }
+      },
+      "general": {
+        "title": "Destino predeterminado",
+        "data": {
+          "default_target": "Destino predeterminado"
+        },
+        "data_description": {
+          "default_target": "Lo usa notify.switchboard cuando no se indica destino, y también la entidad notify."
         }
       }
+    },
+    "error": {
+      "not_a_person": "Elige una entidad person.*.",
+      "duplicate_person": "Esta persona ya está en la tabla.",
+      "no_outputs": "Indica al menos un servicio notify.",
+      "recursive_output": "Una salida no puede apuntar a Centralita de notificaciones.",
+      "invalid_output": "Un nombre de servicio notify contiene caracteres que un nombre de servicio no admite.",
+      "invalid_entity": "Esto no es un identificador de entidad.",
+      "invalid_time": "Usa HH:MM o HH:MM:SS.",
+      "invalid_slug": "Usa solo minúsculas, dígitos y guiones bajos.",
+      "duplicate_slug": "Otro destino ya usa este identificador.",
+      "invalid_priority": "Elige info, normal, high o critical.",
+      "invalid_presence_rule": "Elige always, home_only o away_only.",
+      "not_an_alert": "Elige una entidad alert.*.",
+      "empty_audience": "Elige al menos una persona.",
+      "unknown_person": "Este destino nombra a alguien que no está en la tabla.",
+      "invalid_snooze_minutes": "Usa minutos enteros positivos separados por comas.",
+      "invalid_default_data": "Los datos predeterminados deben ser un objeto."
+    },
+    "abort": {
+      "nothing_to_remove": "Todavía no hay nada que eliminar.",
+      "nothing_to_configure": "Añade primero un destino."
+    }
+  },
+  "issues": {
+    "unknown_target": {
+      "title": "Destino desconocido de Centralita de notificaciones",
+      "description": "Algo ha llamado a notify.switchboard con el destino {slug}, que no está en la tabla de enrutamiento. El mensaje se descartó. Añade el destino o corrige a quien llama."
+    },
+    "missing_output": {
+      "title": "Falta el servicio notify",
+      "description": "El servicio notify {output} lleva varias notificaciones seguidas sin existir. Los mensajes dirigidos a él se pierden. Repara el servicio o quítalo de las salidas de la persona."
     }
   }
 }
