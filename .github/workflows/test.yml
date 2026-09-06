@@ -33,11 +33,27 @@ jobs:
         if: matrix.pre
         run: pip install --pre --upgrade homeassistant
 
-      - name: Run tests with coverage
-        run: pytest --cov=custom_components.notify_switchboard --cov-report=xml
+      - name: Run unit tests with coverage
+        # The acceptance suite (tests/acceptance) is the executable specification of the
+        # sprint in progress: it is red by design until that sprint lands, so it runs in
+        # the non-blocking job below.
+        run: pytest --ignore=tests/acceptance --cov=custom_components.notify_switchboard --cov-report=xml
 
       - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.ha-version }}
           path: coverage.xml
+
+  acceptance:
+    name: Acceptance spec (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: pip install -r requirements_dev.txt
+      - name: Run the sprint acceptance suite
+        run: pytest tests/acceptance --no-cov -q
