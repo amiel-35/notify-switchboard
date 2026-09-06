@@ -89,12 +89,26 @@ Decisions taken in Sprint 1, where the contract left room:
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
   right local hour (`dispatcher.next_wake_time`).
-- **Snooze resolves the acting person from the device registry when it can.**
-  The Companion `device_id` is looked up directly and as a
+- **Snooze resolves the acting person from `context.user_id` first.** The
+  Companion webhook re-fires the action event with the registration's own
+  context (`homeassistant/components/mobile_app/webhook.py`,
+  `webhook_fire_event` → `registration_context(config_entry.data)` →
+  `Context(user_id=…)`), and a `person.*` entity publishes the user it is
+  linked to as a `user_id` attribute
+  (`homeassistant/components/person/const.py`,
+  `PersonEntityStateAttribute.USER_ID`). If a person in the row's audience
+  matches, only that person is snoozed.
+  Failing that, the Companion `device_id` is looked up directly and as a
   `("mobile_app", <id>)` identifier; the device's name, its user-given name and
-  its config entry's `device_name` are slugified into `mobile_app_<name>` and
-  matched against the persons' outputs. When nothing matches — the documented
-  ambiguous case — every person in the row's audience is snoozed.
+  its config entry's `device_name` are turned into a service name exactly the
+  way core does it — `slugify(f"mobile_app_{name}")`,
+  `homeassistant/components/notify/legacy.py` — and matched against the
+  persons' outputs. When nothing matches — the documented ambiguous case —
+  every person in the row's audience is snoozed.
+- **Outputs are stored without their `notify.` prefix.** `parse_person`
+  normalises `notify.mobile_app_x` to `mobile_app_x`, so the two spellings a
+  user may reasonably write behave identically for person resolution, for
+  Companion-button gating and for the recursion check.
 - **An output that does not exist is tolerated three times** (load order) and
   raises one `repairs` issue on the fourth consecutive miss. The counter is
   cleared as soon as the service appears.

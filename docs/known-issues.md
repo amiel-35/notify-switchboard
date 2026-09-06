@@ -50,19 +50,43 @@ Accepted for S1. Planned resolution: an ADR before S2 decides whether the row
 should own its own message templates, or whether to propose the attributes
 upstream.
 
-## 2026-09-06 — S1 — `mobile_app` no longer registers legacy notify services
+## 2026-09-07 — S1 — the Companion output prefix, and what it really matches
 
-`homeassistant/components/mobile_app/notify.py` in 2026.9.1 exposes Companion
-push as a `MobileAppNotifyEntity`, not as a legacy `BaseNotificationService`
-with a `targets` property. The `mobile_app_*` prefix check that decides which
-outputs get buttons (brief item 5) therefore matches whatever the user typed
-as an output, not something the modern `mobile_app` integration hands out.
+An earlier version of this entry claimed that `mobile_app` in 2026.9.1 no
+longer registers legacy `notify.mobile_app_*` services. **That was wrong**, and
+the correction is recorded here rather than deleted so the reasoning is
+auditable.
 
-Accepted for S1 because the contract is written in terms of legacy notify
-service names and the acceptance suite mocks them. Planned resolution: revisit
-once a real Companion device is wired to the dev instance — the router may need
-to treat a `notify.*` **entity** as an output too, which is a contract change
-and therefore an ADR.
+In core 2026.9.1 (`homeassistant/components/mobile_app/`) Companion push is
+still a legacy notify platform:
+
+- `__init__.py`, line 110: `discovery.async_load_platform(hass,
+  Platform.NOTIFY, DOMAIN, {}, config)` loads the notify platform at startup;
+- `notify.py`, line 177, `async_get_service` returns a
+  `MobileAppNotificationService(BaseNotificationService)` (line 187) whose
+  `targets` property (line 192) is `push_registrations(hass)`, a
+  `{device_name: webhook_id}` mapping of every push-capable registration.
+
+So core does register one `notify.mobile_app_<device>` service per Companion
+registration, and `BaseNotificationService.async_register_services`
+(`homeassistant/components/notify/legacy.py`, line 275) names it
+`slugify(f"{prefix}_{name}")` — that is, the **whole** string is slugified,
+not the prefix plus a separately slugified device name. The switchboard now
+composes candidate names the same way (`dispatcher.companion_service_name`);
+composing them any other way silently fails to match on device names that end
+in a separator or contain punctuation.
+
+What remains true, and is the reason the `mobile_app_` prefix rule is kept: the
+prefix is a **reliable** marker for "this output is a Companion push service",
+because core builds every one of those names from the fixed `mobile_app`
+platform prefix. Buttons are therefore added to outputs whose service name
+starts with `mobile_app_` and to no others.
+
+What is genuinely still unverified is the *callback* side: the `device_id`
+carried by a `mobile_app_notification_action` event has not been observed on a
+real device from this project, so the device-registry lookup in
+`Switchboard._resolve_persons` is written defensively and is only the second
+choice, after `context.user_id`. See the entry below.
 
 ## 2026-09-06 — S1 — the options flow edits one row at a time
 

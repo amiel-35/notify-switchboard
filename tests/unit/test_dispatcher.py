@@ -22,7 +22,10 @@ from custom_components.notify_switchboard.const import DOMAIN
 from custom_components.notify_switchboard.diagnostics import (
     async_get_config_entry_diagnostics,
 )
-from custom_components.notify_switchboard.dispatcher import next_wake_time
+from custom_components.notify_switchboard.dispatcher import (
+    companion_service_name,
+    next_wake_time,
+)
 
 
 def make_person(entity_id: str, outputs: list[str], **overrides: Any) -> dict:
@@ -576,6 +579,22 @@ async def test_migration_is_a_no_op_at_version_1(hass: HomeAssistant) -> None:
     future = MockConfigEntry(domain=DOMAIN, version=2, minor_version=1, options={})
     future.add_to_hass(hass)
     assert await async_migrate_entry(hass, future) is False
+
+
+@pytest.mark.parametrize(
+    ("device_name", "expected"),
+    [
+        ("Alice Phone", "mobile_app_alice_phone"),
+        # The whole string is slugified, exactly as core does it: a trailing
+        # separator does not survive as `mobile_app_` + "".
+        ("Alice's iPhone", "mobile_app_alice_s_iphone"),
+        ("-", "mobile_app"),
+        ("Téléphone d'Amiel", "mobile_app_telephone_d_amiel"),
+    ],
+)
+def test_companion_service_name_matches_core(device_name: str, expected: str) -> None:
+    """`slugify(f"mobile_app_{name}")`, like notify/legacy.py line 275."""
+    assert companion_service_name(device_name) == expected
 
 
 async def test_snooze_resolves_the_acting_person_from_the_context_user_id(

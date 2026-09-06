@@ -151,8 +151,15 @@ ACTION_ACKNOWLEDGE: Final = "ack"
 ACTION_SNOOZE: Final = "snooze"
 
 # Only outputs whose legacy service name starts with this prefix get buttons
-# (brief item 5). See docs/known-issues.md: modern `mobile_app` no longer
-# registers legacy per-device notify services.
+# (brief item 5). `mobile_app` in core 2026.9.1 *does* register one legacy
+# `notify.mobile_app_<device>` service per push registration
+# (`homeassistant/components/mobile_app/__init__.py` line 110 loads the notify
+# platform through discovery; `mobile_app/notify.py` line 177 `async_get_service`
+# returns a `BaseNotificationService` whose `targets` property, line 192, is
+# `push_registrations(hass)`), and core names each one
+# `slugify(f"mobile_app_{device_name}")`
+# (`homeassistant/components/notify/legacy.py` line 275). The prefix is
+# therefore a reliable marker for "this output is a Companion push service".
 COMPANION_OUTPUT_PREFIX: Final = "mobile_app_"
 
 # ---------------------------------------------------------------------------
