@@ -20,7 +20,7 @@
     "step": {
       "init": {
         "title": "Standard de notification",
-        "description": "Ajoutez les personnes que la maison notifie, puis une cible par alerte. Chaque cible devient un service notify.switchboard_<slug> à lister dans les notifiers d'une alerte.",
+        "description": "Ajoutez les personnes que la maison notifie, puis une cible par alerte. Chaque cible devient un service notify.switchboard_[slug] à lister dans les notifiers d'une alerte.",
         "menu_options": {
           "person": "Ajouter ou modifier une personne",
           "remove_person": "Supprimer une personne",
@@ -56,7 +56,7 @@
       },
       "target": {
         "title": "Cible",
-        "description": "Une ligne de la table de routage. Elle devient notify.switchboard_<slug>.",
+        "description": "Une ligne de la table de routage. Elle devient notify.switchboard_[slug].",
         "data": {
           "slug": "Identifiant",
           "name": "Nom",
@@ -90,7 +90,7 @@
           "slug": "Cible"
         },
         "data_description": {
-          "slug": "Le service notify.switchboard_<slug> disparaît avec elle."
+          "slug": "Le service notify.switchboard_[slug] disparaît avec elle."
         }
       },
       "general": {

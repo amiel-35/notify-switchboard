@@ -20,7 +20,7 @@
     "step": {
       "init": {
         "title": "Centralita de notificaciones",
-        "description": "Añade a las personas a las que avisa la casa y luego un destino por alerta. Cada destino se convierte en un servicio notify.switchboard_<slug> que puedes indicar en los notifiers de una alerta.",
+        "description": "Añade a las personas a las que avisa la casa y luego un destino por alerta. Cada destino se convierte en un servicio notify.switchboard_[slug] que puedes indicar en los notifiers de una alerta.",
         "menu_options": {
           "person": "Añadir o modificar una persona",
           "remove_person": "Eliminar una persona",
@@ -56,7 +56,7 @@
       },
       "target": {
         "title": "Destino",
-        "description": "Una fila de la tabla de enrutamiento. Se convierte en notify.switchboard_<slug>.",
+        "description": "Una fila de la tabla de enrutamiento. Se convierte en notify.switchboard_[slug].",
         "data": {
           "slug": "Identificador",
           "name": "Nombre",
@@ -90,7 +90,7 @@
           "slug": "Destino"
         },
         "data_description": {
-          "slug": "El servicio notify.switchboard_<slug> desaparece con él."
+          "slug": "El servicio notify.switchboard_[slug] desaparece con él."
         }
       },
       "general": {

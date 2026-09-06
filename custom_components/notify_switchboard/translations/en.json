@@ -20,7 +20,7 @@
     "step": {
       "init": {
         "title": "Notify Switchboard",
-        "description": "Add the people this house notifies, then one target per alert. Each target becomes a notify.switchboard_<slug> service you can list under an alert's notifiers.",
+        "description": "Add the people this house notifies, then one target per alert. Each target becomes a notify.switchboard_[slug] service you can list under an alert's notifiers.",
         "menu_options": {
           "person": "Add or update a person",
           "remove_person": "Remove a person",
@@ -56,7 +56,7 @@
       },
       "target": {
         "title": "Target",
-        "description": "One row of the routing table. It becomes notify.switchboard_<slug>.",
+        "description": "One row of the routing table. It becomes notify.switchboard_[slug].",
         "data": {
           "slug": "Slug",
           "name": "Name",
@@ -90,7 +90,7 @@
           "slug": "Target"
         },
         "data_description": {
-          "slug": "The notify.switchboard_<slug> service disappears with it."
+          "slug": "The notify.switchboard_[slug] service disappears with it."
         }
       },
       "general": {
