@@ -745,6 +745,38 @@ async def test_diagnostics_redacts_message_bodies(hass: HomeAssistant) -> None:
     assert diagnostics["last_decisions"][0]["message"] == "**REDACTED**"
 
 
+async def test_diagnostics_redacts_default_data_values_but_keeps_the_keys(
+    hass: HomeAssistant,
+) -> None:
+    """`default_data` is user content; its shape stays, its values do not."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [
+            make_target(
+                "leak",
+                default_data={"channel": "Alarms", "url": "/lovelace/water"},
+            ),
+            make_target("garage", default_data={}),
+        ],
+        "leak",
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    rows = {row["slug"]: row for row in diagnostics["entry"]["options"]["targets"]}
+    assert rows["leak"]["default_data"] == {
+        "channel": "**REDACTED**",
+        "url": "**REDACTED**",
+    }
+    assert rows["garage"]["default_data"] == {}
+    # The rest of the row is untouched: a dump has to stay readable.
+    assert rows["leak"]["audience"] == ["person.alice"]
+    # And the live options are not mutated by the dump.
+    assert entry.options["targets"][0]["default_data"]["channel"] == "Alarms"
+
+
 async def test_snoozes_expire_and_feed_the_person_sensor(
     hass: HomeAssistant, freezer: Any
 ) -> None:

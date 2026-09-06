@@ -1,22 +1,47 @@
 """Diagnostics for Notify Switchboard.
 
-Message bodies are the only thing worth hiding here: they can quote sensor
-names, addresses or anything an `alert` template rendered. They go through
-`homeassistant.components.diagnostics.async_redact_data`.
+Everything a human typed is hidden here: message bodies (they can quote sensor
+names, addresses or anything an `alert` template rendered) and the `default_data`
+of every routing-table row (it can hold a push channel, a URL, a phone-specific
+payload). Message bodies go through
+`homeassistant.components.diagnostics.async_redact_data`; `default_data` is
+redacted value by value so the *shape* of the row stays readable, which is the
+whole point of a diagnostics dump.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
+
+from .const import CONF_DEFAULT_DATA, CONF_TARGETS
 
 if TYPE_CHECKING:
     from . import SwitchboardConfigEntry
 
 TO_REDACT = {"message", "title"}
+
+
+def _redact_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Return the entry options with every `default_data` value redacted."""
+    redacted = dict(options)
+    rows = redacted.get(CONF_TARGETS)
+    if not isinstance(rows, list):
+        return redacted
+
+    redacted[CONF_TARGETS] = [
+        {
+            **row,
+            CONF_DEFAULT_DATA: {key: REDACTED for key in row[CONF_DEFAULT_DATA]},
+        }
+        if isinstance(row, dict) and isinstance(row.get(CONF_DEFAULT_DATA), dict)
+        else row
+        for row in rows
+    ]
+    return redacted
 
 
 async def async_get_config_entry_diagnostics(
@@ -30,7 +55,7 @@ async def async_get_config_entry_diagnostics(
         "entry": {
             "version": entry.version,
             "minor_version": entry.minor_version,
-            "options": dict(entry.options),
+            "options": _redact_options(dict(entry.options)),
         },
         "counters": {
             "routed_today": switchboard.routed_today,
