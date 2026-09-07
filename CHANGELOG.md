@@ -76,6 +76,30 @@ user-facing concept: no TTL, no summary, no escalation, no new option key.
   detaches everything, not just the deferral and silence timers. This was
   visible as an intermittent "Lingering timer after test …
   `Switchboard._async_reset_counters`" in the config-flow tests.
+- **An ERROR with a traceback at every shutdown.** The teardown above kept the
+  `EVENT_HOMEASSISTANT_STOP` unsub in the same list as the others and called it
+  again from `async_shutdown`, after core's one-time listener had already
+  removed it — so every single stop logged "Unable to remove unknown job
+  listener" with a `ValueError`. The stop unsub now has its own slot and is
+  called exactly once, whichever of the two paths runs.
+- **`unknown_target` and `missing_output` repairs that never went away.** The
+  issue registry is persisted and neither of those two was ever deleted, so the
+  warning outlived the very change it asked for. Creating the missing routing
+  row now clears its `unknown_target` repair on the reload; an output clears
+  its `missing_output` repair on the first call that succeeds, or when it is
+  removed from every person's outputs.
+- **A person lost from the counters.** When one person's delivery raised an
+  unexpected error, the fan-out logged it and moved on without counting that
+  person at all — neither routed nor dropped. It is now counted as
+  `delivery_failed`, the same as any other delivery that reached nobody.
+- **Per-person devices are named after the person.** The virtual device used
+  the person's object_id titled (`person.alice` → "Alice"), ignoring the
+  friendly name a user set in the UI ("Alice Martin"). It now uses the person's
+  state name, falling back to the old form only when the person has no state
+  yet.
+- **`quality_scale.yaml` parses.** One unquoted comment containing ": " made
+  the whole self-assessment file invalid YAML. A unit test now parses it and
+  checks it assesses exactly hassfest's rule set for 2026.9.1.
 
 ### Documentation
 
