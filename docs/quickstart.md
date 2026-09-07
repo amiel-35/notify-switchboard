@@ -1,149 +1,195 @@
-# Quickstart: route your first alert in 10 minutes
+# Quickstart: a working `notify.switchboard` in five minutes
 
-This walks you through installing Notify Switchboard and routing one real
-alert — a water leak — end to end: config, a routing-table row, an `alert:`
-that uses it, and a test from Developer tools. It follows the public
-contract in [`contract.md`](contract.md); read that file if you need the
-exact rules (which priority overrides silence, what happens with an unknown
-target, and so on).
+From 0.4.0 the shortest path through this integration has no YAML in it at
+all. Add the integration, add one person — their phones and their Focus
+sensors are already filled in — and `notify.switchboard` works. Everything
+after that is optional: tie a row to an `alert.*` (with or without writing
+one), test it from the options menu, and ask the router *why* a message would
+or would not arrive.
+
+It follows the public contract in [`contract.md`](contract.md); read that file
+if you need the exact rules (which priority overrides silence, what happens
+with an unknown target, and so on).
 
 > Names used below (`notify.switchboard`, `notify.switchboard_<target>`,
-> `data.priority`, `data.source_entity`) are frozen (see the header of
-> [`contract.md`](contract.md)) — they will not change without a major
-> version, so it is safe to build automations and blueprints against them
-> today.
+> `data.priority`, `data.source_entity`, `notify_switchboard.explain`) are
+> frozen (see the header of [`contract.md`](contract.md)) — they will not
+> change without a major version, so it is safe to build automations and
+> blueprints against them today.
 
-## 1. Install via HACS
+## 1. Add the integration
 
-1. In Home Assistant, open **HACS → Integrations**, then the **⋮** menu →
-   **Custom repositories**.
-2. Add `https://github.com/amiel-35/notify-switchboard`, category
-   **Integration**.
-3. Find **Notify Switchboard** in HACS, click **Download**, then restart
-   Home Assistant when prompted.
+Install it from HACS (see the buttons in [`../README.md`](../README.md)),
+restart, then **Settings → Devices & services → Add integration** → search for
+**Notify Switchboard**.
 
-## 2. Add the integration
+Setup takes no input — a single instance is created and immediately registers
+the `notify.switchboard` service (so `alert:` can list it) and a
+`notify.switchboard` entity (the degraded path, see the last section).
 
-**Settings → Devices & services → Add integration** → search for
-**Notify Switchboard**. Setup takes no input — a single instance is created
-and immediately registers:
+## 2. Add a person — the only step that is not optional
 
-- the `notify.switchboard` service (so `alert:` can list it), and
-- a `notify.switchboard` entity (the degraded path, see step 7).
+Open **Configure → Add or update a person** and pick a `person.*`. The next
+form is already filled in for you:
 
-## 3. Add a person and an output
+- **Notify services** — a multi-select of every `notify.*` service this
+  instance has. The push services of the phones registered to *this person's*
+  Home Assistant user come first, marked as their device, and are already
+  selected. The link is exact: a Companion registration stores the `user_id` it
+  was created for, and a `person.*` publishes the user it is linked to. If a
+  person is not linked to a user (Settings → People), nothing is pre-selected
+  — the integration will not guess from their name.
+  You can still type a service that does not exist yet: a phone that has not
+  registered is tolerated and retried.
+- **Silence entities** — any entity whose `on` state means "do not disturb".
+  The Focus `binary_sensor` of that person's iPhones is proposed
+  automatically.
+- **Wake time** (optional) — when their night silence ends, so a message
+  dropped for silence during the night is delivered then instead of lost.
 
-Open the integration's **Configure** button, then its persons section, and
-add one entry per person who should ever be notified:
+Submitting that form on an **empty** routing table also creates one row,
+`default`, with that person as its audience, and points the default target at
+it. So `notify.switchboard` now reaches a real phone:
 
-- **Person**: the `person.*` entity (e.g. `person.alice`).
-- **Outputs**: one or more existing `notify.*` services to actually deliver
-  to this person — typically their Companion app's notify service (e.g.
-  `mobile_app_alice`), enter it **without** the `notify.` prefix.
-- **Silence entities** (optional): any `schedule.*` or `input_boolean.*`
-  whose `on` state should mean "do not disturb this person" (a night
-  schedule, a manual "focus mode" toggle, ...).
-- **Wake time** (optional): when the person's night silence ends, so a
-  message dropped for silence during the night is delivered then instead of
-  lost.
+```yaml
+action: notify.switchboard
+data:
+  message: "Hello from the switchboard"
+```
 
-Repeat for every person. You need at least one before adding a target.
+That row is *managed*: while it is, adding a second person adds them to its
+audience too. The moment you open it in **Edit a target** and submit, it
+becomes yours and the router stops touching it — for good.
 
-## 4. Add a target row
+### Android's Do Not Disturb
 
-Still in **Configure**, open the targets section and add a row:
+Android exposes Do Not Disturb as a `sensor` with several states
+(`off`, `priority_only`, `alarms_only`, `total_silence`), and this
+integration's silence contract is "state is `on`". One template
+`binary_sensor` bridges it, and can then be picked as a silence entity:
 
-| Field | What to put | Example |
-|---|---|---|
-| Slug | short id; becomes `notify.switchboard_<slug>` | `leak` |
-| Name | display name | Water leak |
-| Class | free-text grouping (never a hardcoded value) | building |
-| Default priority | `info` \| `normal` \| `high` \| `critical` | high |
-| Alert entity (optional) | the `alert.*` this row is tied to, for Acknowledge | `alert.leak_kitchen` |
-| Audience | which persons from step 3 should hear about this | Alice, Bob |
-| Presence rule | `always` \| `home_only` \| `away_only` | always |
-| Allow acknowledge | shows an Acknowledge button on Companion | on |
-| Snooze durations | minutes; empty = no snooze button | 15, 60 |
-| Observer mode | see step 8; leave off for now | off |
+```yaml
+template:
+  - binary_sensor:
+      - name: "Alice phone do not disturb"
+        state: >-
+          {{ states('sensor.alice_phone_do_not_disturb_sensor')
+             not in ['off', 'unknown', 'unavailable'] }}
+```
 
-Saving this row is what makes `notify.switchboard_leak` exist as a service —
-until a row's slug is `leak`, calling that service drops with
-`unknown_target` and raises a single repair issue.
+## 3. Tie a row to an alert — two ways, neither of them urgent
 
-## 5. Write the `alert:`
+A routing-table row is what turns one `alert.*` into one
+`notify.switchboard_<slug>` service with its own audience, priority and
+buttons. **Configure → Add or update a target** asks for a slug, a name, an
+audience and a presence rule; the `alert.*` field is what enables the
+Acknowledge button.
 
-`alert:` is native, YAML-only Home Assistant — a blueprint cannot create it
-(see [`docs/blueprints.md`](blueprints.md)). Copy
-[`docs/examples/alert_leak.yaml`](examples/alert_leak.yaml) into your
-configuration (directly under an `alert:` key, or a package), pointing
-`entity_id` at your real sensor:
+**Either** point the row at an `alert.*` you already have and switch
+**Observer mode** on: the router watches that alert's state itself, so nothing
+in your YAML changes — no `notifiers:` line, no restart.
+
+**Or** let the row tell you what to write. Submitting the form now ends on a
+confirmation step that shows the exact `alert:` block the row expects,
+`notifiers:` included:
 
 ```yaml
 alert:
   leak_kitchen:
-    name: "Kitchen leak sensor"
-    entity_id: binary_sensor.leak_kitchen
+    name: Water leak
+    entity_id: binary_sensor.CHANGE_ME
+    state: "on"
     repeat: [5, 15, 60]
-    message: "Water leak detected: {{ state_attr('binary_sensor.leak_kitchen', 'friendly_name') }}."
-    done_message: "Kitchen leak sensor is dry again."
-    title: "Leak"
+    can_acknowledge: true
     notifiers:
       - switchboard_leak
 ```
 
-The `notifiers:` entry — the target's slug, **without** the `notify.`
-prefix — is the only place the alert tells Notify Switchboard who it is
-(the alert's own `data` cannot be templated, so nothing about the alert
-needs to travel through `data`; see ADR-008 in the doctrine).
+Point `entity_id` at your real sensor, paste it into your configuration (or a
+package), restart Home Assistant, and the alert routes through the row.
+The `notifiers:` entry — the slug, **without** the `notify.` prefix — is the
+only place the alert tells Notify Switchboard who it is (ADR-0008), so nothing
+about the alert has to travel through `data`.
 
-## 6. Restart and test from Developer tools
+Three complete examples live in [`examples/`](examples/).
 
-Restart Home Assistant so the new row's service and the `alert:` entity both
-load. Then, **Developer tools → Actions**, pick `notify.switchboard_leak`
-(or `notify.switchboard` with `target: [leak]`), and call it directly to
-check routing before wiring a real sensor:
+## 4. Test it from the options menu
+
+**Configure → Test a person** or **Test a target** sends one *real* message
+through the ordinary routing path — counted, evented, deferred or dropped like
+any other, and carrying `data.tag: switchboard-test` so a Companion channel or
+an automation can tell it from the real thing. Testing a person picks the
+default target when it reaches them, otherwise the first row whose audience
+contains them.
+
+The step that follows says what happened to each person, in the same words
+`explain` uses. A dry run could not have told you the *output* works; this can.
+
+## 5. Ask why — `notify_switchboard.explain`
+
+"Why didn't I get the leak alert?" now has an answer you can reach.
+**Developer tools → Actions**, `notify_switchboard.explain`, in YAML mode:
 
 ```yaml
-action: notify.switchboard_leak
+action: notify_switchboard.explain
 data:
-  message: "Test leak notification"
-  data:
-    priority: high
-    source_entity: binary_sensor.leak_kitchen
+  target: leak
+  # priority: critical      # optional; defaults to the row's own
+  # person: person.alice    # optional; defaults to the whole audience
 ```
 
-You should see it arrive on every output configured for every person in the
-row's audience who is currently present (or every person, if
-`presence_rule: always`) and not silenced. If someone is silenced, only
-`priority: critical` will still reach them.
+It must be called with **Return response**. It answers, per person:
 
-## 7. Acknowledge and snooze from the phone
+```yaml
+target: leak
+priority: normal
+persons:
+  person.alice:
+    decision: dropped          # routed | deferred | dropped
+    until: null                # ISO instant, deferred only
+    reason: silenced           # a drop reason, dropped only
+    detail: "person.alice is silenced by input_boolean.quiet_hours. Only a critical message would get through."
+    outputs: []                # what would be called
+    missing_outputs: []        # configured outputs that are not services
+```
 
-If the row has `alert_entity` set and `allow_acknowledge: on`, Companion
+`explain` changes nothing at all: no notification is sent, no counter moves,
+no event fires, no deferral is queued. A person who is simply not in the row's
+audience is answered (`dropped` / `not_in_audience`), not refused; an unknown
+target or an unknown person raises, like every other service.
+
+## 6. When something is wrong, the router says so
+
+Three repairs cover the silent failures this integration used to have, in
+**Settings → Repairs**:
+
+- **A person has no notify service** — they sit in an audience and every
+  message meant for them is dropped with `no_outputs`.
+- **A target points at an alert that does not exist** — raised a minute after
+  startup, never during it, so it is never noise.
+- **A notify service is unusable** — an output that has failed several times
+  in a row.
+
+And the diagnostic entities are still there: `sensor.switchboard_routed_today`,
+`sensor.switchboard_dropped_today` (with a `reasons` attribute),
+`sensor.switchboard_deferred_today`, and per person
+`binary_sensor.<person>_silenced`, `sensor.<person>_last_notification`,
+`sensor.<person>_active_snoozes`.
+
+## Acknowledge and snooze from the phone
+
+If a row has an `alert.*` and **Allow acknowledgement**, Companion
 notifications get action buttons:
 
-- **Acknowledge** → sends `mobile_app_notification_action` with
-  `action: switchboard:ack:leak`. The router only calls `alert.turn_off` on
-  `alert.leak_kitchen` because that entity is this row's `alert_entity` (an
-  allow-list — an arbitrary alert id in the action string is refused and
-  logged with the acting user's id).
-- **Snooze `<n>`** (one button per configured duration) → sends
-  `action: switchboard:snooze:leak:<n>`, e.g. `switchboard:snooze:leak:60`
-  for an hour. Snoozes are stored per (person, target), survive a Home
-  Assistant restart, and expire on their own.
+- **Acknowledge** → the router calls `alert.turn_off` on *that row's* alert and
+  on no other (an allow-list; anything else is refused and logged with the
+  acting user's id).
+- **Snooze `<n>`** — one button per configured duration. Snoozes are stored per
+  (person, target), survive a restart, and expire on their own.
 
-## 8. Read the diagnostic sensors
-
-- `sensor.switchboard_routed_today` / `sensor.switchboard_dropped_today` —
-  daily counters, reset at local midnight. The dropped sensor exposes a
-  `reasons` attribute (things like `silenced`, `snoozed`, `unknown_target`,
-  `recursion`) so a drop is never silent.
-- Per person: `binary_sensor.<person>_silenced`,
-  `sensor.<person>_last_notification`, `sensor.<person>_active_snoozes`.
-
-If `sensor.switchboard_dropped_today` climbs and you did not expect it,
-check its `reasons` attribute first — it tells you *why* before you go
-digging through logs.
+Everything those buttons do is also a service — `notify_switchboard.acknowledge`,
+`snooze`, `unsnooze`, `silence`, `unsilence` — so a card or a script can do it
+too.
 
 ## Two other paths worth knowing about
 
@@ -153,16 +199,12 @@ digging through logs.
   Home Assistant limitation — `NotifyEntity` has no `target` or `data`).
   They route through the **default target** at `normal` priority. Use the
   legacy `notify.switchboard_<target>` / `notify.switchboard` services
-  above whenever you need a specific target, a priority, or
-  `source_entity`.
-- **Observer mode**: if the legacy `notify.*` service platform is ever
-  retired upstream, a row with `observer_mode: on` keeps working without
-  being listed in any `notifiers:` — the router watches that row's
-  `alert_entity` state directly (`idle → on` routes the alert's message,
-  `→ idle` routes the done message, `on → off` just stops). It is
-  implemented and tested from v0.1, not a future promise; turn it on for a
-  row today if you would rather not touch the `alert:`'s `notifiers:` list
-  at all.
+  whenever you need a specific target, a priority, or `source_entity`.
+- **Observer mode**: already used in step 3, and also the plan B if the legacy
+  `notify.*` service platform is ever retired upstream — a row with
+  `observer_mode: on` keeps working without being listed in any `notifiers:`
+  (`idle → on` routes the row's message, `→ idle` routes the done message,
+  `on → off` just stops).
 
 ## Next
 

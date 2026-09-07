@@ -39,10 +39,10 @@ entities. There is no intermediate "house" sensor.
 | `dispatcher.py` | Every side effect: service calls, buttons, callbacks, observer mode, deferrals, counters, repairs. |
 | `store.py` | `Store`-backed snoozes, night deferrals and temporary silences. |
 | `legacy.py` | `notify.switchboard` and `notify.switchboard_<slug>`. |
-| `services.py` | The five `notify_switchboard.*` UI services (v0.2, ADR-0016): schemas and registration only, every decision delegated to `dispatcher.py`. |
+| `services.py` | The six `notify_switchboard.*` domain services — the five acting ones (v0.2, ADR-0016) and the read-only `explain` (v0.4, ADR-0018): schemas and registration only, every decision delegated to `dispatcher.py`. |
 | `notify.py` | The degraded `NotifyEntity`. |
 | `entity.py`, `sensor.py`, `binary_sensor.py`, `event.py` | Contract §3.5 entities. |
-| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. |
+| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. From v0.4 it also discovers a person's Companion outputs and Focus sensors out of the `mobile_app` config entries, bootstraps the managed `default` row, and drives the two test steps. |
 
 The pure/impure split is what makes the decision engine unit-testable at 100 %
 branch coverage without a `HomeAssistant` instance.
@@ -139,10 +139,12 @@ Decisions taken in Sprint 1, where the contract left room:
 A card, a script or an automation cannot originate a
 `mobile_app_notification_action` event, so everything the Companion buttons do
 is also a domain service: `notify_switchboard.acknowledge`, `snooze`,
-`unsnooze`, `silence`, `unsilence`. They are registered with the config entry
-and removed on unload, so a reload never leaves a service pointing at a dead
-`Switchboard`; `manifest.json`'s `single_config_entry` is what makes one entry
-owning the domain's services safe.
+`unsnooze`, `silence`, `unsilence`. Since v0.3 (ADR-0017 §5) they are
+registered in `async_setup` and therefore exist whether or not a config entry
+is loaded; a call made while none is refuses with the translated
+`no_loaded_entry`. `manifest.json`'s `single_config_entry` is what makes one
+entry owning the domain's services safe. The read-only `explain` of v0.4 joins
+them under exactly the same rules (see "Explainability" below).
 
 Decisions taken in Sprint 2, where the contract left room:
 
@@ -250,6 +252,62 @@ chains behave identically. `default_title` is applied per delivery, in
 `_async_deliver`, not per request, so a call fanned out over several rows gets
 each row's own default.
 
+## Explainability (v0.4, ADR-0018)
+
+`notify_switchboard.explain` is a sixth domain service, registered next to the
+five acting ones and declared `SupportsResponse.ONLY`. It answers, per person,
+what would happen to a message sent to a row right now: `decision` (`routed` /
+`deferred` / `dropped`), the `until` of a deferral, the `reason` of a drop, a
+translated `detail` naming the deciding object, and the `notify.*` services the
+message would reach (`outputs`) or that are configured but not registered
+(`missing_outputs`).
+
+It is a **pure evaluation** — `Switchboard.build_context()` and `router.decide`,
+and nothing else. No `notify.*` call, no counter, no
+`event.switchboard_delivery`, no queued deferral, no `Store` write. That is not
+a nicety: a service somebody runs to *understand* their configuration must not
+change it, and a card that calls it on every render must not inflate the day's
+figures. The one thing it re-implements rather than reads is the deferral rule,
+and it re-implements it as the same three conditions
+`Switchboard._async_defer` applies, so `explain` cannot promise a deferral the
+dispatcher would not make.
+
+The options flow's `test_person` / `test_target` steps pair with it: they send
+one **real** message (tagged `switchboard-test`), which proves the output
+works — something `explain` cannot do — and then show the `explain` answer for
+the same call in the step description.
+
+## Zero-config (v0.4, ADR-0018)
+
+Three things the instance already knew, and the user used to have to discover
+the hard way:
+
+- **A person's phones.** Each Companion registration is a `mobile_app` config
+  entry carrying `user_id` and `device_name`; a `person.*` publishes the Home
+  Assistant user it is linked to as a `user_id` state attribute. Where the two
+  ids match, `dispatcher.companion_service_name(device_name)` is that person's
+  own output — the same name the router already composed at runtime, now used
+  to *propose* it. The link is exact; guessing `mobile_app_<person object id>`
+  from a name is what ADR-0018 §2 rejects.
+- **Their Focus sensors.** The `binary_sensor` entities registered by those
+  same config entries whose entity id or translation key contains `focus`.
+  Android's Do Not Disturb is a `sensor` with several string states and is
+  deliberately not proposed; `docs/quickstart.md` shows the one-line template
+  that bridges it.
+- **That a fresh install needs a row at all.** The first person added to an
+  empty routing table creates one, slug `default`, flagged `managed`, and
+  `default_target` points at it. While the flag is true the row's audience is
+  every configured person; submitting the row editor for it — any field —
+  clears the flag for good. `managed` is the only new options key of 0.4 and is
+  optional, so no storage migration is needed.
+
+Two consistency repairs come with them: `person_without_outputs`, evaluated at
+setup (an options change reloads the entry, which is when the gap closes), and
+`alert_entity_missing`, evaluated once `dispatcher.ALERT_ENTITY_GRACE_SECONDS`
+after setup because at setup the `alert` component may not exist yet. The
+`async_call_later` handle joins `Switchboard._unsubs`, so unloading the entry
+cancels a grace check that has not fired.
+
 ## Why both a legacy service and an entity
 
 Home Assistant's `alert` integration lists `notifiers:` by legacy `notify.*`
@@ -348,13 +406,13 @@ suite S7 row that planned them.
 The router has its own sprint sequence inside those rows, numbered
 independently of the suite roadmap above: suite S3 is `notify-cast`, router S3
 is this release, and the two S7 rows have nothing to do with each other.
-**Router S3 is done** and is what 0.3.0 ships.
+**Router S4 is done** and is what 0.4.0 ships.
 
 | Router # | Router increment | State |
 |---|---|---|
 | Router S0-S2 | Foundations, the router itself, the UI services and the per-row texts | Shipped (0.1.0, 0.2.0) |
-| Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | **Done — 0.3.0** |
-| Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` row, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | In progress |
+| Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | Shipped (0.3.0) |
+| Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` row, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | **Done — 0.4.0** |
 | Router S5 | Night: turn `wake_time` into a real quiet-hours model (per-person windows, a digest of what was deferred) rather than a single instant | Planned |
 | Router S6 | Escalation: what happens when nobody acknowledges — a second person, a louder output, a delay per row | Planned |
 | Router S7 | Places: route on where somebody is, not only on whether they are home | Planned |

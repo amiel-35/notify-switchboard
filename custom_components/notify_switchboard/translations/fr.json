@@ -3,7 +3,21 @@
   "common": {
     "acknowledge": "J'ai vu",
     "snooze_minutes": "Reporter {minutes} min",
-    "back_to_normal": "Tout est revenu à la normale"
+    "back_to_normal": "Tout est revenu à la normale",
+    "this_persons_device": "appareil de cette personne",
+    "default_target_name": "Tout le monde",
+    "test_message": "Message de test de Notify Switchboard.",
+    "detail_routed": "Ce message serait remis à {outputs}.",
+    "detail_deferred": "{person} est en silence à cause de {entities} et a une heure de réveil : ce message serait mis en attente et délivré à {until}.",
+    "detail_dropped": "Ce message serait écarté pour {person}, motif {reason}.",
+    "detail_presence": "La règle de présence de cette cible est {rule}, et {person} est actuellement {state}.",
+    "detail_silenced": "{person} est en silence à cause de {entities}. Seul un message critical passerait.",
+    "detail_silenced_temporary": "{person} est en silence via notify_switchboard.silence jusqu'à {until}. Seul un message critical passerait.",
+    "detail_snoozed": "{person} a reporté la cible {target} jusqu'à {until}.",
+    "detail_no_outputs": "Aucun service notify n'est configuré pour {person} : il n'y a nulle part où envoyer ce message.",
+    "detail_not_in_audience": "{person} ne fait pas partie de l'audience de la cible {target}.",
+    "detail_unknown_person": "La cible {target} nomme {person}, qui n'est pas dans la table de Notify Switchboard.",
+    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui bouclerait."
   },
   "entity": {
     "binary_sensor": {
@@ -57,23 +71,19 @@
           "target": "Ajouter ou modifier une cible",
           "edit_target": "Modifier une cible",
           "remove_target": "Supprimer une cible",
-          "general": "Cible par défaut"
+          "general": "Cible par défaut",
+          "test_person": "Tester une personne",
+          "test_target": "Tester une cible"
         }
       },
       "person": {
         "title": "Personne",
-        "description": "Quels services notify joignent cette personne, et quand elle est en silence.",
+        "description": "Choisissez la personne à ajouter ou à modifier. L'étape suivante propose les services notify et les capteurs Focus de ses téléphones.",
         "data": {
-          "entity_id": "Personne",
-          "outputs": "Services notify",
-          "silence_entities": "Entités de silence",
-          "wake_time": "Heure de réveil"
+          "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "L'entité person.* dont la présence décide si cette personne est notifiée.",
-          "outputs": "Noms de services notify sans le préfixe notify., par exemple mobile_app_alice. Un service qui n'existe pas encore est toléré et réessayé.",
-          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire.",
-          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
+          "entity_id": "L'entité person.* dont la présence décide si cette personne est notifiée."
         }
       },
       "edit_person": {
@@ -152,6 +162,48 @@
         "data_description": {
           "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify."
         }
+      },
+      "person_outputs": {
+        "title": "Services notify et silence",
+        "description": "Quels services notify joignent {person}, et quand cette personne est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
+        "data": {
+          "outputs": "Services notify",
+          "silence_entities": "Entités de silence",
+          "wake_time": "Heure de réveil"
+        },
+        "data_description": {
+          "outputs": "Choisissez parmi les services notify de cette instance, ou saisissez-en un qui n'existe pas encore : il est toléré et réessayé.",
+          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire. Un capteur Focus d'iPhone est proposé automatiquement.",
+          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
+        }
+      },
+      "target_saved": {
+        "title": "Cible enregistrée",
+        "description": "Voici le bloc alert: que cette ligne attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```"
+      },
+      "test_target": {
+        "title": "Tester une cible",
+        "description": "Envoie un vrai message de test par cette ligne, à toute son audience.",
+        "data": {
+          "slug": "Cible"
+        },
+        "data_description": {
+          "slug": "La ligne de la table de routage à tester. Le message est compté et évènementé comme n'importe quel autre."
+        }
+      },
+      "test_person": {
+        "title": "Tester une personne",
+        "description": "Envoie un vrai message de test à cette personne, par la ligne qui la joint.",
+        "data": {
+          "entity_id": "Personne"
+        },
+        "data_description": {
+          "entity_id": "La cible par défaut est utilisée si elle joint cette personne, sinon la première ligne dont l'audience la contient."
+        }
+      },
+      "test_result": {
+        "title": "Résultat du test",
+        "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
       }
     },
     "error": {
@@ -175,7 +227,8 @@
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
       "nothing_to_edit": "Il n'y a encore rien à modifier.",
-      "nothing_to_configure": "Ajoutez d'abord une cible."
+      "nothing_to_configure": "Ajoutez d'abord une cible.",
+      "nothing_to_test": "Aucune ligne de la table de routage n'a cette personne dans son audience : il n'y a rien à lui envoyer. Ajoutez-la d'abord à l'audience d'une cible."
     }
   },
   "issues": {
@@ -202,6 +255,14 @@
     "person_without_user_id": {
       "title": "Une personne n'est pas reliée à un utilisateur Home Assistant",
       "description": "{person} reçoit des notifications avec des boutons J'ai vu ou Reporter, mais son entité person n'est reliée à aucun utilisateur Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à toute l'audience de la cible. Reliez-la dans Paramètres > Personnes, puis rechargez le Standard de notification."
+    },
+    "person_without_outputs": {
+      "title": "Une personne n'a aucun service notify",
+      "description": "{person} fait partie de l'audience d'au moins une ligne de la table de routage mais n'a aucun service notify : tout message qui lui est destiné est écarté avec le motif no_outputs. Ouvrez les options de Notify Switchboard, modifiez cette personne et donnez-lui au moins un service notify."
+    },
+    "alert_entity_missing": {
+      "title": "Une cible pointe vers une alerte qui n'existe pas",
+      "description": "La ligne {slug} de la table de routage est liée à {entity_id}, qui n'est pas dans la machine à états. Cette ligne n'acquitte rien et n'observe rien. Écrivez ce bloc alert:, ou videz le champ alerte de la ligne, puis rechargez Notify Switchboard."
     }
   },
   "exceptions": {
@@ -294,6 +355,24 @@
         "person": {
           "name": "Personne",
           "description": "La personne dont il faut lever le silence."
+        }
+      }
+    },
+    "explain": {
+      "name": "Expliquer",
+      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette ligne ? », personne par personne, sans rien envoyer. À appeler avec return_response.",
+      "fields": {
+        "target": {
+          "name": "Cible",
+          "description": "Le slug de la ligne de la table de routage à évaluer."
+        },
+        "priority": {
+          "name": "Priorité",
+          "description": "La priorité à utiliser pour l'évaluation. Laissez vide pour la priorité par défaut de la ligne, exactement comme un vrai appel."
+        },
+        "person": {
+          "name": "Personne",
+          "description": "Sur qui répondre. Laissez vide pour toute l'audience de la ligne."
         }
       }
     }

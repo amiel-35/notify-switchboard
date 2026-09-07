@@ -3,7 +3,21 @@
   "common": {
     "acknowledge": "Visto",
     "snooze_minutes": "Posponer {minutes} min",
-    "back_to_normal": "Todo ha vuelto a la normalidad"
+    "back_to_normal": "Todo ha vuelto a la normalidad",
+    "this_persons_device": "dispositivo de esta persona",
+    "default_target_name": "Todo el mundo",
+    "test_message": "Mensaje de prueba de Notify Switchboard.",
+    "detail_routed": "Este mensaje se entregaría a {outputs}.",
+    "detail_deferred": "{person} está en silencio por {entities} y tiene hora de despertar: este mensaje se pondría en cola y se entregaría a las {until}.",
+    "detail_dropped": "Este mensaje se descartaría para {person}, motivo {reason}.",
+    "detail_presence": "La regla de presencia de este destino es {rule} y {person} está actualmente {state}.",
+    "detail_silenced": "{person} está en silencio por {entities}. Solo pasaría un mensaje critical.",
+    "detail_silenced_temporary": "{person} está en silencio mediante notify_switchboard.silence hasta {until}. Solo pasaría un mensaje critical.",
+    "detail_snoozed": "{person} ha pospuesto el destino {target} hasta {until}.",
+    "detail_no_outputs": "No hay ningún servicio notify configurado para {person}, así que no hay adónde enviarlo.",
+    "detail_not_in_audience": "{person} no está en la audiencia del destino {target}.",
+    "detail_unknown_person": "El destino {target} nombra a {person}, que no está en la tabla de Notify Switchboard.",
+    "detail_recursion": "Todos los servicios notify configurados para {person} apuntan de vuelta a Notify Switchboard, lo que causaría una recursión."
   },
   "entity": {
     "binary_sensor": {
@@ -57,23 +71,19 @@
           "target": "Añadir o modificar un destino",
           "edit_target": "Editar un destino",
           "remove_target": "Eliminar un destino",
-          "general": "Destino predeterminado"
+          "general": "Destino predeterminado",
+          "test_person": "Probar una persona",
+          "test_target": "Probar un destino"
         }
       },
       "person": {
         "title": "Persona",
-        "description": "Qué servicios notify llegan a esta persona y cuándo está en silencio.",
+        "description": "Elige la persona que quieres añadir o editar. El paso siguiente ofrece los servicios notify y los sensores Focus de sus teléfonos.",
         "data": {
-          "entity_id": "Persona",
-          "outputs": "Servicios notify",
-          "silence_entities": "Entidades de silencio",
-          "wake_time": "Hora de despertar"
+          "entity_id": "Persona"
         },
         "data_description": {
-          "entity_id": "La entidad person.* cuya presencia decide si se avisa a esta persona.",
-          "outputs": "Nombres de servicios notify sin el prefijo notify., por ejemplo mobile_app_alice. Un servicio que aún no existe se tolera y se reintenta.",
-          "silence_entities": "Cualquier entidad cuyo estado on signifique silencio: un schedule, un input_boolean, un sensor binario.",
-          "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse."
+          "entity_id": "La entidad person.* cuya presencia decide si se avisa a esta persona."
         }
       },
       "edit_person": {
@@ -152,6 +162,48 @@
         "data_description": {
           "default_target": "Lo usa notify.switchboard cuando no se indica destino, y también la entidad notify."
         }
+      },
+      "person_outputs": {
+        "title": "Servicios notify y silencio",
+        "description": "Qué servicios notify llegan a {person} y cuándo está en silencio. Los servicios de los teléfonos vinculados a su usuario de Home Assistant se listan primero y ya están marcados.",
+        "data": {
+          "outputs": "Servicios notify",
+          "silence_entities": "Entidades de silencio",
+          "wake_time": "Hora de despertar"
+        },
+        "data_description": {
+          "outputs": "Elige entre los servicios notify de esta instancia o escribe uno que aún no exista: se tolera y se reintenta.",
+          "silence_entities": "Cualquier entidad cuyo estado on signifique silencio: un schedule, un input_boolean, un sensor binario. Un sensor Focus de iPhone se propone automáticamente.",
+          "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse."
+        }
+      },
+      "target_saved": {
+        "title": "Destino guardado",
+        "description": "Este es el bloque alert: que espera esta fila. Cópialo en tu configuración YAML, apunta entity_id a la entidad que quieres vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```"
+      },
+      "test_target": {
+        "title": "Probar un destino",
+        "description": "Envía un mensaje de prueba real por esta fila, a toda su audiencia.",
+        "data": {
+          "slug": "Destino"
+        },
+        "data_description": {
+          "slug": "La fila de la tabla de enrutamiento que quieres probar. El mensaje se cuenta y se emite como cualquier otro."
+        }
+      },
+      "test_person": {
+        "title": "Probar una persona",
+        "description": "Envía un mensaje de prueba real a esta persona, por la fila que la alcanza.",
+        "data": {
+          "entity_id": "Persona"
+        },
+        "data_description": {
+          "entity_id": "Se usa el destino predeterminado si alcanza a esta persona; si no, la primera fila cuya audiencia la contiene."
+        }
+      },
+      "test_result": {
+        "title": "Resultado de la prueba",
+        "description": "El mensaje se ha enviado. Esto es lo que el enrutador decidió para cada persona:\n\n{result}"
       }
     },
     "error": {
@@ -175,7 +227,8 @@
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",
       "nothing_to_edit": "Todavía no hay nada que editar.",
-      "nothing_to_configure": "Añade primero un destino."
+      "nothing_to_configure": "Añade primero un destino.",
+      "nothing_to_test": "Ninguna fila de la tabla de enrutamiento tiene a esta persona en su audiencia, así que no hay nada que enviarle. Añádela primero a la audiencia de un destino."
     }
   },
   "issues": {
@@ -202,6 +255,14 @@
     "person_without_user_id": {
       "title": "Una persona no está vinculada a un usuario de Home Assistant",
       "description": "{person} recibe notificaciones con botones Confirmar o Posponer, pero su entidad person no está vinculada a ningún usuario de Home Assistant. Por eso Notify Switchboard no puede saber quién ha pulsado, y aplica la acción a toda la audiencia del destino. Vincúlela en Ajustes > Personas y recargue Notify Switchboard."
+    },
+    "person_without_outputs": {
+      "title": "Una persona no tiene ningún servicio notify",
+      "description": "{person} está en la audiencia de al menos una fila de la tabla de enrutamiento pero no tiene ningún servicio notify, así que todos los mensajes destinados a ella se descartan con el motivo no_outputs. Abre las opciones de Notify Switchboard, edita a esa persona y dale al menos un servicio notify."
+    },
+    "alert_entity_missing": {
+      "title": "Un destino apunta a una alerta que no existe",
+      "description": "La fila {slug} de la tabla de enrutamiento está vinculada a {entity_id}, que no está en la máquina de estados. Esa fila no confirma nada ni observa nada. Escribe ese bloque alert:, o vacía el campo de alerta de la fila, y recarga Notify Switchboard."
     }
   },
   "exceptions": {
@@ -294,6 +355,24 @@
         "person": {
           "name": "Persona",
           "description": "La persona a la que hay que levantarle el silencio."
+        }
+      }
+    },
+    "explain": {
+      "name": "Explicar",
+      "description": "Responde qué le pasaría ahora mismo a un mensaje enviado a una fila de la tabla de enrutamiento, persona por persona, sin enviar nada. Llámalo con return_response.",
+      "fields": {
+        "target": {
+          "name": "Destino",
+          "description": "El slug de la fila de la tabla de enrutamiento que se va a evaluar."
+        },
+        "priority": {
+          "name": "Prioridad",
+          "description": "La prioridad con la que evaluar. Déjalo vacío para usar la prioridad predeterminada de la fila, igual que en una llamada real."
+        },
+        "person": {
+          "name": "Persona",
+          "description": "Sobre quién responder. Déjalo vacío para toda la audiencia de la fila."
         }
       }
     }

@@ -76,3 +76,26 @@ unsilence:
         entity:
           filter:
             domain: person
+
+explain:
+  fields:
+    target:
+      required: true
+      example: leak
+      selector:
+        text:
+    priority:
+      example: high
+      selector:
+        select:
+          options:
+            - info
+            - normal
+            - high
+            - critical
+    person:
+      example: person.alice
+      selector:
+        entity:
+          filter:
+            domain: person

@@ -1,6 +1,8 @@
 # Notify Switchboard
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=amiel-35&repository=notify-switchboard&category=integration)
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=notify_switchboard)
 
 A [Home Assistant](https://www.home-assistant.io/) custom integration that
 acts as a pure `notify` **proxy**. It never delivers a notification itself:
@@ -44,29 +46,38 @@ queued and delivered at their wake time.
 
 ## Install
 
-Via [HACS](https://hacs.xyz/), as a custom repository:
-
-1. HACS → Integrations → menu → Custom repositories.
-2. Add `https://github.com/amiel-35/notify-switchboard`, category
-   "Integration".
-3. Install "Notify Switchboard", then restart Home Assistant.
+The **My Home Assistant** button at the top of this page opens this repository
+in [HACS](https://hacs.xyz/) on your own instance. By hand: HACS →
+Integrations → menu → Custom repositories → add
+`https://github.com/amiel-35/notify-switchboard`, category "Integration", then
+install "Notify Switchboard" and restart Home Assistant.
 
 ## Configuration
 
+The second button at the top of this page starts the config flow. Or:
 Settings → Devices & services → Add integration → "Notify Switchboard".
-Setup takes no input; the routing table is built from the integration's
-options:
+Setup takes no input, and since 0.4.0 **one form is enough** to get a working
+`notify.switchboard`:
 
-1. **Add a person** — pick a `person.*`, list the notify services that reach
-   them (`mobile_app_alice`; the `notify.` prefix is accepted and stripped),
-   optionally the
-   entities whose `on` state means "silent", and a wake time.
-2. **Add a target** — one row per alert: a slug (it becomes
-   `notify.switchboard_<slug>`), a name, a default priority, the `alert.*` it
-   is tied to, the audience, a presence rule, and the snooze durations to
-   offer.
-3. **Default target** — the row used by `notify.switchboard` when no target is
-   given, and by the notify entity.
+1. **Add a person** — pick a `person.*`. The notify services of the phones
+   registered to that person's Home Assistant user are listed first, marked as
+   theirs and already selected, and their iPhone Focus sensors are proposed as
+   silence entities. Nothing is guessed from a name: the link is the `user_id`
+   a Companion registration stores and the one a `person.*` publishes. You can
+   still type a service that does not exist yet.
+2. That is it, on a fresh install: the first person added to an empty routing
+   table also creates a `default` row and points the default target at it, so
+   `notify.switchboard` reaches a real phone straight away. While that row is
+   managed, a second person joins its audience automatically; editing it hands
+   it to you for good.
+3. **Add a target** — one row per alert, when you want more than "everybody":
+   a slug (it becomes `notify.switchboard_<slug>`), a name, a default
+   priority, the `alert.*` it is tied to, the audience, a presence rule, and
+   the snooze durations to offer. Saving it shows the `alert:` block to paste,
+   `notifiers:` included.
+4. **Test a person / Test a target** — sends one real message through the
+   ordinary routing path, tagged `switchboard-test`, and shows what the router
+   decided for each person.
 
 Then point an alert at it:
 
@@ -95,9 +106,36 @@ explicit error rather than doing nothing quietly.
 | `notify_switchboard.unsnooze` | `target`, `person` (optional) | Lifts a snooze immediately. |
 | `notify_switchboard.silence` | `person`, `minutes` | Silences somebody for a while, for every target, without touching their own silence entities. Only `critical` still gets through. |
 | `notify_switchboard.unsilence` | `person` | Lifts that silence immediately. |
+| `notify_switchboard.explain` | `target`, `priority` (optional), `person` (optional) | Answers what would happen to a message sent right now, per person, and changes nothing at all. Call it with **Return response**. |
 
 A silence set this way shows up in `binary_sensor.<person>_silenced` (with an
 `until` attribute), survives a restart, and lifts on its own.
+
+## Why didn't I get it?
+
+`notify_switchboard.explain` is the answer to the first argument this router
+will ever lose. It runs the real decision over the real world and reports it,
+per person, without sending anything, moving a counter or firing an event:
+
+```yaml
+persons:
+  person.alice:
+    decision: dropped          # routed | deferred | dropped
+    until: null                # ISO instant, deferred only
+    reason: silenced           # a drop reason, dropped only
+    detail: "person.alice is silenced by input_boolean.quiet_hours. Only a critical message would get through."
+    outputs: []                # the notify.* services it would reach
+    missing_outputs: []        # configured outputs that are not services
+```
+
+`detail` is translated, and it names the deciding object — *which* switch is
+on, *when* the snooze lifts, the presence rule against the person's current
+state — rather than restating the reason.
+
+Alongside it, three repairs turn silent, permanent failures into something the
+Repairs page can show: a person in an audience with no notify service at all, a
+row tied to an `alert.*` that does not exist (checked a minute after startup,
+never during it), and an output that keeps failing.
 
 ## Message text
 
@@ -133,16 +171,17 @@ the `notify.switchboard` service and the entity; it does not touch the
 ## Roadmap
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table and
-the router's own roadmap. This release covers everything up to router S3: the
+the router's own roadmap. This release covers everything up to router S4: the
 routing table, the per-person decision, acknowledge and snooze, night
-deferral, observer mode, the diagnostic entities, the five services above, a
-temporary per-person silence, the per-row message texts, and — since 0.3.0 —
-translated entity names, a parallel fan-out bounded by a per-output timeout,
-`person.user_id` as the canonical link for Companion callbacks, and actions
-that exist whether or not the config entry is loaded.
+deferral, observer mode, the diagnostic entities, the six services above, a
+temporary per-person silence, the per-row message texts, translated entity
+names, a parallel fan-out bounded by a per-output timeout, `person.user_id` as
+the canonical link for Companion callbacks, actions that exist whether or not
+the config entry is loaded, and — since 0.4.0 — discovered Companion outputs
+and Focus sensors, a managed `default` row, `notify_switchboard.explain`, two
+consistency repairs and a test message from the options menu.
 
-Next: zero-config (S4), a real quiet-hours model (S5), escalation (S6) and
-places (S7).
+Next: a real quiet-hours model (S5), escalation (S6) and places (S7).
 
 ## Documentation
 

@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.4.0 — zero-config and explainability (contract v0.4 addendum,
+ADR-0018), on top of the router 0.3.0 changes further down, which are in `main`
+but not tagged either. Every feature here is discovery, defaults and diagnosis
+over the decision engine 0.1.0 already had: no new routing semantics, no new
+event type, no new drop reason, and one optional routing-table row key.
+
+### Added
+
+- **`notify_switchboard.explain`, a sixth and read-only action.** Declared
+  `SupportsResponse.ONLY`, so it must be called with `return_response`. Given a
+  `target` (and optionally a `priority` and a `person`) it answers, per person:
+  `decision` (`routed` / `deferred` / `dropped`), the ISO `until` of a
+  deferral, the `reason` of a drop, a **translated `detail`** naming what
+  actually decided — which silence entity is on, when the snooze lifts, the
+  presence rule against the person's current state — and the `notify.*`
+  services the message would reach (`outputs`) or that are configured but not
+  registered (`missing_outputs`). It is a pure evaluation: no notification is
+  sent, no counter moves, no `event.switchboard_delivery` fires, no deferral is
+  queued and nothing is persisted. A known person who is simply not in the
+  row's audience is answered (`dropped` / `not_in_audience`) rather than
+  refused; an unknown target or person raises `ServiceValidationError` with the
+  existing translation keys, and with no loaded entry it raises
+  `no_loaded_entry` like the other five. Declared in `services.yaml` with
+  `en`/`fr`/`es` translations like the other five, so Developer tools > Actions
+  generates its field editor.
+- **Companion outputs are discovered, labelled and pre-selected.** The person
+  editor's `outputs` field is now a multi-select of the instance's own
+  `notify.*` services instead of free text. The push services of the phones
+  registered to *that person's* Home Assistant user come first, carry a
+  translated "this person's device" marker, and are pre-selected for a new
+  person. The link is exact — the `user_id` a `mobile_app` config entry stores
+  against the `user_id` a `person.*` publishes — never a guess from a name. A
+  service that does not exist yet can still be typed (`custom_value`), which is
+  the 0.1 behaviour this replaces.
+- **iOS Focus sensors are proposed as silence entities.** For a new person, the
+  `binary_sensor` entities of their own Companion registrations whose entity id
+  or translation key contains `focus`. Android's Do Not Disturb is deliberately
+  not proposed (it is a `sensor` with several string states); `docs/quickstart.md`
+  now carries the one-line template `binary_sensor` that bridges it.
+- **A managed `default` row, so a fresh install works after one form.** The
+  first person added to an **empty** routing table also creates a row —
+  translated name, class `general`, priority `normal`, presence `always`, that
+  person as its audience, flagged `managed` — and points `default_target` at
+  it. `notify.switchboard` therefore reaches a real phone as soon as one person
+  with one output exists. While the flag is true the row's audience is every
+  configured person, so a second person joins it automatically. **Submitting
+  the row editor for that row — any field — clears `managed` permanently**, and
+  nothing ever sets it back.
+- **Two consistency repairs**, both `warning`, both not fixable from the repair
+  itself, both translated and both deleted when their cause disappears:
+  `person_without_outputs` (a person in the audience of at least one row with
+  no notify service at all — until now they were dropped with `no_outputs` on
+  every message, silently and for ever) and `alert_entity_missing` (a row tied
+  to an `alert.*` that is not in the state machine
+  `dispatcher.ALERT_ENTITY_GRACE_SECONDS` — 60 s — after the entry was set up;
+  not at setup, where the `alert` component may simply not have loaded yet).
+- **"Test a person" / "Test a target" in the options menu.** Each sends one
+  *real* message through the ordinary routing path — counted, evented, deferred
+  or dropped like any other — carrying the public `data.tag: switchboard-test`,
+  and then shows the `explain` answer for that same call in the step
+  description. A real message rather than a dry run is the point: it proves the
+  *output* works, which `explain` cannot.
+- **The `alert:` snippet, on a new confirmation step.** Saving a routing-table
+  row now ends on `target_saved`, which shows a ready-to-paste `alert:` block
+  keyed on the row's own alert (or its slug), with `notifiers:
+  [switchboard_<slug>]`, a `state:`, a `repeat:` example and an obvious
+  `entity_id:` placeholder. Nothing is written to the options until that step is
+  submitted.
+
+### Changed
+
+- **The person editor is two steps**, `person` (pick the `person.*`) then
+  `person_outputs` (services, silence entities, wake time). A form cannot react
+  to a field it is showing, so pre-selecting somebody's phones requires the
+  person to have been chosen earlier. `Edit a person` picks the row and opens
+  `person_outputs` directly, still on the **stored** values: discovery never
+  silently re-adds an output somebody removed. The stored options shape is
+  unchanged.
+- **`managed` is a new optional routing-table row key**, and the only options
+  change of 0.4. Absent means false, so every row written by 0.1–0.3 behaves
+  exactly as it does today and no storage migration is needed.
+- **Documentation rewritten around the zero-config path**: `docs/quickstart.md`
+  now opens on "add the integration, add one person, you are done", with the
+  `alert:` block, the test steps and `explain` after it; `README.md` gains My
+  Home Assistant buttons for HACS and for the config flow.
+
+---
+
 Router 0.3.0 — debts and robustness (contract v0.3 addendum, ADR-0017). No new
 user-facing concept: no TTL, no summary, no escalation, no new option key.
 
