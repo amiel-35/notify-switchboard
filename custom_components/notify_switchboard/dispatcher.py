@@ -1341,12 +1341,34 @@ class Switchboard:
     def _async_schedule_deferral(self, person_id: str) -> None:
         """(Re)schedule the delivery of one person's queued messages.
 
-        The instant is whichever comes first: the person's next wake time, or
-        the end of a temporary `notify_switchboard.silence` if one is running
-        and lifts sooner. The second case matters because
-        `_async_flush_deferrals` re-checks the silence and keeps a message that
-        is still covered — without it, a flush held back by an hour of
-        requested quiet would wait until the *next* morning to try again.
+        Two instants can be predicted, and the timer is armed on whichever of
+        them comes first that is still ahead of us:
+
+        * the person's next wake time, or -- when they have none (ADR-0020 §3)
+          -- the end their active `silence_entities` publish, the same instant
+          `explain` reports as `until`;
+        * the end of a temporary `notify_switchboard.silence`, if one is
+          running.
+
+        The second one matters because `_async_flush_deferrals` re-checks both
+        silences and keeps a message that is still covered. Without it, a flush
+        held back by an hour of requested quiet would wait until the *next*
+        morning to try again -- and a person with no wake time would wait for
+        no morning at all: a temporary silence that outlives the night leaves
+        the re-arm reading a schedule that has since gone `off` and publishes
+        nothing, so the queue would be left with no timer whatsoever until some
+        later night ended. A message with a time to live rarely survives that.
+
+        Only an instant **strictly ahead** of `now` is armed on. A timer that
+        fires exactly at the end a schedule published can run before that
+        schedule's own state write lands, so the re-arm may still read the end
+        that has just passed; arming on it would have
+        `async_track_point_in_time` fire again immediately
+        (`$HA_CORE_SRC/homeassistant/helpers/event.py`, `_TrackPointUTCTime`
+        clamps a past instant to "now"), and the flush and the re-arm would
+        chase each other in a loop. Dropping the stale instant leaves the later
+        one -- or, when there is none, nothing to wait for, which is what the
+        early flush of ADR-0019 §4 is for.
 
         A configured `silence_entities` going `off` early is not scheduled for
         here -- the router cannot predict when that happens -- but it is no
@@ -1368,21 +1390,22 @@ class Switchboard:
             return
 
         now = dt_util.now()
-        if person.wake_time is None:
-            # ADR-0020 §3: no wake time, so the fallback timer is armed on the
-            # end the silence published -- the same instant `explain` reports.
-            # With nothing published there is nothing to arm, and the early
-            # flush of ADR-0019 §4 is what releases the queue.
-            end = self.configured_silence_end(person)
-            if end is None:
-                return
-            when = dt_util.as_local(end)
-        else:
-            when = next_wake_time(now, person.wake_time)
-            if (until := self.store.silences.get(person_id)) is not None:
-                local_until = dt_util.as_local(until)
-                if now < local_until < when:
-                    when = local_until
+        candidates: list[datetime] = []
+        if person.wake_time is not None:
+            candidates.append(next_wake_time(now, person.wake_time))
+        elif (end := self.configured_silence_end(person)) is not None:
+            # ADR-0020 §3: no wake time, so the upper bound is the end the
+            # silence published. With nothing published there is nothing to
+            # arm on from here, and the early flush of ADR-0019 §4 is what
+            # releases the queue.
+            candidates.append(dt_util.as_local(end))
+        if (until := self.store.silences.get(person_id)) is not None:
+            candidates.append(dt_util.as_local(until))
+
+        ahead = [instant for instant in candidates if instant > now]
+        if not ahead:
+            return
+        when = min(ahead)
 
         @callback
         def _deliver(_now: datetime) -> None:
