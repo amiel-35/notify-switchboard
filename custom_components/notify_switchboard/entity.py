@@ -52,6 +52,7 @@ intent is readable rather than hidden in an f-string at each call site.
 
 from __future__ import annotations
 
+from homeassistant.const import ATTR_FRIENDLY_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -79,16 +80,20 @@ def person_device_name(hass: HomeAssistant, person: PersonConfig) -> str:
 
     A `person.*` entity is renamed in the UI without its entity id following,
     so the object_id is not the person's name -- `person.alice` may well be
-    "Alice Martin". `State.name` is the friendly name when there is one and
-    the titled object_id otherwise (`homeassistant/core.py`, `State.name`),
-    which is exactly what is wanted here.
+    "Alice Martin". The friendly name is therefore the only source worth
+    reading.
 
-    The titled object_id remains the fallback for the case there is no state
-    at all: at setup a restart can reach this before the `person` integration
-    has written its states.
+    `State.name` is not that source: it is
+    `friendly_name or object_id.replace("_", " ")` (`homeassistant/core.py`,
+    `State.name`) with no titling, so a person entity without a friendly name
+    would give "jean luc". The attribute is read directly and the titled
+    object_id stays the single fallback -- for a state with no friendly name,
+    and for no state at all (at setup a restart can reach this before the
+    `person` integration has written its states).
     """
-    if (state := hass.states.get(person.entity_id)) is not None:
-        return state.name
+    state = hass.states.get(person.entity_id)
+    if state is not None and (name := state.attributes.get(ATTR_FRIENDLY_NAME)):
+        return str(name)
     return person.object_id.replace("_", " ").title()
 
 

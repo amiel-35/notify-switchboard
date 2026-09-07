@@ -95,9 +95,9 @@ user-facing concept: no TTL, no summary, no escalation, no new option key.
   `delivery_failed`, the same as any other delivery that reached nobody.
 - **Per-person devices are named after the person.** The virtual device used
   the person's object_id titled (`person.alice` → "Alice"), ignoring the
-  friendly name a user set in the UI ("Alice Martin"). It now uses the person's
-  state name, falling back to the old form only when the person has no state
-  yet.
+  friendly name a user set in the UI ("Alice Martin"). It now reads the
+  `friendly_name` attribute, falling back to the old titled form when there is
+  none — or no state at all yet.
 - **`quality_scale.yaml` parses.** One unquoted comment containing ": " made
   the whole self-assessment file invalid YAML. A unit test now parses it and
   checks it assesses exactly hassfest's rule set for 2026.9.1.
