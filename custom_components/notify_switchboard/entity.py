@@ -52,7 +52,7 @@ readable rather than hidden in an f-string.
 
 from __future__ import annotations
 
-from homeassistant.core import callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import Entity
@@ -74,11 +74,31 @@ def router_device_info(entry_id: str) -> DeviceInfo:
     )
 
 
-def person_device_info(entry_id: str, person: PersonConfig) -> DeviceInfo:
+def person_device_name(hass: HomeAssistant, person: PersonConfig) -> str:
+    """Return the name to give one person's virtual device.
+
+    A `person.*` entity is renamed in the UI without its entity id following,
+    so the object_id is not the person's name -- `person.alice` may well be
+    "Alice Martin". `State.name` is the friendly name when there is one and
+    the titled object_id otherwise (`homeassistant/core.py`, `State.name`),
+    which is exactly what is wanted here.
+
+    The titled object_id remains the fallback for the case there is no state
+    at all: at setup a restart can reach this before the `person` integration
+    has written its states.
+    """
+    if (state := hass.states.get(person.entity_id)) is not None:
+        return state.name
+    return person.object_id.replace("_", " ").title()
+
+
+def person_device_info(
+    hass: HomeAssistant, entry_id: str, person: PersonConfig
+) -> DeviceInfo:
     """Return the virtual device grouping one person's entities."""
     return DeviceInfo(
         identifiers={(DOMAIN, f"{entry_id}:{person.entity_id}")},
-        name=person.object_id.replace("_", " ").title(),
+        name=person_device_name(hass, person),
         entry_type=DeviceEntryType.SERVICE,
         manufacturer="Notify Switchboard",
     )
@@ -150,5 +170,7 @@ class SwitchboardPersonEntity(SwitchboardEntity):
         self._person = person
         self._attr_unique_id = f"{self._entry_id}:{person.entity_id}:{kind}"
         self._attr_translation_key = kind
-        self._attr_device_info = person_device_info(self._entry_id, person)
+        self._attr_device_info = person_device_info(
+            switchboard.hass, self._entry_id, person
+        )
         self._freeze_object_id(f"{person.object_id}_{kind}")
