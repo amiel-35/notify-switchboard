@@ -18,8 +18,29 @@ jobs:
         working-directory: custom_components/notify_switchboard
         run: zip -r ${{ github.workspace }}/notify_switchboard.zip . -x '.*'
 
+      - name: Extract the release notes from CHANGELOG.md
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          notes="$(awk -v heading="## [${version}]" '
+            index($0, heading) == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)"
+          # Drop the leading blank lines; "$( )" has already dropped the trailing ones.
+          notes="$(printf '%s\n' "$notes" | sed -e '/./,$!d')"
+          if [ -z "$notes" ]; then
+            echo "::error file=CHANGELOG.md::No '## [${version}]' section in CHANGELOG.md — add it (Highlights first, then the detailed blocks), then delete and re-push the tag ${TAG}."
+            exit 1
+          fi
+          printf '%s\n' "$notes" > release-notes.md
+          echo "Release notes for ${version}:"
+          cat release-notes.md
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
           files: notify_switchboard.zip
-          generate_release_notes: true
+          body_path: release-notes.md
