@@ -88,7 +88,10 @@ enough to get a working `notify.switchboard`:
 3. **Add a target** — one per alert, when you want more than "everybody". Five
    fields: a slug (it becomes `notify.switchboard_<slug>`), a name, the
    `alert.*` it is about, the audience, and whether the router watches that
-   alert itself. Saving it shows the `alert:` block to paste.
+   alert itself. The audience offers the instance's `notify.*` services
+   alongside the persons, so a kitchen speaker can be in it without being
+   modelled as somebody who lives in the house (see below). Saving it shows
+   the `alert:` block to paste.
 4. **Test a person / Test a target** — sends one real message through the
    ordinary routing path, tagged `switchboard-test`, and shows what the router
    decided for each person.
@@ -97,7 +100,40 @@ Priority, presence rule, buttons, snooze durations, templates and default data
 all have a default that suits almost everybody, and live behind **Advanced
 settings of a target** — offered straight after saving, and in the options menu
 for ever after. The same split applies to a person: **Advanced settings of a
-person** holds their wake time and their night summary.
+person** holds their wake time and their night summary. **Escalation of a
+target** is a third, one-question step, described next.
+
+### When the house is empty
+
+A target can carry **`escalate_when_nobody_home`** (options menu → *Escalation
+of a target*, off by default). When it is on and **no** person of the target's
+audience is in the literal state `home` at the moment a message arrives, that
+message is routed **one step louder**, for that message only:
+
+| From | To |
+|---|---|
+| `info` | `normal` |
+| `normal` | `high` |
+| `high` | `critical` |
+| `critical` | `critical` (unchanged) |
+
+One step, not straight to `critical`: an empty house says nobody is here to
+notice it, not that the message became a life-safety alert. A target whose
+alerts matter sets its default priority to `high` and gets a **critical** push
+out of an empty house — which, with the critical payload below, is a phone
+that rings through Do Not Disturb. A target of shopping lists gets a `normal`
+message and nothing else.
+
+Anything that is not the literal `home` — a named zone, `not_home`, `unknown`,
+a person the state machine has never heard of — counts as "not home". A target
+with no person in its audience escalates nothing, and the presence rule is
+never overridden: a `home_only` target with nobody home still drops everybody
+with the reason `presence`. That last point is the thing to check before
+turning escalation on: it only changes anything on a target whose presence
+rule lets an absent person be notified — `always` or `away_only`. Under
+`home_only` an empty house means nobody is notified at all, so there is no
+priority left to raise. `notify_switchboard.explain` reports the rule under
+its `escalated` key, and reports the raised priority.
 
 ### Observer mode, or `notifiers:`
 
@@ -152,10 +188,49 @@ notify:
 
 Aim it at a Music Assistant player to get pause/announce/resume; a raw Cast
 player is interrupted. Pick `notify.kitchen_speaker` in a person's **Notify
-services** the same way you would a phone, or give it to a person whose whole
-job is that speaker. Assist Satellite Notifier (a sibling of this suite) is the one
-adapter still worth a separate integration — `assist_satellite` has no
-`notify` platform of its own.
+services** the same way you would a phone — or put it **straight in a target's
+audience**, which is what it is for. Assist Satellite Notifier (a sibling of
+this suite) is the one adapter still worth a separate integration —
+`assist_satellite` has no `notify` platform of its own.
+
+An audience entry that is a `notify.*` service name is a **bare output**: a
+thing that can be told something, with no presence, no phone and no bedtime.
+It has no presence rule, no silence, no snooze, no wake time, no summary and
+no time to live — it is delivered now or it is not delivered — and it gets no
+Acknowledge or Snooze button and no key the router invented, only what you
+sent merged with the target's default data. It counts as one delivery like
+anybody else, it takes part in the target's episodes (so "back to normal"
+reaches the speaker that heard the alarm and no other), and one that does not
+exist fails exactly the way a missing phone does. Until 0.7.0 it had to be
+modelled as a fake `person.*` that never moved.
+
+An episode can tell a bare output that it is over; it cannot **tidy** it. The
+clear at the end of an episode works on the identifiers the router adds — the
+`tag` a Companion app matches, the `notification_id`
+`persistent_notification` is created with — and a bare output receives none of
+them. A bare `notify.persistent_notification` therefore stays on the dashboard
+until somebody dismisses it, next to the back-to-normal message saying the
+leak is fixed. Put `persistent_notification` in a **person's** outputs instead
+whenever you want it cleared.
+
+### Outputs that are `notify` entities
+
+Some integrations — Alexa Devices, Telegram, core's own notify groups — ship
+`notify.*` **entities** rather than legacy services. From 0.7.0 an output that
+names one is delivered through `notify.send_message`. A registered legacy
+service of the same name always wins, so nothing that works today changes.
+
+The pickers do not offer them: **Notify services** and a target's **Audience**
+both list the registered `notify.*` services, so to use an entity you type its
+entity id into the field — both fields accept a typed value — and the router
+resolves it when the message goes out.
+
+Home Assistant's entity action carries **`message` and `title` and nothing
+else**, so a target's default data, your own `data`, the default tag, the
+buttons and the critical payload never reach an entity output. That is core's
+shape, not a shortcut — it is the same limitation this integration documents
+for its own `notify.switchboard` entity. An entity that is missing or
+`unavailable` is treated as a missing output, with the same repair.
 
 ## The night
 
@@ -168,6 +243,31 @@ publishes that instant, an `input_boolean` does not — and a message silenced b
 something that never says when it stops is dropped with the reason `silenced`,
 as it always was.
 
+- **A silence can be selective.** A silence entity that is `on` and publishes a
+  `min_priority` state attribute holds only the calls **below** that priority;
+  anything at or above it goes through. `binary_sensor.<person>_silenced`
+  still reads `on` throughout: it answers "is a silence running?", not "would
+  this particular message get through?", and a floor changes only the second —
+  which is `notify_switchboard.explain`'s question, message by message. A core
+  `schedule` is the documented way to publish one, with no automation of your
+  own:
+
+  ```yaml
+  schedule:
+    night:
+      monday:
+        - from: "22:30:00"
+          to: "07:00:00"
+          data:
+            min_priority: high
+  ```
+
+  List `schedule.night` as that person's silence entity and the night holds the
+  shopping list and lets the leak through. The router reads the attribute, not
+  the domain, so a template `binary_sensor` that publishes it works the same
+  way. A value that is not one of the four priorities is ignored and the entity
+  holds everything: a floor fails towards quiet. When several silences are on,
+  the strictest decides, and one without a floor holds everything.
 - **Nothing waits for ever.** Each priority has a time to live, counted from
   the moment the message was queued: 2 h for `info`, 12 h for `normal`, none
   for `high`. A message whose time has run out is dropped with the reason
@@ -250,6 +350,10 @@ will ever lose. It runs the real decision over the real world and reports it,
 per person, without sending anything, moving a counter or firing an event:
 
 ```yaml
+target: leak
+priority: critical             # the priority a message would actually go out at
+escalated: nobody_home         # or null: what raised it, when anything did
+outputs: [notify.kitchen_speaker]   # the target's bare outputs, in audience order
 persons:
   person.alice:
     decision: dropped          # routed | deferred | dropped
@@ -262,7 +366,10 @@ persons:
 
 `detail` is translated, and it names the deciding object — *which* switch is
 on, *when* the snooze lifts, the presence rule against the person's current
-state — rather than restating the reason.
+state, and the **floor** a silence carries when it has one — rather than
+restating the reason. `priority` is what a message sent right now would carry,
+escalation included; `escalated` is `null` when nothing raised it, including
+when the rule's condition held but the message was already `critical`.
 
 Alongside it, three repairs turn silent, permanent failures into something the
 Repairs page can show: a person in an audience with no notify service at all, a
@@ -285,7 +392,7 @@ settings of a target**:
 
 | Key | Meaning |
 |---|---|
-| `priority` | `info` / `normal` / `high` / `critical`; overrides the target's default. Only `critical` bypasses silence and snoozes. |
+| `priority` | `info` / `normal` / `high` / `critical`; overrides the target's default. Only `critical` bypasses silence and snoozes. **From 0.7.0 it is not forwarded to `mobile_app_*` outputs**: it is the router's own input key, and Android's Companion app reads `data.priority` and understands only `high`. Every other output still receives it. |
 | `source_entity` | The entity the message is about. Diagnostics and voice deny-lists read it. |
 | `tag` | De-duplicates a deferral and names the notification. Defaults to `switchboard-<slug>`, and that default is only sent to Companion and `persistent_notification` outputs; a `tag` **you** set is passed to every output like any other key. |
 | `ttl_minutes` | How long this message is still worth delivering once it has been held back. `0` means never expires. |
@@ -296,6 +403,58 @@ The router never adds a key an output cannot read: apart from the defaults
 above, an output receives exactly what you sent merged with the target's
 default data. That matters for adapters that validate their `data` and refuse anything
 unknown — the AirPlay and Assist Satellite notifiers of this suite do.
+
+### Critical notifications
+
+`critical` has meant one thing to a phone since 0.1.0: nothing. It bypassed a
+silence *inside the router* and then arrived as an ordinary push, which a phone
+in Do Not Disturb does not play.
+
+From 0.7.0, a message whose **effective** priority is `critical` — after the
+escalation above — carries, on `mobile_app_*` outputs only, the keys the
+[Companion documentation](https://companion.home-assistant.io/docs/notifications/critical-notifications/)
+gives for a critical notification:
+
+| Registration OS | Keys added under `data` |
+|---|---|
+| iOS / iPadOS / watchOS | `push: {sound: {name: default, critical: 1, volume: 1.0}}` |
+| Android | `ttl: 0`, `priority: high`, `channel: alarm_stream` |
+| anything else, or no matching registration | both sets |
+
+The OS is read from the Companion registration behind that service, so nothing
+has to be configured per phone. Both sets are sent when the router cannot tell:
+the keys of one OS are inert on the other, and a phone that rings beats a phone
+that is quiet because a registration predates the field. A key **you** set is
+never overwritten, and `push` counts as a single key — write
+`push: {interruption-level: critical}` and the router adds nothing under it.
+
+Turn it off in one place, under **Default target** in the options menu
+("Make critical notifications critical"). On iOS the phone must also have
+granted the Companion app the critical-alerts permission, which no integration
+can do for you.
+
+## The routing table, for cards
+
+`sensor.switchboard_routing_table` publishes what the table *is*, so a card
+stops re-declaring it in its own YAML and going stale on the first options
+edit. Its state is the number of targets, and it carries exactly two
+attributes:
+
+| Attribute | One entry per | Keys |
+|---|---|---|
+| `targets` | target, in table order | `slug`, `name`, `alert_entity`, `snooze_minutes`, `allow_acknowledge`, `audience` |
+| `persons` | configured person, in options order | `entity_id`, `wake_time`, `summary` |
+
+`alert_entity` and `wake_time` are `null` rather than absent when there is
+none, so every row has the same shape, and `audience` is reported verbatim,
+bare outputs included. Both lists are **closed**: a target's `default_data` is
+never exposed — it is where an API key or a webhook path ends up, and a state
+attribute is readable by anybody who can read the state machine — and neither
+is a person's list of notify services. If you need to know what *would*
+happen, that is `notify_switchboard.explain`.
+
+Neither attribute is written to the database: they are configuration, and they
+change only when you edit the options.
 
 ## Translations
 
@@ -322,11 +481,26 @@ the `notify.switchboard` service and the entity; it does not touch the
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table and the
 router's own roadmap.
 
-**0.6.0 is a consolidation release**: it adds no routing rule, no entity, no
-service and no drop reason. It shortens the first form somebody meets from
-fifteen fields to five, removes a field nothing ever read (`class`), gives an
-absent wake time a documented meaning, settles one word per concept, and makes
-these documents agree with the code. What went before it is still all here:
+**0.7.0 adds again**, from a list the maintainer shortened after the product
+review: one step louder when nobody is home, a priority floor a `schedule` can
+carry, `sensor.switchboard_routing_table`, who acknowledged in the
+`acknowledged` event, audience entries and outputs that are not people, and a
+critical push that a phone actually plays. It has one **breaking** change:
+`data.priority` no longer reaches a `mobile_app_*` output — see the `data` keys
+table above. The router still owns no timer and no counter of its own: every
+rule is evaluated when a message arrives, from entities that already exist.
+Deferred, each with the native answer that stands in for it today: escalation
+after N minutes (a template `binary_sensor`'s `delay_on`, written up in
+[`docs/blueprints.md`](docs/blueprints.md)), a delivery cap, a per-target
+authentication override, a per-person priority floor, an acknowledgement
+history sensor, labels on a target and a `places` object.
+
+0.6.0 before it was a consolidation release: it added no routing rule, no
+entity, no service and no drop reason. It shortened the first form somebody
+meets from fifteen fields to five, removed a field nothing ever read
+(`class`), gave an absent wake time a documented meaning, settled one word per
+concept, and made these documents agree with the code. What went before is
+still all here:
 the routing table, the per-person decision, acknowledge and snooze, night
 deferral, observer mode, the diagnostic entities, the six services above, a
 temporary per-person silence, the per-target message texts, translated entity
@@ -338,9 +512,8 @@ repairs, a test message from the options menu, a time to live on a deferral,
 one wake-time summary, a full re-decision at the flush, an early flush when
 the silence really ends, episodes and cleared notifications.
 
-Next, in 0.7.0: escalation and places, reduced in scope. Later, and
-unscheduled: labels on a target, a per-target authentication override, and
-intents.
+Later, and unscheduled, each needing an ADR of its own: the deferred list
+above, plus intents.
 
 ## Glossary
 
@@ -351,10 +524,13 @@ anything.
 |---|---|
 | **Target** | One entry of the routing table: an identity, an alert it is about, an audience, and how it is driven. It becomes `notify.switchboard_<slug>`. Not to be confused with the notify `target` list — the `target:` field of a `notify.switchboard` call, which names one or more of these. |
 | **Person** | A `person.*` this router knows, with the notify services that reach them and the entities that mean they are silent. |
-| **Output** | A `notify.*` service a person's messages are handed to. The router never delivers anything itself. |
-| **Audience** | The people a target is for. Anybody else is not considered at all — not notified, and not counted as dropped. |
+| **Output** | A `notify.*` service — or, from 0.7.0, a `notify.*` entity — a person's messages are handed to. The router never delivers anything itself. |
+| **Bare output** | An audience entry that is a `notify.*` service name rather than a person: a speaker, a wall tablet. It has no presence, no silence, no snooze, no deferral and no buttons — it is told now or not at all — and it takes part in the target's episodes like anybody else. |
+| **Audience** | The people a target is for, and its bare outputs. Anybody else is not considered at all — not notified, and not counted as dropped. |
 | **Presence rule** | Whether a person's `person.*` state has to be `home`, has to be away, or does not matter. The only thing here still called a rule. |
 | **Silence** | A person is silent while one of their own silence entities is `on` (a `schedule`, an `input_boolean`, an iPhone Focus sensor) or while a temporary `notify_switchboard.silence` is running. Only `priority: critical` gets through. |
+| **Priority floor** | A `min_priority` state attribute on a silence entity that is `on`: the silence then holds only the calls **below** that priority. A `schedule`'s per-block `data:` is the documented way to publish one — a night that holds the shopping list and lets the leak through. An unreadable value is ignored, and the silence holds everything. |
+| **Escalation** | `escalate_when_nobody_home` on a target: one step louder for one message, when no person of the audience is `home`. It never overrides the presence rule. |
 | **Snooze** | One target stopped for a chosen number of minutes, from a notification button or from `notify_switchboard.snooze`. The button snoozes it for the person who pressed it; the service called without a `person` snoozes it for the target's whole audience. |
 | **Wake time** | The hour a person's night silence is treated as over. Optional: without one, a queue is flushed when the silence itself says it ends. |
 | **Quiet hours** | *Not a concept of this integration.* It is what a silence entity and a wake time add up to, and it is the phrase most people arrive with. |

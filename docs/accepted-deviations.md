@@ -1,6 +1,6 @@
 # Accepted deviations
 
-Three places where this integration knowingly bends one of its own stated
+Five places where this integration knowingly bends one of its own stated
 principles, and what each one bought. They are **not** findings: nobody
 reported them, nothing is waiting to be fixed, and none of them is a
 compromise made under time pressure. They are design the maintainer chose,
@@ -116,6 +116,79 @@ one short.
 
 ---
 
+## 4. `escalate_when_nobody_home` is not on `target_advanced`
+
+**The deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md)'s
+Consequences say "the options flow gains one boolean on `target_advanced`".
+0.7.0 puts it on a step of its own, `target_escalation`, reached from an
+options-menu entry and its picker.
+
+**The principle it bends.** An ADR is normative, and an implementation that
+does not do what its ADR says is the failure mode ADR-0011 exists to prevent.
+
+**Why it was accepted.** The two normative documents disagree, and the older
+one is the frozen contract. `docs/contract.md` §"v0.6 addendum" →
+"Four options-flow step ids are public" **enumerates** what `target_advanced`
+holds — `default_priority`, `presence_rule`, `allow_acknowledge`,
+`snooze_minutes`, `default_data`, `message`, `done_message`, `default_title`,
+`clear_done`, nine fields — and the v0.7 addendum does not amend that list. The
+acceptance suite pins the same nine, exactly and in order
+(`tests/acceptance/test_s6_target_editor.py::test_target_advanced_holds_
+everything_else_with_unchanged_defaults`), and those tests are frozen. Adding a
+tenth field would have contradicted the contract *and* required editing a
+frozen test to ship a sentence from a non-frozen section of an ADR.
+
+The same contract section says the steps it does not list — the confirmation,
+the pickers — "are internal and may change", so a new internal step is the one
+place the field could go without amending anything. What the ADR actually asks
+for, a boolean in the options flow, is delivered; where it sits is the half
+that moved.
+
+**What would change it.** An ADR that amends contract v0.6's list of what
+`target_advanced` holds, and the acceptance test that pins it. Until then, a
+step id has been added and none has been renamed.
+
+---
+
+## 5. A title is gated on the entity's `supported_features`
+
+**The deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md) §6
+leaves the title to core: the router passes `title` to `notify.send_message`
+regardless, and core drops it for an entity that cannot take one. 0.7.0 reads
+the entity's published `supported_features` first and sends the key only to an
+entity that declares `NotifyEntityFeature.TITLE`. An entity that publishes no
+`supported_features` at all is still sent the title, and core still decides.
+
+**The principle it bends.** An ADR is normative
+([ADR-0011](ADR/0011-frozen-contract-and-contract-test.md)), and this one
+names the behaviour it wants in one sentence. "The router is a pure proxy"
+([ADR-0002](ADR/0002-pure-proxy.md)) leans the same way: a proxy that inspects
+the far end before deciding which key to pass is doing more than proxying.
+
+**Why it was accepted.** The gate the ADR relies on does not always run.
+`NotifyEntity.async_send_message`
+(`$HA_CORE_SRC/homeassistant/components/notify/__init__.py` line 185, the gate
+at lines 188-193) drops the title for an entity that does not declare the
+feature -- but a platform is free to override `async_send_message`, and one
+that does never reaches the base implementation that would have dropped it.
+For such an entity, "pass it regardless" means handing a title to a platform
+that published, in its own `supported_features`, that it cannot take one. The
+frozen acceptance suite states the expected outcome in the other direction:
+`tests/acceptance/test_s7_entity_outputs.py` line 108,
+`test_an_entity_that_does_not_support_a_title_still_gets_the_message`, asserts
+`title is None` (line 121) for an entity without the feature, and those tests
+may not be edited. Reading the published attribute is therefore the *same*
+outcome as core's for an entity that inherits the base behaviour, and the
+*documented* outcome for one that does not.
+
+**What it costs.** One state-machine read per entity delivery, and one place
+where the behaviour is described by neither the ADR alone nor core alone. An
+entity that starts declaring `TITLE` only after it is first seen loses the
+title of anything sent in between, and one that lies about its
+`supported_features` is believed.
+
+---
+
 ## What would change any of these
 
 Each one has a shape that would make it native, and none of them is closed:
@@ -127,6 +200,13 @@ Each one has a shape that would make it native, and none of them is closed:
 3. If the dropped counter ever grows a per-reason breakdown that a dashboard
    can filter, `not_in_audience` can be counted like everything else without
    drowning the headline number.
+4. If a future ADR amends the contract's list of what `target_advanced` holds,
+   `escalate_when_nobody_home` moves onto it and `target_escalation`
+   disappears.
+5. If core ever runs its `NotifyEntityFeature.TITLE` gate where a platform
+   cannot bypass it -- in the entity service rather than in the base
+   `async_send_message` -- the router stops reading `supported_features` and
+   passes the title regardless, exactly as ADR-0021 §6 asks.
 
 Anything that changes one of them needs an ADR, exactly as the decision to
 accept it did.

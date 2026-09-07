@@ -22,7 +22,8 @@
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
     "detail_expired": "Un message en attente pour {person} serait abandonné une fois sa durée de vie écoulée.",
-    "detail_not_notified": "{person} n'a rien reçu pendant le dernier épisode de la cible {target} : le message de retour à la normale ne le concerne pas."
+    "detail_not_notified": "{person} n'a rien reçu pendant le dernier épisode de la cible {target} : le message de retour à la normale ne le concerne pas.",
+    "detail_silenced_floor": "{person} est en silence via {entities}, qui ne laisse passer que {floor} et au-dessus. Seul un message critical passe toujours."
   },
   "entity": {
     "binary_sensor": {
@@ -50,6 +51,9 @@
       },
       "routed_today": {
         "name": "Acheminées aujourd'hui"
+      },
+      "routing_table": {
+        "name": "Table de routage"
       }
     }
   },
@@ -81,7 +85,8 @@
           "general": "Cible par défaut",
           "ttl": "Durée de vie",
           "test_person": "Tester une personne",
-          "test_target": "Tester une cible"
+          "test_target": "Tester une cible",
+          "edit_target_escalation": "Escalade d'une cible"
         }
       },
       "person": {
@@ -221,10 +226,12 @@
       "general": {
         "title": "Cible par défaut",
         "data": {
-          "default_target": "Cible par défaut"
+          "default_target": "Cible par défaut",
+          "critical_payload": "Rendre les notifications critical réellement critiques"
         },
         "data_description": {
-          "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify."
+          "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify.",
+          "critical_payload": "Ajoute les clés Companion qui font sonner un téléphone malgré le mode Ne pas déranger quand un message est critical. Activé par défaut ; ne concerne que les services mobile_app."
         }
       },
       "ttl": {
@@ -264,6 +271,23 @@
       "test_result": {
         "title": "Résultat du test",
         "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
+      },
+      "target_escalation": {
+        "title": "Escalade d'une cible",
+        "description": "Ce que fait {target} quand personne de son audience n'est à la maison. Rien d'autre n'est modifié sur la cible. Ce réglage ne change quelque chose que si la règle de présence de la cible notifie les absents — always ou away_only. Avec home_only, une maison vide veut dire que personne n'est notifié : il ne reste aucune priorité à monter.",
+        "data": {
+          "escalate_when_nobody_home": "Monter la priorité quand la maison est vide"
+        },
+        "data_description": {
+          "escalate_when_nobody_home": "Un cran plus fort pour ce message seulement : info devient normal, normal devient high, high devient critical. Critical ne change pas, et la règle de présence décide toujours qui est notifié."
+        }
+      },
+      "edit_target_escalation": {
+        "title": "Escalade d'une cible",
+        "description": "Choisissez la cible dont vous voulez ouvrir le réglage d'escalade. Tout le reste est laissé tel quel.",
+        "data": {
+          "slug": "Cible"
+        }
       }
     },
     "error": {
@@ -271,6 +295,7 @@
       "duplicate_person": "Cette personne est déjà dans la table.",
       "no_outputs": "Indiquez au moins un service notify.",
       "recursive_output": "Une sortie ne peut pas pointer sur Standard de notification.",
+      "component_service_output": "notify.notify et notify.send_message appartiennent au composant notify lui-même, pas à quelque chose qui peut être notifié. Indiquez un vrai service notify.",
       "invalid_output": "Un nom de service notify contient des caractères qu'un nom de service ne peut pas porter.",
       "invalid_entity": "Ce n'est pas un identifiant d'entité.",
       "invalid_time": "Utilisez HH:MM ou HH:MM:SS.",

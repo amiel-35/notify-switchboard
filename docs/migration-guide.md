@@ -78,6 +78,16 @@ You have just gained: presence, silence, snooze, one counter, and one place to
 add the third person. You have lost nothing — those two phones are the
 `default` target's outputs.
 
+> **Upgrading from 0.6.x?** One thing you may have been relying on changed.
+> `data.priority` is no longer forwarded to `mobile_app_*` outputs: it is the
+> router's own input key, and Android's Companion app read it as a Companion
+> key that only understands `high`. If an automation of yours wrote
+> `data: {priority: high}` to make an Android notification urgent, that side
+> effect is gone — route the message at `critical` instead and the router
+> writes `priority: "high"` itself, alongside the rest of the Companion
+> critical payload. Nothing else about the key changes: it still selects the
+> priority, and it still reaches every output that is not a Companion one.
+
 Do this for as many of the N as are genuinely "everybody". Stop there for the
 first week if you like.
 
@@ -151,6 +161,24 @@ goes out when the silence ends. If they want a specific hour instead, set a
 Expect this to change what you receive, and give it a week before you tune it.
 The time to live is what stops a 23:31 door notification arriving at 07:00 —
 its defaults are two hours for `info` and twelve for `normal`.
+
+If a night that holds *everything* turns out to be too much, do not reach for a
+second silence entity: give the one you have a floor. A `schedule` whose block
+carries `data: {min_priority: high}` holds the shopping list and lets the leak
+through, and the router reads that attribute off any silence entity that
+publishes it.
+
+## Step 4b — the house nobody is in
+
+Two targets in, you will meet the case the first week always produces: the
+alert fires, everybody is out, and the message goes out at the priority you
+chose for a household that was at home to hear it. Turn on **Escalation of a
+target** for that one target and it goes out one step louder — and, if it was
+already `high`, as a **critical** push that rings through Do Not Disturb.
+
+Do it target by target, not everywhere: the flag is a statement that this
+particular alert matters when nobody is watching the house, and a shopping list
+that escalates is noise.
 
 ## Step 5 — the rest of the N
 

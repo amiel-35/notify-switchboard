@@ -400,6 +400,33 @@ nothing ever reads the watched entity's current state. Still not filed.
 (ADR-0020 §8): it is not a finding of its own, it is deviation 3 seen from the
 counters. The text lives there, and only there.
 
+## 2026-09-07 — S7 — the option lists do not offer `notify` entities
+
+From 0.7.0 an output that names a `notify.*` **entity** is delivered through
+`notify.send_message`, but no picker offers one. Both option lists are built
+from `ServiceRegistry.async_services_for_domain(NOTIFY_DOMAIN)` —
+`_output_options` for a person's **Notify services** and `_audience_options`
+for a target's **Audience**, both in
+`custom_components/notify_switchboard/config_flow.py` — and the service
+registry knows about registered legacy services and nothing else. An entity is
+reachable by typing its entity id into either field, which both selectors
+allow (`custom_value=True`, the same escape hatch ADR-0018 §2 added for a
+phone that has not registered yet).
+
+Accepted for S7 rather than fixed: both lists are pinned by the frozen
+acceptance suite. `tests/acceptance/test_s4_discovery.py` asserts the exact
+set of values `outputs` offers, their order and their labels; changing what
+the list holds is a change to behaviour a frozen test describes, and this
+repository does not edit one without an ADR. Doing it properly also needs
+three decisions the sprint had no mandate to take: how an entity is labelled
+next to a service, where it sits in the order, and what is shown when a legacy
+service and an entity share a name (the service wins, so the list would be
+offering the loser).
+
+Planned resolution: an ADR that answers those three questions and amends the
+S4 expectations with it. Documented meanwhile in the README, §"Outputs that
+are `notify` entities".
+
 ## 2026-09-07 — S7 — the critical push is unverified on a real device
 
 ADR-0021 §7 makes a `critical` message carry the keys the Companion

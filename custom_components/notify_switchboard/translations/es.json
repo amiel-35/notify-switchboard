@@ -22,7 +22,8 @@
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
     "detail_expired": "Un mensaje en espera para {person} se descartaría en cuanto se agote su tiempo de vida.",
-    "detail_not_notified": "{person} no recibió nada durante el último episodio del destino {target}, así que el mensaje de vuelta a la normalidad no es para él."
+    "detail_not_notified": "{person} no recibió nada durante el último episodio del destino {target}, así que el mensaje de vuelta a la normalidad no es para él.",
+    "detail_silenced_floor": "{person} está en silencio por {entities}, que solo deja pasar {floor} y superior. Solo un mensaje critical pasa siempre."
   },
   "entity": {
     "binary_sensor": {
@@ -50,6 +51,9 @@
       },
       "routed_today": {
         "name": "Encaminadas hoy"
+      },
+      "routing_table": {
+        "name": "Tabla de enrutamiento"
       }
     }
   },
@@ -81,7 +85,8 @@
           "general": "Destino predeterminado",
           "ttl": "Tiempo de vida",
           "test_person": "Probar una persona",
-          "test_target": "Probar un destino"
+          "test_target": "Probar un destino",
+          "edit_target_escalation": "Escalada de un destino"
         }
       },
       "person": {
@@ -221,10 +226,12 @@
       "general": {
         "title": "Destino predeterminado",
         "data": {
-          "default_target": "Destino predeterminado"
+          "default_target": "Destino predeterminado",
+          "critical_payload": "Hacer que las notificaciones critical sean críticas"
         },
         "data_description": {
-          "default_target": "Lo usa notify.switchboard cuando no se indica destino, y también la entidad notify."
+          "default_target": "Lo usa notify.switchboard cuando no se indica destino, y también la entidad notify.",
+          "critical_payload": "Añade las claves de Companion que hacen sonar un teléfono aunque esté en No molestar cuando un mensaje es critical. Activado por defecto; solo afecta a los servicios mobile_app."
         }
       },
       "ttl": {
@@ -264,6 +271,23 @@
       "test_result": {
         "title": "Resultado de la prueba",
         "description": "El mensaje se ha enviado. Esto es lo que el enrutador decidió para cada persona:\n\n{result}"
+      },
+      "target_escalation": {
+        "title": "Escalada de un destino",
+        "description": "Qué hace {target} cuando nadie de su audiencia está en casa. No se toca nada más del destino. Solo cambia algo si la regla de presencia del destino avisa a los ausentes: always o away_only. Con home_only, una casa vacía significa que no se avisa a nadie, así que no queda ninguna prioridad que subir.",
+        "data": {
+          "escalate_when_nobody_home": "Subir la prioridad cuando no hay nadie en casa"
+        },
+        "data_description": {
+          "escalate_when_nobody_home": "Un paso más alto solo para ese mensaje: info pasa a normal, normal a high, high a critical. Critical no cambia, y la regla de presencia sigue decidiendo a quién se avisa."
+        }
+      },
+      "edit_target_escalation": {
+        "title": "Escalada de un destino",
+        "description": "Elija el destino cuyo ajuste de escalada quiere abrir. Todo lo demás se deja como está.",
+        "data": {
+          "slug": "Destino"
+        }
       }
     },
     "error": {
@@ -271,6 +295,7 @@
       "duplicate_person": "Esta persona ya está en la tabla.",
       "no_outputs": "Indica al menos un servicio notify.",
       "recursive_output": "Una salida no puede apuntar a Centralita de notificaciones.",
+      "component_service_output": "notify.notify y notify.send_message pertenecen al propio componente notify, no a algo que se pueda avisar. Indique un servicio notify real.",
       "invalid_output": "Un nombre de servicio notify contiene caracteres que un nombre de servicio no admite.",
       "invalid_entity": "Esto no es un identificador de entidad.",
       "invalid_time": "Usa HH:MM o HH:MM:SS.",

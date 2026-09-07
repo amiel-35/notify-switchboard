@@ -34,19 +34,27 @@ from custom_components.notify_switchboard.router import (
     build_routing_table,
     caller_tag,
     collapse_by_tag,
+    critical_keys_for_os,
     decide,
     default_tag,
+    effective_priority,
     effective_tag,
+    escalate_one_step,
+    is_bare_output,
     is_done_message,
     is_recursive_output,
     merge_data,
+    nobody_is_home,
     parse_action,
+    parse_min_priority,
     parse_person,
     parse_target,
     parse_wake_time,
     presence_allows,
     resolve_priority,
     resolve_ttl,
+    silence_catches,
+    silences_catching,
     snooze_action,
     snooze_is_active,
     split_outputs,
@@ -416,9 +424,12 @@ def test_decide_drops_when_silenced_unless_critical() -> None:
         ],
         [target("leak", audience=("person.alice",))],
     )
+    # v0.7 (ADR-0021 §2): `silenced` holds the entities that are **on**, each
+    # mapped to the floor it publishes -- `None` for a silence that publishes
+    # none, which is every silence before 0.7.0.
     ctx = context(
         person_states={"person.alice": "home"},
-        silenced={"input_boolean.night": True},
+        silenced={"input_boolean.night": None},
     )
     silenced = decide(built, request(), ctx)
     assert silenced.routed == ()
@@ -772,3 +783,205 @@ def test_the_v05_person_and_row_keys_default_to_their_absent_meaning() -> None:
     )
     assert parse_target({"slug": "leak"}).clear_done is False
     assert parse_target({"slug": "leak", "clear_done": True}).clear_done is True
+
+
+# ---------------------------------------------------------------------------
+# v0.7 (ADR-0021): escalation, floors, bare outputs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("start", "expected"),
+    [
+        (PRIORITY_INFO, PRIORITY_NORMAL),
+        (PRIORITY_NORMAL, PRIORITY_HIGH),
+        (PRIORITY_HIGH, PRIORITY_CRITICAL),
+        (PRIORITY_CRITICAL, PRIORITY_CRITICAL),
+        ("nonsense", "nonsense"),
+    ],
+)
+def test_escalate_one_step_moves_by_exactly_one(start, expected) -> None:
+    """One step, and `critical` is the ceiling (ADR-0021 §1)."""
+    assert escalate_one_step(start) == expected
+
+
+def test_effective_priority_needs_the_flag_a_person_and_an_empty_house() -> None:
+    """Three conditions, and each one on its own is enough to change nothing."""
+    audience = ("person.alice",)
+    away = RoutingContext(now=NOW, person_states={"person.alice": "not_home"})
+
+    off = target("leak", audience=audience)
+    assert effective_priority(off, {}, away) == (PRIORITY_NORMAL, None)
+
+    on = target("leak", audience=audience, escalate_when_nobody_home=True)
+    assert effective_priority(on, {}, away) == (PRIORITY_HIGH, "nobody_home")
+
+    home = RoutingContext(now=NOW, person_states={"person.alice": "home"})
+    assert effective_priority(on, {}, home) == (PRIORITY_NORMAL, None)
+
+    # An audience of bare outputs only has nobody to ask about, so it is not an
+    # empty house -- it is a target with no presence at all.
+    speakers = target(
+        "leak", audience=("notify.kitchen",), escalate_when_nobody_home=True
+    )
+    assert effective_priority(speakers, {}, away) == (PRIORITY_NORMAL, None)
+
+
+def test_a_rule_that_changes_nothing_reports_no_escalation() -> None:
+    """`critical` is unchanged, so `escalated` stays None (ADR-0021 §8)."""
+    on = target("leak", audience=("person.alice",), escalate_when_nobody_home=True)
+    away = RoutingContext(now=NOW, person_states={"person.alice": "not_home"})
+    assert effective_priority(on, {"priority": PRIORITY_CRITICAL}, away) == (
+        PRIORITY_CRITICAL,
+        None,
+    )
+
+
+@pytest.mark.parametrize("state", ["not_home", "Work", "unknown", "unavailable", None])
+def test_only_the_literal_state_home_counts_as_home(state) -> None:
+    """Anything else is "not home", including a person nobody has heard of."""
+    states = {} if state is None else {"person.alice": state}
+    context = RoutingContext(now=NOW, person_states=states)
+    assert nobody_is_home(target("leak", audience=("person.alice",)), context)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (PRIORITY_HIGH, PRIORITY_HIGH),
+        ("loud", None),
+        (3, None),
+        (True, None),
+        (None, None),
+    ],
+)
+def test_parse_min_priority_fails_towards_quiet(raw, expected) -> None:
+    """An unreadable floor is ignored, so the entity silences everything."""
+    assert parse_min_priority(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("floor", "priority", "caught"),
+    [
+        (None, PRIORITY_CRITICAL, True),
+        (PRIORITY_HIGH, PRIORITY_NORMAL, True),
+        (PRIORITY_HIGH, PRIORITY_HIGH, False),
+        (PRIORITY_HIGH, PRIORITY_CRITICAL, False),
+        (PRIORITY_INFO, PRIORITY_INFO, False),
+    ],
+)
+def test_silence_catches_only_what_is_below_the_floor(floor, priority, caught) -> None:
+    """A floor changes which calls a silence catches, and nothing else."""
+    assert silence_catches(floor, priority) is caught
+
+
+def test_the_strictest_on_silence_decides() -> None:
+    """Silence is an OR across sources; a floor narrows one, not the union."""
+    alice = person(
+        "person.alice",
+        silence_entities=("binary_sensor.evening", "binary_sensor.night"),
+    )
+    context = RoutingContext(
+        now=NOW,
+        silenced={
+            "binary_sensor.evening": PRIORITY_NORMAL,
+            "binary_sensor.night": PRIORITY_HIGH,
+        },
+    )
+    assert silences_catching(alice, context, PRIORITY_NORMAL) == ["binary_sensor.night"]
+    assert silences_catching(alice, context, PRIORITY_HIGH) == []
+
+
+@pytest.mark.parametrize(
+    ("entry", "bare"),
+    [
+        ("notify.kitchen_speaker", True),
+        ("person.alice", False),
+        ("light.kitchen", False),
+    ],
+)
+def test_is_bare_output_reads_the_domain_and_nothing_else(entry, bare) -> None:
+    """An audience entry in the `notify` domain is a bare output (ADR-0021 §5)."""
+    assert is_bare_output(entry) is bare
+
+
+def test_a_bare_output_is_its_own_delivery_with_no_person() -> None:
+    """One `RoutedDelivery`, `person=None`, one output, the audience entry kept."""
+    built = table(
+        [person("person.alice", outputs=("mobile_app_alice",))],
+        [target("leak", audience=("person.alice", "notify.kitchen_speaker"))],
+    )
+    context = RoutingContext(now=NOW, person_states={"person.alice": "home"})
+
+    decision = decide(built, request(), context)
+
+    speaker = next(item for item in decision.routed if item.is_bare)
+    assert speaker.person is None
+    assert speaker.outputs == ("kitchen_speaker",)
+    assert speaker.audience_entry == "notify.kitchen_speaker"
+
+
+def test_a_recursive_bare_output_is_refused_and_names_itself() -> None:
+    """`recursion`, no new reason, and the drop carries the output it is about."""
+    built = table(
+        [person("person.alice", outputs=("mobile_app_alice",))],
+        [target("leak", audience=("person.alice", "notify.switchboard_leak"))],
+    )
+    context = RoutingContext(now=NOW, person_states={"person.alice": "home"})
+
+    decision = decide(built, request(), context)
+
+    refusal = next(drop for drop in decision.dropped if drop.reason == DROP_RECURSION)
+    assert refusal.person is None
+    assert refusal.output == "notify.switchboard_leak"
+
+
+def test_the_target_splits_its_audience_by_domain() -> None:
+    """`audience_persons` and `bare_outputs` keep the audience order."""
+    row = target(
+        "leak",
+        audience=("person.alice", "notify.kitchen_speaker", "person.bob"),
+    )
+    assert row.audience_persons == ("person.alice", "person.bob")
+    assert row.bare_outputs == ("notify.kitchen_speaker",)
+
+
+@pytest.mark.parametrize(
+    ("os_name", "has_push", "has_channel"),
+    [
+        ("iOS", True, False),
+        ("ipados", True, False),
+        ("WATCHOS", True, False),
+        ("Android", False, True),
+        ("SailfishOS", True, True),
+        (None, True, True),
+        ("", True, True),
+    ],
+)
+def test_critical_keys_are_translated_per_os(os_name, has_push, has_channel) -> None:
+    """An OS the router cannot identify gets both sets (ADR-0021 §7)."""
+    keys = critical_keys_for_os(os_name)
+    assert ("push" in keys) is has_push
+    assert ("channel" in keys) is has_channel
+    if has_channel:
+        assert keys["ttl"] == 0
+        assert keys["priority"] == PRIORITY_HIGH
+
+
+def test_the_apple_payload_is_a_fresh_object_every_time() -> None:
+    """A shared nested mapping would leak into every message's `data`."""
+    first = critical_keys_for_os("ios")
+    second = critical_keys_for_os("ios")
+    assert first == second
+    assert first["push"] is not second["push"]
+
+
+def test_the_v07_target_key_defaults_to_its_absent_meaning() -> None:
+    """`escalate_when_nobody_home` absent means off."""
+    assert parse_target({"slug": "leak"}).escalate_when_nobody_home is False
+    assert (
+        parse_target(
+            {"slug": "leak", "escalate_when_nobody_home": True}
+        ).escalate_when_nobody_home
+        is True
+    )

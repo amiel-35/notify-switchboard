@@ -54,10 +54,51 @@ of routing-table slugs), and `data` carrying `priority`, `source_entity`, `tag`
 and anything else, which is merged over the target's `default_data` and forwarded
 unchanged.
 
+## The decision order (v0.7, ADR-0021)
+
+`router.decide` runs, per target, in this order. Everything in it is evaluated
+at **decision time**, from entities that already exist: the router owns no
+timer and no counter of its own for any of it.
+
+1. **The effective priority.** `data.priority` overrides the target's
+   `default_priority` as it always has; then, when the target carries
+   `escalate_when_nobody_home` and **no** person of its audience is in the
+   literal state `home`, the priority is raised **one step** —
+   `info→normal→high→critical`, `critical` unchanged — for this decision only.
+   A target with no person in its audience escalates nothing: an audience of
+   bare outputs is not an empty house. From here on, "the priority" means the
+   escalated one, everywhere: the silence and snooze bypass,
+   `authenticationRequired`, the `routed` event and the critical payload.
+2. **The audience, entry by entry, split by domain.** An entry in the `notify`
+   domain is a **bare output** and skips steps 3 to 5 entirely; anything else
+   is a person, known or not.
+3. **The presence rule** of the target, against the person's `person.*` state.
+   The escalation never overrides it: a `home_only` target with nobody home
+   drops every person with `presence`, escalated or not.
+4. **Silence**, unless the priority is `critical`. A configured silence entity
+   that is `on` catches this call when it carries no `min_priority` state
+   attribute, or when the call's priority is **below** the floor that
+   attribute names. The strictest `on` silence decides, and an unreadable
+   floor is ignored, so the entity silences everything: a floor fails towards
+   quiet. A temporary `notify_switchboard.silence` carries no floor.
+5. **Snooze**, unless the priority is `critical`.
+6. **The outputs.** A person's, or the bare output's single one.
+
 ## Output contract
 
-For every output of every selected person, the router calls
-`notify.<output>` with `message`, `title` and the merged `data`.
+For every output of every selected person — and for every bare output of the
+audience — the router calls `notify.<output>` with `message`, `title` and the
+merged `data`.
+
+An output is resolved in one fixed order (ADR-0021 §6): a **registered legacy
+notify service** first, which is what every output that works today is, then a
+`notify` **entity id**, delivered through `notify.send_message` with `message`
+and `title` and nothing else. A legacy service and an entity share one
+namespace, so the order is stated rather than discovered. The router resolves
+the entity itself before calling — absent from the state machine, or
+`unavailable`, is a missing output — because `notify.send_message` is an entity
+service and core logs and skips an entity it cannot resolve rather than
+raising, so calling and hoping would count a delivery that never happened.
 
 Decisions taken in Sprint 1, where the contract left room:
 
@@ -292,6 +333,68 @@ Decisions taken in Sprint 2, where the contract left room:
   allow-list, not the caller's role, is what bounds them. See the addendum to
   ADR-0016 and `docs/known-issues.md`.
 
+### Bare outputs: an audience entry that is not a person (v0.7, ADR-0021 §5)
+
+A kitchen speaker, a wall tablet's toast overlay: a thing that can be told
+something, with no presence, no phone and no bedtime. An `audience` entry in
+the `notify` domain is one, and the domain is the whole rule.
+
+`decide` turns such an entry into its own `RoutedDelivery` with `person=None`
+and exactly one output. It has no presence rule, no silence, no snooze, no
+deferral, no time-to-live, no wake time and no summary; it receives exactly the
+caller's `data` merged with the target's `default_data`, and none of the keys
+the router invents — no `actions`, no `authenticationRequired`, no
+`notification_id`, no default `tag`, even when the service behind it happens to
+be a `mobile_app_*` one. What it does **not** escape is the critical payload
+below: that is a property of the service, not of the audience entry.
+
+It does take part in **episodes**: the delivery is recorded under the audience
+entry as written, so a `done` message reaches the bare outputs that heard the
+episode's messages and every other one is dropped with `not_notified`, exactly
+like a person. A delivered bare output is one routed delivery, reported in a
+`routed` event whose `person` key is `null`; a missing one is
+`delivery_failed`; one resolving to `notify.switchboard*` is refused with
+`recursion`. No drop reason and no event type is added for any of it.
+
+What an episode cannot do for a bare output is **clear** it. The clear at the
+end of an observer episode is addressed by the identifiers the router adds --
+`data.tag` for a `clear_notification` push, `data.notification_id` for
+`persistent_notification.dismiss` -- and `_scope_output_data` withholds both
+from a bare output precisely because they are router keys. A bare
+`notify.persistent_notification` is therefore recorded in `episode.outputs`
+(as `persistent_notification`, the normalised name) and the dismiss does fire,
+with a `notification_id` that never labelled anything: core created the
+notification under an id of its own, and it lingers on the dashboard next to
+the back-to-normal message. Accepted, not worked around: giving a bare output
+`notification_id` would put a router key back into the payload that the whole
+of §5 exists to keep clean. `persistent_notification` in a **person's**
+outputs is the shape that gets cleared.
+
+This is the reduced form of "places" and the whole of it. The object that would
+have modelled a room is deferred (ADR-0021 §9).
+
+### The critical payload, per OS (v0.7, ADR-0021 §7)
+
+Two changes to what a `mobile_app_*` output receives, and to nothing else.
+
+- The router's own `priority` key is **stripped, unconditionally**. It is a
+  router input, not a Companion key, and Android's Companion app reads
+  `data.priority` and knows one value, `high`. This is the only breaking
+  change of 0.7.0.
+- When the effective priority is `critical` and the global `critical_payload`
+  option is on (default), the keys the Companion documentation gives are
+  added: on iOS / iPadOS / watchOS `push: {sound: {name: default, critical: 1,
+  volume: 1.0}}`, on Android `ttl: 0`, `priority: high`,
+  `channel: alarm_stream`. The OS comes from the matching `mobile_app`
+  registration's `os_name`, matched case-insensitively; anything the router
+  cannot identify gets **both** sets. A key the caller or the target's
+  `default_data` already wrote is never overwritten, and `push` counts as a
+  single caller key.
+
+It applies nowhere else: a wake-time summary's `data` is *built* rather than
+merged and a critical message is never deferred, a `clear_notification` is not
+a message, and a `NotifyEntity` output carries no `data` at all.
+
 ### The two silence sources
 
 `is_person_silenced` is an **OR** of two independent sources:
@@ -511,10 +614,21 @@ Per person (`<p>` = the object_id of the `person.*` entity):
 Globally: `sensor.switchboard_routed_today`,
 `sensor.switchboard_dropped_today` (attribute `reasons`, a
 `{reason: count}` dict), `sensor.switchboard_deferred_today` (attribute
-`queued`, a `{person: [target, ...]}` dict) and `event.switchboard_delivery`
+`queued`, a `{person: [target, ...]}` dict),
+`sensor.switchboard_routing_table` and `event.switchboard_delivery`
 with the four frozen event types. `deferred_today` is an **additional**
 diagnostic entity, allowed by contract §3.5; it exists because a deferral is
 neither routed nor dropped and was therefore invisible.
+
+`sensor.switchboard_routing_table` (v0.7, ADR-0021 §3) exists so cards stop
+copying the table into their own YAML. Its state is the number of targets and
+its two attributes — `targets` and `persons` — are **closed lists** of exactly
+the keys `docs/contract.md` names, in options order. It never exposes a
+target's `default_data`, which is where a user's secrets end up and which a
+state attribute would make world-readable, nor a person's `outputs`. Both
+attributes are declared `_unrecorded_attributes`: they are configuration, they
+change only on an options edit, and their history is not worth a database row
+per state write.
 
 Counters reset at local midnight (`homeassistant/helpers/event.py`,
 `async_track_time_change`). They are `SensorStateClass.TOTAL` with an explicit

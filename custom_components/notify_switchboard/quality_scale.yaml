@@ -1,4 +1,4 @@
-# Quality scale self-assessment for Notify Switchboard (router 0.6.0).
+# Quality scale self-assessment for Notify Switchboard (router 0.7.0).
 #
 # Every rule of every tier is assessed: `done`, `todo` with a one-line reason,
 # or `exempt` with a one-line reason. Nothing is left "not assessed yet"
@@ -176,8 +176,12 @@ rules:
   entity-disabled-by-default:
     status: exempt
     comment: >-
-      Three global entities and two per person, all cheap to compute and all
-      part of what the contract promises a card can read.
+      Four global sensors, one global event entity, one degraded notify
+      entity and two sensors plus one binary sensor per person -- all cheap to
+      compute and all part of what the contract promises a card can read.
+      sensor.switchboard_routing_table (v0.7) is the one whose attributes
+      could grow a database: they are declared _unrecorded_attributes instead
+      of the entity being disabled, because a card has to be able to read it.
   entity-translations:
     status: done
     comment: >-

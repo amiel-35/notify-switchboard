@@ -23,7 +23,12 @@ from .const import (
     VALID_PRESENCE_RULES,
     VALID_PRIORITIES,
 )
-from .router import is_recursive_output, parse_wake_time
+from .router import (
+    is_bare_output,
+    is_component_service_output,
+    is_recursive_output,
+    parse_wake_time,
+)
 
 PERSON_DOMAIN = "person"
 ALERT_DOMAIN = "alert"
@@ -112,10 +117,23 @@ def validate_target(
     if alert_entity and not str(alert_entity).startswith(f"{ALERT_DOMAIN}."):
         errors[CONF_ALERT_ENTITY] = "not_an_alert"
 
-    audience = [str(person) for person in row.get(CONF_AUDIENCE) or []]
+    # v0.7 addendum (ADR-0021 §5): an audience entry may be a `notify.*`
+    # service name -- a kitchen speaker, a wall tablet's toast overlay -- and
+    # the domain is the whole rule. A bare output is refused for two reasons
+    # and no others: pointing back at the switchboard, which an output has
+    # always been refused for, and naming one of the `notify` component's own
+    # services that cannot be a recipient (`is_component_service_output`).
+    # The pickers already hide both, but both are typable.
+    audience = [str(entry) for entry in row.get(CONF_AUDIENCE) or []]
+    bare = [entry for entry in audience if is_bare_output(entry)]
+    persons = [entry for entry in audience if not is_bare_output(entry)]
     if not audience:
         errors[CONF_AUDIENCE] = "empty_audience"
-    elif any(person not in known_persons for person in audience):
+    elif any(is_recursive_output(entry) for entry in bare):
+        errors[CONF_AUDIENCE] = "recursive_output"
+    elif any(is_component_service_output(entry) for entry in bare):
+        errors[CONF_AUDIENCE] = "component_service_output"
+    elif any(person not in known_persons for person in persons):
         errors[CONF_AUDIENCE] = "unknown_person"
 
     _minutes, ok = parse_snooze_minutes(row.get(CONF_SNOOZE_MINUTES))

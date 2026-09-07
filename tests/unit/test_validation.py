@@ -132,3 +132,82 @@ def test_alert_entity_may_be_empty() -> None:
         validate_target(a_target(alert_entity=None), [], ["person.alice"], is_new=True)
         == {}
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.7 (ADR-0021 §5): an audience entry may be a `notify.*` service name
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_output_is_a_valid_audience_entry() -> None:
+    """The domain is the whole rule: a `notify.*` name is not an unknown person."""
+    assert (
+        validate_target(
+            a_target(audience=["person.alice", "notify.kitchen_speaker"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )
+
+
+def test_a_bare_output_pointing_back_at_the_switchboard_is_refused() -> None:
+    """The recursion guard does not care which side of the audience it is on."""
+    errors = validate_target(
+        a_target(audience=["person.alice", "notify.switchboard_leak"]),
+        [],
+        ["person.alice"],
+        is_new=True,
+    )
+    assert errors["audience"] == "recursive_output"
+
+
+def test_an_audience_of_bare_outputs_only_is_valid() -> None:
+    """A target may address nothing but things: no person is not no audience."""
+    assert (
+        validate_target(
+            a_target(audience=["notify.kitchen_speaker"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize("entry", ["notify.notify", "notify.send_message"])
+def test_a_notify_component_service_is_refused_as_an_audience_entry(entry) -> None:
+    """The domain rule lets these in; neither can ever be a recipient.
+
+    `notify.notify` is the aggregate legacy service — it fans the message out
+    to every notify platform on the instance, which is the undifferentiated
+    channel this router replaces, and no episode can say who it reached.
+    `notify.send_message` is the entity action: its schema requires an
+    `entity_id`, so the call built for a bare output fails every time. The
+    pickers hide both, but `custom_value=True` makes both typable.
+    """
+    errors = validate_target(
+        a_target(audience=["person.alice", entry]),
+        [],
+        ["person.alice"],
+        is_new=True,
+    )
+    assert errors["audience"] == "component_service_output"
+
+
+def test_persistent_notification_stays_a_valid_bare_output() -> None:
+    """The third component service is the one that *is* a destination.
+
+    It takes a plain `message`, it names exactly one place, and it is what a
+    household uses before any phone is registered.
+    """
+    assert (
+        validate_target(
+            a_target(audience=["notify.persistent_notification"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )
