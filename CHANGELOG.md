@@ -58,6 +58,36 @@ an advanced step without deciding what leaving it empty means would have turned
   drops with reason `silenced`, exactly as in 0.1 → 0.5, so no installation
   that has left the field empty since 0.1.0 changes behaviour.
 
+### Fixed
+
+- **A deferral without a wake time no longer loses its timer when a temporary
+  silence outlives the night.** The fallback timer introduced above was armed
+  on the end the person's configured silence published, and on nothing else.
+  A `notify_switchboard.silence` asked for after the message was queued can
+  end later than that: the flush at the schedule's end held the message,
+  correctly, and the re-arm that followed read a schedule that had just gone
+  `off` and published nothing, so no timer was left at all. The queue then
+  waited for the next night to end, which for a message with a time to live
+  usually means it never arrived. Both instants are now weighed together, the
+  way the wake-time branch already weighed them.
+- **A re-arm never targets an instant that has already passed.** A timer
+  firing exactly at a schedule's `next_event` can run before that schedule's
+  own state write lands, and `async_track_point_in_time` does not refuse a
+  point in the past — it fires on the next pass of the loop. Arming on the end
+  that has just passed had the flush and the re-arm chase each other.
+- **The `alert:` block shown after saving an observer-mode target no longer
+  names `notifiers:`.** Observer mode *is* the router watching the alert
+  itself; the block it needs has no `notifiers:` list, as `README.md` has
+  always said. Emitting one wired the row both ways at once — the alert
+  calling the router on every `repeat`, and the router routing the same
+  transition on its own — so pasting the block as instructed produced
+  duplicated notifications. The step now also says which of the two wirings
+  the block it is showing follows.
+- **`default_data` is redacted in a diagnostics dump with core's own
+  `REDACTED`.** It was replaced with a bare `REDACTED` while message bodies,
+  redacted by `async_redact_data`, read `**REDACTED**`; two spellings in one
+  document read as two different things.
+
 ### Removed
 
 - **The `class` key of a routing-table row.** It was asked for on every target
@@ -79,14 +109,16 @@ an advanced step without deciding what leaving it empty means would have turned
   link to it rather than redefining anything.
 - **Observer mode is the primary documented path in `README.md`**, as it
   already was in the quickstart; the `notifiers:` example comes second.
-- **One duration claim: ten minutes**, in the quickstart's title, in `README.md`'s
-  documentation list and in `docs/ARCHITECTURE.md`'s suite S7 line. The
-  quickstart says what the ten minutes include — the YAML and the restart.
+- **One duration claim: about ten minutes**, in the quickstart's title, in
+  `README.md`'s documentation list and — as the suite S7 acceptance criterion
+  it has always been — in `docs/ARCHITECTURE.md`. The quickstart says what the
+  ten minutes include (the YAML and the restart) and that the figure is an
+  estimate read off those steps, not a stopwatch reading: nobody has timed it.
 - **`docs/migration-guide.md`** (new): where to start when you already have N
   inline `notify.mobile_app_*` calls and M `alert:` blocks. One target per
   alert, the `default` target first, observer mode so nothing in the YAML has
   to change, `explain` to check a target before trusting it, and a rollback
-  that is one line.
+  that is one menu action.
 - **`docs/accepted-deviations.md`** (new): the three places where this
   integration knowingly bends one of its own principles — a temporary silence
   the router owns, an episode it persists, `not_in_audience` it does not count
@@ -103,6 +135,29 @@ an advanced step without deciding what leaving it empty means would have turned
   unscheduled — labels, a per-target authentication override, intents and the
   routing table as an entity. No line anywhere still says a feature is planned
   for a sprint that no longer covers it.
+- **The Glossary says what the code does.** *Snooze* records that the action
+  without a `person` snoozes the target's whole audience; *Deferral* records
+  that it takes one of the person's **own** silence entities, a temporary
+  `notify_switchboard.silence` alone being dropped rather than deferred.
+  `README.md` no longer claims that every word in bold on the page is defined
+  there — bold is used for emphasis all over it — and names the vocabulary it
+  means instead.
+- **The known-issues entry moved to `accepted-deviations.md` is a pointer, not
+  a copy.** It had been left behind in full, so the same paragraph was
+  maintained in two places.
+- **The upstream drafts are honest about what they are.** Both "possible fix"
+  blocks say they are untested sketches; the `alert` one shows the line that
+  has to store the watched entity id first, because `AlertEntity` never keeps
+  it; and `async_call_at` is cited at its real line.
+- **`docs/migration-guide.md`** says that emptying a `notifiers:` list needs a
+  restart — `alert` ships no reload action — and explains the nested `data:`
+  in its first example rather than leaving it to look like a typo.
+- **`docs/fr/doctrine.md` carries a header saying it is a snapshot** written
+  before 0.6.0, where *classe* still exists and a routing-table row is called a
+  *ligne*. It is not maintained; `docs/contract.md` and the Glossary are.
+- **`target_saved` says that ticking its checkbox defers the save** to the next
+  form, which is what it does: the target is written when `target_advanced` is
+  submitted.
 
 ---
 
