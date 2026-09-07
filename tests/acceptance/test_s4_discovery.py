@@ -255,8 +255,12 @@ async def test_a_person_with_no_linked_user_gets_nothing_pre_selected(
         "guessing from the person's name is exactly what ADR-0018 §2 rejects"
     )
     assert not suggested_value(result, "silence_entities")
+    # 0.7.1: every option is readable, but none carries the "this person's
+    # device" marker when the person has no linked user (ADR-0018 §2).
+    marker = "this person"
     for option in selector_options(result, "outputs"):
-        assert option["label"] == option["value"]
+        assert option["label"], "labels are never empty"
+        assert marker not in option["label"].lower()
 
 
 async def test_editing_a_person_suggests_what_is_stored_not_what_is_discovered(
