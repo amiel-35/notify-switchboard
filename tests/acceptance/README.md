@@ -688,3 +688,118 @@ Written against `docs/contract.md` §"v0.6 addendum (ADR-0020)",
 - `test_contract.py::test_the_ttl_defaults_are_defaults_a_household_can_change`
   — 0.5 already lets a household override them; v0.6 only says out loud that
   the three numbers are not frozen.
+
+## Sprint 7 (`test_s7_*.py`, and the v0.7 additions to `test_contract.py`)
+
+Sprint 7 adds again after a consolidation release, and adds from a list the
+maintainer shortened after the product review: seven decisions, three of them
+things the earlier draft carried and no longer does (`docs/ADR/0021` §9). The
+sprint's guard-rail is the one thing every test below can be read against —
+**the router owns no timer and no counter of its own**, so every rule is
+evaluated at decision time from entities that already exist.
+
+Written against `docs/contract.md` §"v0.7 addendum (ADR-0021)",
+`docs/ADR/0021-escalation-and-places-reduced.md` and
+`docs/sprints/sprint-7-brief.md`.
+
+| File | What it pins |
+|---|---|
+| `test_s7_nobody_home.py` | `escalate_when_nobody_home` raises the priority **one step** and no further (`info→normal→high→critical`, `critical` unchanged); only the literal state `home` counts as home; one person home is enough; the presence rule is never overridden; a target without the flag behaves exactly as 0.6.0 did; `explain` reports `escalated: nobody_home`, and `null` when the rule changed nothing. |
+| `test_s7_scheduled_floor.py` | A silence entity that is `on` and carries a `min_priority` state attribute holds only the calls below it; one that carries none, or an unreadable one, holds everything; the strictest of several `on` floors decides; `critical` still bypasses; the router reads the **attribute**, not the domain; a floor changes which calls are caught, not what happens to a caught call; `explain`'s `detail` names both the entity and the floor. |
+| `test_s7_routing_table.py` | `sensor.switchboard_routing_table` exists, its state is the number of targets, its two lists carry exactly the documented keys and in options order, `default_data` and a person's `outputs` never appear, an audience reports a bare output verbatim, and both attributes are excluded from the recorder. |
+| `test_s7_ack_authorship.py` | The `acknowledged` event payload carries `user_id` and `person` on both entry points; `person` is `null` when the canonical link does not resolve; a refusal names no author; and **no** `sensor.switchboard_acknowledgements` and no fifth event type are added. |
+| `test_s7_bare_outputs.py` | An `audience` entry that is a `notify.*` service name is delivered to; it has no presence, no silence, no snooze and no buttons; it receives the caller's and the target's data and nothing the router invented; it counts as one routed delivery; a missing one is `delivery_failed` and a recursive one is `recursion`, with no new reason; it takes part in the episode for the `done` message; `explain` lists it under a top-level `outputs`. |
+| `test_s7_entity_outputs.py` | An output that is a `notify` entity id is delivered with `notify.send_message`, carrying `message` and `title` and nothing else; an entity without `NotifyEntityFeature.TITLE` still gets the message; a registered legacy service of the same name wins; an entity that is in no state machine is a missing output and one that is present is not; naming the router's own `notify.switchboard` entity is `recursion`. |
+| `test_s7_critical_payload.py` | The iOS keys, the Android keys, both sets for an OS the router cannot identify, caller-set keys preserved with `push` counting as one key, the option off adding nothing, and `data.priority` stripped from a `mobile_app_*` output — always — while every other output still receives it. |
+| `test_contract.py` | The new frozen entity name in every instance language, the five-key `explain` response, the breaking `data.priority` strip, `critical_payload` defaulting to on, the two `acknowledged` payload keys, and the two new kinds of thing a `notify.*` name may be. |
+
+### Fixtures added or touched in `conftest.py`
+
+- **`make_target(escalate_when_nobody_home=...)`** and
+  **`make_entry(critical_payload=...)`**, both written only when they differ
+  from their default, so every S1-S6 options dict keeps the exact keys it had.
+- **`make_mobile_app_entry(os_name=...)`** and the same argument on the
+  `mobile_app_registration` fixture, defaulting to the `"iOS"` the S4
+  discovery tests have always written.
+- **`routing_table_sensor`**, the same one-line shape as `routed_sensor` and
+  the other three.
+- **`schedule_silence`**, which sets up a real `schedule.*` that is `on` all
+  week and carries block `data`. Removing the entity at teardown is what
+  leaves no lingering timer behind: a `Schedule` always arms one for its next
+  event and cancels it only through the `async_on_remove` its
+  `async_added_to_hass` registers.
+- **`notify_entity`**, which adds a real `NotifyEntity` to core's own `notify`
+  entity component — the short way rather than through a mock integration and
+  a mock platform, because `notify`'s `async_setup` already creates the
+  `EntityComponent` and registers `send_message` on it, and adding an entity
+  to that component is all a platform would have done.
+- **`explain`**, moved into `conftest.py` because four S7 files need it;
+  `test_s4_explain.py` keeps its own copy.
+- **`real_alert` is now an async-generator fixture** that ends every alert it
+  made at teardown. Nothing about the alerts changed: the safety net exists
+  because a test that fails *before* its own `end()` used to leave core's
+  repeat armed and turn one red into a red plus a teardown error, which hides
+  what the red was about.
+
+### Assumptions added by Sprint 7
+
+24. **A silence entity's `min_priority` is read as a plain state attribute**,
+    whatever publishes it. Most of the floor tests set it with
+    `hass.states.async_set(entity_id, "on", {"min_priority": "high"})`, exactly
+    as every other test sets an `input_boolean.*` silence without setting up
+    `input_boolean`; two of them use the real `schedule` fixture, because
+    `schedule` is what the contract documents as the way to produce the
+    attribute and that half is worth exercising for real.
+25. **What a caught silence *does* is ADR-0020 §3's business, not this
+    sprint's.** A `schedule.*` publishes the end of its block, so a call it
+    catches is **deferred**; a plain `binary_sensor` publishes none, so a call
+    it catches is **dropped** with `silenced`. The floor tests use whichever
+    entity makes the assertion legible and say so, rather than asserting a
+    drop reason a deferral will never produce.
+26. **The routing-table entity's unrecorded attributes are asserted on the
+    state object**, not by setting up the recorder:
+    `Entity.async_internal_added_to_hass` publishes
+    `{"unrecorded_attributes": ...}` as the state's `state_info`
+    (`$HA_CORE_SRC/homeassistant/helpers/entity.py`), which is exactly what
+    `recorder/db_schema.py` reads when it serialises one.
+27. **`test_s7_entity_outputs.py` builds a real notify entity and asserts on
+    the entity, not on a mocked service.** Mocking `notify.send_message` would
+    replace the entity service core registers and prove nothing about whether
+    the router reached the entity platform at all.
+28. **A `mobile_app` registration is a config entry, not a running
+    integration.** The critical-payload tests build entries with `os_name`
+    exactly as the S4 discovery tests build them with `user_id` and
+    `device_name`: the router reads config entries, and setting up
+    `mobile_app` would drag in http, webhooks and a push relay for nothing.
+
+### Tests that are green from the start, on purpose
+
+Following the S3-S6 practice: the negative half of a rule is worth pinning
+even when today's code already satisfies it.
+
+- `test_s7_nobody_home.py::test_a_target_without_the_flag_is_never_escalated`
+  and `::test_nothing_is_escalated_while_one_audience_person_is_home` — the
+  two lines an over-eager escalation crosses first.
+- `test_s7_nobody_home.py::test_the_escalation_does_not_override_the_presence_rule`
+  — a `home_only` target with nobody home is the case where the flag *looks*
+  like it should fire and must not.
+- `test_s7_nobody_home.py::test_a_normal_call_escalated_to_high_still_does_not_bypass_a_silence`
+  — `critical` stays the only bypass, which is the whole reason the escalation
+  is one step.
+- `test_s7_scheduled_floor.py::test_a_silence_entity_without_the_attribute_still_holds_everything`,
+  `::test_an_unreadable_floor_holds_everything` and
+  `::test_a_floor_alongside_a_silence_that_carries_none_holds_everything` — a
+  floor that fails towards noise is worse than no floor.
+- `test_s7_scheduled_floor.py::test_critical_still_bypasses_a_block_that_carries_a_floor`
+  — unchanged since v0 and must stay so.
+- `test_s7_ack_authorship.py::test_no_acknowledgements_entity_and_no_new_event_type_are_added`
+  — the deferral of ADR-0021 §9, pinned so it cannot arrive by accident.
+- `test_s7_entity_outputs.py::test_a_registered_legacy_service_wins_over_an_entity_of_the_same_name`
+  — today's behaviour for every output that works today, and the reason the
+  resolution order is written down rather than discovered.
+- `test_s7_entity_outputs.py::test_an_output_naming_the_routers_own_notify_entity_is_refused`
+  — `notify.switchboard` was a service that did not exist; with §6 it becomes
+  a live entity and a real loop.
+- `test_s7_critical_payload.py::test_priority_still_reaches_every_other_output`
+  and `::test_a_non_critical_message_gets_no_critical_payload` — the two edges
+  of a change that is otherwise all addition.

@@ -207,6 +207,14 @@ did not take it up even though it added three other per-target fields. Planned
 resolution: a `require_authentication` tri-state on the target when a real use
 case shows up.
 
+**Still open in 0.7.0, and deferred again on purpose** (ADR-0021 §9). The
+first draft of Sprint 7 carried exactly the tri-state this entry names and the
+maintainer cut it after the product review: it is a fourth state on a form
+0.6.0 existed to shorten, for a case still nobody has hit. The rule is
+unchanged — the buttons carry `authenticationRequired` when the message's
+**effective** priority is `high` or `critical`, which from 0.7.0 means after
+`escalate_when_nobody_home` has had its say.
+
 ## 2026-09-07 — S1 — two `alert` limitations to raise upstream
 
 This entry exists so the follow-up is not lost:
@@ -391,3 +399,48 @@ nothing ever reads the watched entity's current state. Still not filed.
 **Moved to [`accepted-deviations.md`](accepted-deviations.md) §3 in 0.6.0**
 (ADR-0020 §8): it is not a finding of its own, it is deviation 3 seen from the
 counters. The text lives there, and only there.
+
+## 2026-09-07 — S7 — the critical push is unverified on a real device
+
+ADR-0021 §7 makes a `critical` message carry the keys the Companion
+documentation gives for a critical notification — on iOS
+`push.sound: {name: default, critical: 1, volume: 1.0}`, on Android `ttl: 0`,
+`priority: high` and `channel: alarm_stream`
+(<https://companion.home-assistant.io/docs/notifications/critical-notifications/>).
+
+Nothing in this repository can prove that a phone then rings. The acceptance
+tests assert that the router **emits** the documented keys, on the OS the
+registration declares, with a caller's own keys preserved; what happens after
+the push leaves Home Assistant is the Companion app's, Apple's and Firebase's.
+In particular, an iOS critical alert additionally requires the user to have
+granted the Companion app the critical-alerts permission, which no test can
+stand in for.
+
+Accepted for S7: the alternative is not shipping the feature. Planned
+resolution: one observed critical push on a real iOS device — the sprint's own
+definition of done — recorded here with the phone's OS version and the
+Companion app version, after which this entry is marked resolved rather than
+deleted.
+
+## 2026-09-07 — S7 — `data.priority` stops reaching Companion outputs
+
+Recorded here as well as in `docs/contract.md` §v0.7 §"Breaking", because it is
+the one change of 0.7.0 that can make an existing installation behave
+differently and somebody debugging it will look here first.
+
+Until 0.6.x the router merged `data.priority` — its **own** input key, the one
+that selects the effective priority — into the `data` every output received,
+Companion outputs included. On Android the Companion app reads `data.priority`
+and understands exactly one value, `high`, so a household that had written
+`data: {priority: high}` was getting a high-priority Android notification as a
+side effect of asking the router to route at `high`. From 0.7.0 the key is
+stripped from `mobile_app_*` outputs, always, and the router writes
+`priority: "high"` itself when the message's effective priority is `critical`
+and the `critical_payload` option is on.
+
+Accepted rather than kept for compatibility: leaving the key in place would
+mean the router's own critical payload could be silently overridden by the
+routing priority of the message it belongs to, and would keep handing every
+Android device a `priority` it does not understand on every single message.
+Every output that is not a `mobile_app_*` one still receives `priority`
+exactly as before.

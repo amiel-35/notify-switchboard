@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.6 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.7 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -34,6 +34,18 @@
 > defaults a minor version may change, and four options-flow step ids become
 > public names. Nothing is added and no routing rule changes. Everything
 > above and below stays the v0 / v0.2 / v0.3 / v0.4 / v0.5 text, unchanged.
+>
+> v0.7 addendum (ADR-0021): one more frozen entity name
+> (`sensor.switchboard_routing_table`), one optional target key
+> (`escalate_when_nobody_home`), one global option (`critical_payload`), the
+> `min_priority` state attribute a silence entity may carry, two `explain`
+> top-level keys (`escalated`, `outputs`), two `acknowledged` payload keys
+> (`user_id`, `person`), audience entries that are `notify.*` service names and
+> outputs that are `notify.*` entity ids — and one **removal**:
+> `data.priority` no longer reaches a `mobile_app_*` output. No service, no
+> drop reason and no `event.switchboard_delivery` type is added. Everything
+> above and below stays the v0 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 text,
+> unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -48,6 +60,7 @@
 | Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`, `sensor.switchboard_deferred_today` (v0.3, ADR-0017) |
 | UI services (v0.2, ADR-0016) | `notify_switchboard.acknowledge`, `notify_switchboard.snooze`, `notify_switchboard.unsnooze`, `notify_switchboard.silence`, `notify_switchboard.unsilence` |
 | Read-only service (v0.4, ADR-0018) | `notify_switchboard.explain` (`SupportsResponse.ONLY`) |
+| Routing-table entity (v0.7, ADR-0021) | `sensor.switchboard_routing_table` |
 
 ## Input (legacy service call)
 
@@ -512,6 +525,246 @@ table is a **target**. The `target:` list of the legacy `notify.switchboard`
 call is spelled "the notify `target` list" wherever it has to be distinguished
 from it. A `person.*` is a **person**. `README.md` carries the glossary the
 other documents link to.
+
+## v0.7 addendum (ADR-0021)
+
+This addendum **adds** one entity, one target key, one global option, one state
+attribute the router reads, two `explain` keys, two `acknowledged` payload keys
+and two new kinds of output — and **removes one thing** from what a Companion
+output receives. The removal is stated on its own below, because it is the only
+breaking change of 0.7.0. No service is added, no drop reason is added, and the
+four `event.switchboard_delivery` types are unchanged.
+
+### One more frozen name
+
+`sensor.switchboard_routing_table` joins the frozen names table above, alongside
+`sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today` and
+`sensor.switchboard_deferred_today`. Like them, its **entity id** is frozen in
+the English form on an instance of any language; only its friendly name is
+translated (v0.3 §"Names").
+
+### `escalate_when_nobody_home` — one optional target key
+
+A target may carry `escalate_when_nobody_home: true`. It is absent (and
+therefore false) on every target written before 0.7.0.
+
+When it is true and **no** person of the target's audience is in the literal
+state `home` at decision time, the call's priority is raised **one step**, for
+that decision only:
+
+| From | To |
+|---|---|
+| `info` | `normal` |
+| `normal` | `high` |
+| `high` | `critical` |
+| `critical` | `critical` (unchanged) |
+
+The target's `default_priority` and the caller's `data.priority` are not
+changed; the next call re-evaluates the question from scratch.
+
+- Anything that is not the string `home` — a named zone, `not_home`, `unknown`,
+  `unavailable`, a person the state machine has never heard of — counts as "not
+  home".
+- Bare outputs (below) have no presence and are never asked; a target whose
+  audience holds no person escalates nothing.
+- The presence rule is untouched. A `home_only` target with nobody home drops
+  every person with reason `presence`, escalated or not.
+- The escalated priority is the effective one everywhere downstream: the
+  silence and snooze bypass, `authenticationRequired`, the `priority` of the
+  `routed` event, and the critical payload below.
+
+### A scheduled priority floor: the `min_priority` state attribute
+
+A person's configured silence entity that is `on` **and** whose state
+attributes carry `min_priority` silences only the calls **below** that value;
+calls at or above it pass. The rank is `info < normal < high < critical`.
+
+- The drop reason is the existing `silenced`. No reason is added.
+- A silence entity that is `on` and carries no such attribute silences
+  everything, as before.
+- A `min_priority` whose value is not one of the four priority strings is
+  ignored and the entity silences everything: an unreadable floor fails towards
+  quiet.
+- When several of a person's silence entities are `on`, the strictest decides:
+  the person is silenced when any of them would silence this call.
+- A temporary `notify_switchboard.silence` carries no floor and silences
+  everything.
+- A floor changes **which** calls a silence catches, not what happens to a
+  caught call: it is still dropped with `silenced`, or deferred to a wake time
+  or to the silence's own published end (v0.6), re-decided at its flush and
+  summarised, exactly as before.
+- `priority: critical` still bypasses every silence, floor or no floor.
+
+The documented way to publish the attribute is a core `schedule`, whose active
+block's `data:` becomes state attributes:
+
+```yaml
+schedule:
+  night:
+    monday:
+      - from: "22:30:00"
+        to: "07:00:00"
+        data:
+          min_priority: high
+```
+
+Any entity that is `on` and exposes the attribute is read the same way; the
+router reads the attribute, never the domain.
+
+There is no per-person `min_priority` option.
+
+### `sensor.switchboard_routing_table`
+
+Its **state** is the number of targets. It carries exactly two attributes:
+
+| Attribute | Contents |
+|---|---|
+| `targets` | one entry per target, in the order of the routing table, with exactly the keys `slug`, `name`, `alert_entity`, `snooze_minutes`, `allow_acknowledge`, `audience` |
+| `persons` | one entry per configured person, in options order, with exactly the keys `entity_id`, `wake_time`, `summary` |
+
+`alert_entity` and `wake_time` are `null` when the row has none, never absent.
+`wake_time` is the `"HH:MM:SS"` string the options carry. `audience` is
+reported verbatim, bare outputs included.
+
+Both lists are **closed**: nothing is added to either without an ADR. In
+particular the entity never exposes `default_data` — the one target key that
+carries whatever the user put in it — and never exposes a person's `outputs`.
+A caller that needs to know what *would* happen has
+`notify_switchboard.explain`.
+
+Both attributes are excluded from the recorder: they are configuration, they
+change only on an options edit, and their history is not worth a database row
+per state write.
+
+### The `acknowledged` event payload
+
+The `acknowledged` `event.switchboard_delivery` payload carries `user_id` and
+`person` alongside the `target` and `alert_entity` it already carried.
+
+- `user_id` is the acting `context.user_id` — the service call's, or the
+  Companion callback event's — or `null`.
+- `person` is that user resolved through the **canonical** link only: the
+  `user_id` state attribute of a `person.*` (v0.3 §"Callback resolution order",
+  step 1). It is `null` when that does not resolve. The `device_id` fallback of
+  step 2 is deliberately not used for authorship.
+
+No entity and no stored record exposes acknowledgement authorship: the event is
+where it lives.
+
+### Bare outputs: an audience entry that is a `notify.*` service
+
+An entry of a target's `audience` may be a `notify.*` **service name** instead
+of a `person.*` entity id. The domain tells the two apart, and nothing else.
+
+A bare output has:
+
+- no presence, so no presence rule and no part in `escalate_when_nobody_home`;
+- no silence, no snooze, no deferral, no time-to-live, no wake time, no
+  summary — it is delivered now or it is not delivered;
+- no Companion buttons, no `authenticationRequired`, no `notification_id` and
+  no router-added `tag`. It receives exactly the caller's `data` merged with
+  the target's `default_data`, and nothing the router invented.
+
+It does take part in **episodes**: a bare output that received a message of an
+episode receives that episode's `done` message, and one that did not is dropped
+with `not_notified`, exactly like a person.
+
+A delivered bare output is one routed delivery — counted in
+`sensor.switchboard_routed_today`, reported in a `routed`
+`event.switchboard_delivery` whose `person` key is `null`. One that does not
+exist, times out or raises is a `delivery_failed` drop, with the same
+consecutive-failure repair as a person's output. A bare output resolving to
+`notify.switchboard*` is refused with the existing `recursion` reason, at
+config time and at runtime.
+
+No drop reason and no event type is added for any of this.
+
+### Entity outputs: an output that is a `notify.*` entity id
+
+An output — a person's, or a bare one — that is a `notify` **entity id** is
+delivered with `notify.send_message`, carrying `message` and `title`.
+
+- **Resolution order: a registered legacy service first, then an entity.** A
+  legacy notify service and a notify entity share one namespace; an output that
+  is a registered service is called as one, exactly as before, and only an
+  output that is not becomes an entity call.
+- **`data` is not carried.** `notify.send_message` accepts `message` and
+  `title` and nothing else, so a target's `default_data`, a caller's `data`,
+  the default `tag`, the Companion buttons and the critical payload below never
+  reach an entity output. This is the same Home Assistant limitation the
+  contract already records for this integration's own `notify.switchboard`
+  entity.
+- **A missing entity is a missing output.** An entity that is absent from the
+  state machine, or whose state is `unavailable`, is treated exactly as a
+  missing service: the same consecutive-failure repair, the same
+  `delivery_failed` drop when it was a person's only output, and the same
+  `missing_outputs` list in `explain`.
+- **The recursion guard covers it.** `notify.switchboard` is this
+  integration's own notify entity; naming it as an output is refused with the
+  `recursion` reason, at config time and at runtime.
+
+### `critical_payload` — a global option, and a critical push that is critical
+
+`entry.options["critical_payload"]` is an optional boolean, **default true**;
+absent means true.
+
+While it is on, a message whose **effective** priority is `critical` — after
+`escalate_when_nobody_home`, above — carries, on `mobile_app_*` outputs only,
+the keys the Companion documentation gives for a critical notification:
+
+| Registration `os_name` | Keys added under `data` |
+|---|---|
+| `ios`, `ipados`, `watchos` | `push: {sound: {name: "default", critical: 1, volume: 1.0}}` |
+| `android` | `ttl: 0`, `priority: "high"`, `channel: "alarm_stream"` |
+| anything else, absent, or no matching registration | both sets |
+
+The OS is read from the `os_name` of the `mobile_app` config entry whose
+registration produces that output's service name. Matching is
+case-insensitive.
+
+A key the caller — or the target's `default_data` — already wrote is never
+overwritten. `push` counts as a **single** caller key: if the caller supplied
+any `push` mapping, the router adds nothing under it, which is how a household
+that prefers `push: {interruption-level: critical}` writes it.
+
+With the option off, none of these keys is added. Nothing else in the message
+changes, on any output.
+
+### Breaking: `data.priority` no longer reaches a `mobile_app_*` output
+
+Until 0.6.x, `data.priority` — the router's own input key, which selects the
+effective priority — was merged into the `data` handed to every output,
+Companion outputs included. From 0.7.0 the router **removes it** from the
+`data` it forwards to a `mobile_app_*` output.
+
+This is a change to what a Companion output receives, and it is stated here as
+one rather than folded into the paragraph above:
+
+- It happens **whatever** the priority is and **whatever** `critical_payload`
+  says. Turning the option off does not put the key back.
+- Android's Companion app reads `data.priority` and understands exactly one
+  value, `high`. A caller who was relying on `data: {priority: high}` to make
+  an Android notification urgent must stop: the router now sets
+  `priority: "high"` itself, on a `critical` message, as part of the critical
+  payload above.
+- Every **other** output — a bare `notify.*`, a speaker, a webhook,
+  `persistent_notification` — keeps receiving `priority` exactly as before. It
+  is the caller's key and the router is a proxy.
+
+### `explain` gains two top-level keys
+
+The response of `notify_switchboard.explain` is a mapping with **five** keys:
+`target`, `priority` and `persons` as before, plus
+
+| Key | Type | Meaning |
+|---|---|---|
+| `escalated` | `"nobody_home"` or `null` | which rule raised this decision's priority. `null` when nothing did — including when the rule's condition held but the priority was already `critical` |
+| `outputs` | list of `notify.*` service names | the target's bare outputs, in audience order; `[]` when it has none |
+
+`priority` reports the **escalated** priority. Each person's value keeps
+exactly the six keys v0.4 froze; a person silenced by a floored silence reports
+`reason: silenced`, and their `detail` names both the entity that is on and the
+floor it carries.
 
 ## Observer mode (plan B, ADR-007)
 
