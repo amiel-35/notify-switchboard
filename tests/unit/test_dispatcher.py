@@ -2235,7 +2235,9 @@ async def test_explain_answers_for_a_person_the_row_names_but_the_table_lacks(
     assert "person.ghost" in answer["detail"], (
         f"the sentence must name whom it is about; got {answer['detail']!r}"
     )
-    assert "leak" in answer["detail"]
+    # The target is named the way the household named it, not by its short
+    # identifier (0.7.1), so the comparison is case-insensitive.
+    assert "leak" in answer["detail"].lower()
 
 
 async def test_a_test_message_carries_the_public_tag_and_the_rows_title(

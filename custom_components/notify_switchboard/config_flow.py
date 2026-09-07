@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -115,7 +116,7 @@ from .const import (
     VALID_PRESENCE_RULES,
     VALID_PRIORITIES,
 )
-from .dispatcher import companion_service_name
+from .dispatcher import companion_service_name, friendly_name, named_entity
 from .router import is_recursive_output
 from .validation import parse_snooze_minutes, validate_person, validate_target
 
@@ -156,6 +157,25 @@ KEY_THIS_PERSONS_DEVICE = f"component.{DOMAIN}.common.this_persons_device"
 KEY_DEFAULT_TARGET_NAME = f"component.{DOMAIN}.common.default_target_name"
 FALLBACK_THIS_PERSONS_DEVICE = "this person's device"
 FALLBACK_DEFAULT_TARGET_NAME = "Everybody"
+
+# v0.7.1: the words an option label is built from. A chip reading
+# `airplay_bedroom` or `mobile_app_dev_bob` is the maintainer's own example of
+# the interface speaking like the code, so every option the two selectors offer
+# is labelled -- and the words that go in a label are translated, like the
+# marker above, rather than being English in a French UI.
+LABEL_HOME_ASSISTANT_APP = "home_assistant_app"
+LABEL_PERSISTENT_NOTIFICATION = "persistent_notification"
+OPTION_LABEL_FALLBACKS: dict[str, str] = {
+    "this_persons_device": FALLBACK_THIS_PERSONS_DEVICE,
+    LABEL_HOME_ASSISTANT_APP: "Home Assistant app",
+    LABEL_PERSISTENT_NOTIFICATION: "Home Assistant notifications",
+}
+
+# The `SelectSelector` translation keys of the two coded choices
+# (`component.<domain>.selector.<key>.options.<value>`): the stored values stay
+# `info` / `home_only`, and only what the chip reads changes.
+SELECTOR_PRIORITY = "priority"
+SELECTOR_PRESENCE_RULE = "presence_rule"
 
 # The `alert:` block `target_saved` offers (ADR-0018 §7). `notifiers:` wants the
 # legacy service name without its `notify.` prefix, which is exactly what
@@ -348,14 +368,83 @@ def _discovered_focus_sensors(hass: HomeAssistant, person_entity_id: str) -> lis
 
 
 @callback
+def _person_label(hass: HomeAssistant, entity_id: str) -> str:
+    """Return the name a picker shows for one person.
+
+    The same source the person's virtual device already uses
+    (`entity.person_device_name`), so the options menu, the device page and the
+    notification all call somebody by the same name.
+    """
+    return friendly_name(hass, entity_id)
+
+
+def _target_label(row: Mapping[str, Any]) -> str:
+    """Return the name a picker shows for one target.
+
+    The short identifier is plumbing -- it is what `notify.switchboard_<slug>`
+    is built from -- and the name is what the household chose. A target saved
+    without a name falls back to it, exactly as `_alert_snippet` does.
+    """
+    return str(row.get("name") or row[CONF_SLUG])
+
+
+@callback
+def _companion_device_names(hass: HomeAssistant) -> dict[str, str]:
+    """Map every Companion push service name to the device it belongs to.
+
+    Built from the `mobile_app` config entries rather than from a name
+    heuristic, exactly as `_discovered_outputs` is, and for every registration
+    of the instance rather than one person's: the audience selector offers a
+    phone as a bare output without knowing whose it is.
+    """
+    return {
+        companion_service_name(str(device_name)): str(device_name)
+        for entry in hass.config_entries.async_entries(MOBILE_APP_DOMAIN)
+        if (device_name := entry.data.get(MOBILE_APP_DEVICE_NAME))
+    }
+
+
+def _output_label(
+    service: str, devices: Mapping[str, str], texts: Mapping[str, str]
+) -> str:
+    """Return a readable name for one `notify` service, without its own name.
+
+    Three cases, in order: a Companion registration is its device, spelled the
+    way its owner spelled it; `persistent_notification` is the one core service
+    worth a name of its own; anything else is at least turned back into words.
+    Callers append the service name itself -- somebody who has to go and change
+    a configuration needs it, and a label that hid it would be friendlier and
+    useless.
+    """
+    device = devices.get(service)
+    if device is not None:
+        return f"{device} ({texts[LABEL_HOME_ASSISTANT_APP]})"
+    if service == SERVICE_PERSISTENT_NOTIFICATION:
+        return texts[LABEL_PERSISTENT_NOTIFICATION]
+    return service.replace("_", " ").capitalize()
+
+
+@callback
 def _output_options(
-    hass: HomeAssistant, owned: list[str], marker: str
+    hass: HomeAssistant,
+    owned: list[str],
+    marker: str,
+    devices: Mapping[str, str] | None = None,
 ) -> list[selector.SelectOptionDict]:
     """Build the `outputs` option list: this person's phones first, labelled.
 
     `sort` is left at its default `False` on the selector so the frontend keeps
     this order; it is the whole point of the list.
+
+    v0.7.1 opens the label of the person's *own* phones on the device name,
+    which is the only thing they recognise -- "Bob's iPhone" rather than
+    `mobile_app_bob_s_iphone`. Every other option keeps the bare service name
+    as its label, and that is not an oversight: `test_s4_discovery.py`
+    §"the persons own phones come first and are labelled" pins
+    `label == value` for anything that is not this person's, so labelling them
+    is a change to an acceptance test rather than to this function.
     """
+    devices = devices if devices is not None else _companion_device_names(hass)
     available = sorted(
         service
         for service in hass.services.async_services_for_domain(NOTIFY_DOMAIN)
@@ -364,14 +453,19 @@ def _output_options(
     first = [service for service in owned if service in available]
     rest = [service for service in available if service not in first]
     return [
-        selector.SelectOptionDict(value=service, label=f"{service} ({marker})")
+        selector.SelectOptionDict(
+            value=service,
+            label=f"{devices.get(service, service)} — {marker} ({service})",
+        )
         for service in first
     ] + [selector.SelectOptionDict(value=service, label=service) for service in rest]
 
 
 @callback
 def _audience_options(
-    hass: HomeAssistant, known_persons: list[str]
+    hass: HomeAssistant,
+    known_persons: list[str],
+    labels: Mapping[str, str] | None = None,
 ) -> list[selector.SelectOptionDict]:
     """Build the `audience` option list: the persons, then the bare outputs.
 
@@ -383,15 +477,51 @@ def _audience_options(
     The persons come first because they are what an audience usually is; a
     speaker is spelled with its full `notify.` prefix, which is what makes the
     domain readable in the stored row and in the routing-table entity.
+
+    v0.7.1 labels every option: a person by the name Home Assistant shows, a
+    speaker in words with its own name kept in brackets. Nothing an acceptance
+    test pins lives here, so unlike `_output_options` this list is readable
+    from end to end.
     """
+    texts = dict(OPTION_LABEL_FALLBACKS) | dict(labels or {})
+    devices = _companion_device_names(hass)
     speakers = sorted(
-        f"{NOTIFY_DOMAIN}.{service}"
+        service
         for service in hass.services.async_services_for_domain(NOTIFY_DOMAIN)
         if not is_recursive_output(service) and service not in NOTIFY_COMPONENT_SERVICES
     )
     return [
-        selector.SelectOptionDict(value=value, label=value)
-        for value in [*known_persons, *speakers]
+        selector.SelectOptionDict(value=person_id, label=_person_label(hass, person_id))
+        for person_id in known_persons
+    ] + [
+        selector.SelectOptionDict(
+            value=(value := f"{NOTIFY_DOMAIN}.{service}"),
+            label=f"{_output_label(service, devices, texts)} ({value})",
+        )
+        for service in speakers
+    ]
+
+
+@callback
+def _person_picker_options(
+    hass: HomeAssistant, persons: list[dict[str, Any]]
+) -> list[selector.SelectOptionDict]:
+    """Return the options of every "pick a person" step, labelled by name."""
+    return [
+        selector.SelectOptionDict(
+            value=row["entity_id"], label=_person_label(hass, row["entity_id"])
+        )
+        for row in persons
+    ]
+
+
+def _target_picker_options(
+    targets: list[dict[str, Any]],
+) -> list[selector.SelectOptionDict]:
+    """Return the options of every "pick a target" step, labelled by name."""
+    return [
+        selector.SelectOptionDict(value=row[CONF_SLUG], label=_target_label(row))
+        for row in targets
     ]
 
 
@@ -431,15 +561,20 @@ def _alert_snippet(row: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _explain_summary(response: dict[str, Any]) -> str:
+def _explain_summary(hass: HomeAssistant, response: dict[str, Any]) -> str:
     """Render an `explain` response as a markdown list, one item per person.
 
     The step description this lands in is rendered as markdown, where a bare
     newline is collapsed: without the list markers every person's answer runs
     into a single paragraph.
+
+    v0.7.1 opens each item on the person's own name and drops the decision
+    word: `routed` and `deferred` are the router's vocabulary, and the sentence
+    that follows already says what happened, in the reader's language. The
+    entity id stays in brackets for whoever has to go and fix something.
     """
     lines = [
-        f"{person}: {answer['decision']} - {answer['detail']}"
+        f"{named_entity(hass, person)} — {answer['detail']}"
         for person, answer in sorted(response["persons"].items())
     ]
     return "\n".join(f"- {line}" for line in lines)
@@ -781,7 +916,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 await self._async_bootstrap_default_target()
                 return self._save()
 
-        marker = await self._async_owned_device_marker()
+        labels = await self._async_option_labels()
         schema = vol.Schema(
             {
                 vol.Required(CONF_OUTPUTS, default=[]): selector.SelectSelector(
@@ -789,7 +924,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                         options=_output_options(
                             self.hass,
                             _discovered_outputs(self.hass, person_id),
-                            marker,
+                            labels["this_persons_device"],
                         ),
                         multiple=True,
                         # A phone that has not registered yet, or an output
@@ -817,7 +952,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 else self._suggested_person_outputs(),
             ),
             errors=errors,
-            description_placeholders={"person": person_id},
+            description_placeholders={"person": _person_label(self.hass, person_id)},
         )
 
     async def async_step_person_advanced(
@@ -878,7 +1013,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 },
             ),
             errors=errors,
-            description_placeholders={"person": str(person_id)},
+            description_placeholders={
+                "person": _person_label(self.hass, str(person_id))
+            },
         )
 
     async def async_step_edit_person_advanced(
@@ -904,19 +1041,27 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required("entity_id"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row["entity_id"] for row in persons]
+                        options=_person_picker_options(self.hass, persons)
                     )
                 )
             }
         )
         return self.async_show_form(step_id="edit_person_advanced", data_schema=schema)
 
-    async def _async_owned_device_marker(self) -> str:
-        """Return the translated "this person's device" option marker."""
+    async def _async_option_labels(self) -> dict[str, str]:
+        """Return the translated words the two selectors build labels from.
+
+        One lookup for the three of them: the marker that says a phone is this
+        person's, and the two names `_output_label` needs. English fallbacks
+        keep a label readable on an instance whose language has no file yet.
+        """
         translations = await async_get_translations(
             self.hass, self.hass.config.language, "common", {DOMAIN}
         )
-        return translations.get(KEY_THIS_PERSONS_DEVICE, FALLBACK_THIS_PERSONS_DEVICE)
+        return {
+            name: translations.get(f"component.{DOMAIN}.common.{name}", fallback)
+            for name, fallback in OPTION_LABEL_FALLBACKS.items()
+        }
 
     async def async_step_edit_person(
         self, user_input: dict[str, Any] | None = None
@@ -935,7 +1080,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required("entity_id"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row["entity_id"] for row in persons]
+                        options=_person_picker_options(self.hass, persons)
                     )
                 )
             }
@@ -973,7 +1118,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required("entity_id"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row["entity_id"] for row in persons]
+                        options=_person_picker_options(self.hass, persons)
                     )
                 )
             }
@@ -1030,6 +1175,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 self._pending_target = row
                 return await self.async_step_target_saved()
 
+        labels = await self._async_option_labels()
         schema = vol.Schema(
             {
                 vol.Required(CONF_SLUG): selector.TextSelector(
@@ -1043,7 +1189,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 ),
                 vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=_audience_options(self.hass, known_persons),
+                        options=_audience_options(self.hass, known_persons, labels),
                         multiple=True,
                         # A speaker that is not registered yet must still be
                         # typable, exactly as an output is (ADR-0018 §2).
@@ -1135,12 +1281,18 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_DEFAULT_PRIORITY, default=DEFAULT_PRIORITY
                 ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=list(VALID_PRIORITIES))
+                    selector.SelectSelectorConfig(
+                        options=list(VALID_PRIORITIES),
+                        translation_key=SELECTOR_PRIORITY,
+                    )
                 ),
                 vol.Required(
                     CONF_PRESENCE_RULE, default=DEFAULT_PRESENCE_RULE
                 ): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=list(VALID_PRESENCE_RULES))
+                    selector.SelectSelectorConfig(
+                        options=list(VALID_PRESENCE_RULES),
+                        translation_key=SELECTOR_PRESENCE_RULE,
+                    )
                 ),
                 vol.Optional(
                     CONF_ALLOW_ACKNOWLEDGE, default=False
@@ -1170,9 +1322,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 user_input if user_input is not None else self._suggested_target(),
             ),
             errors=errors,
-            description_placeholders={
-                "target": stored.get("name") or stored[CONF_SLUG]
-            },
+            description_placeholders={"target": _target_label(stored)},
         )
 
     async def async_step_edit_target_advanced(
@@ -1198,7 +1348,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required(CONF_SLUG): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 )
             }
@@ -1268,7 +1418,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required(CONF_SLUG): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 )
             }
@@ -1336,9 +1486,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 },
             ),
             errors=errors,
-            description_placeholders={
-                "target": stored.get("name") or stored[CONF_SLUG]
-            },
+            description_placeholders={"target": _target_label(stored)},
         )
 
     async def async_step_edit_target_escalation(
@@ -1364,7 +1512,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required(CONF_SLUG): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 )
             }
@@ -1393,7 +1541,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required(CONF_SLUG): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 )
             }
@@ -1432,7 +1580,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                     CONF_DEFAULT_TARGET, default=current
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 ),
                 vol.Optional(
@@ -1537,7 +1685,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required(CONF_SLUG): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row[CONF_SLUG] for row in targets]
+                        options=_target_picker_options(targets)
                     )
                 )
             }
@@ -1570,7 +1718,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 vol.Required("entity_id"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=[row["entity_id"] for row in persons]
+                        options=_person_picker_options(self.hass, persons)
                     )
                 )
             }
@@ -1590,7 +1738,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
             return self.async_abort(reason="nothing_to_test")
 
         await switchboard.async_send_test_message(slug)
-        self._test_result = _explain_summary(await switchboard.async_explain(slug))
+        self._test_result = _explain_summary(
+            self.hass, await switchboard.async_explain(slug)
+        )
         return await self.async_step_test_result()
 
     async def async_step_test_result(

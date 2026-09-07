@@ -32,6 +32,7 @@ import voluptuous as vol
 from homeassistant.components.notify import NotifyEntityFeature
 from homeassistant.const import (
     ATTR_ENTITY_ID,
+    ATTR_FRIENDLY_NAME,
     ATTR_SUPPORTED_FEATURES,
     EVENT_HOMEASSISTANT_STOP,
     STATE_IDLE,
@@ -103,6 +104,7 @@ from .const import (
     DROP_NOT_IN_AUDIENCE,
     DROP_SILENCED,
     DROP_SNOOZED,
+    DROP_UNKNOWN_PERSON,
     DROP_UNKNOWN_TARGET,
     ERROR_ACKNOWLEDGE_NOT_ALLOWED,
     ERROR_INVALID_SILENCE_MINUTES,
@@ -994,8 +996,11 @@ class Switchboard:
         there.
         """
         placeholders: dict[str, str] = {
-            "target": target.slug,
-            "person": person_id,
+            "target": target.name or target.slug,
+            # v0.7.1: a sentence a household reads names people the way the
+            # household does. `unknown_person` is the exception below -- there,
+            # the id is the thing to go and fix.
+            "person": friendly_name(self.hass, person_id),
             "reason": key,
             "rule": target.presence_rule,
             "state": context.person_states.get(person_id, "") or "unknown",
@@ -1015,7 +1020,9 @@ class Switchboard:
                     self.temporary_silence_until(person) if person else None
                 )
             else:
-                placeholders["entities"] = ", ".join(catching)
+                placeholders["entities"] = ", ".join(
+                    named_entity(self.hass, entity_id) for entity_id in catching
+                )
                 # ADR-0021 §2: naming only the entity leaves the user unable to
                 # tell why the `high` message got through and the `normal` one
                 # did not, so a floored silence gets a sentence that names the
@@ -1031,12 +1038,19 @@ class Switchboard:
                     )
         elif key == DECISION_DEFERRED:
             placeholders["entities"] = ", ".join(
-                self._silence_entities_on(person, context)
+                named_entity(self.hass, entity_id)
+                for entity_id in self._silence_entities_on(person, context)
             )
         elif key == DROP_SNOOZED and person is not None:
             placeholders["until"] = _local_text(
                 context.snoozes.get((person.entity_id, target.slug))
             )
+
+        if key == DROP_UNKNOWN_PERSON:
+            # The one sentence whose whole point is to name somebody the table
+            # does not know: the id is what a hand-edited audience holds, and
+            # what the user has to correct.
+            placeholders["person"] = named_entity(self.hass, person_id)
 
         translations = await self._async_translations()
         template = translations.get(
@@ -3288,7 +3302,9 @@ class Switchboard:
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_PERSON_WITHOUT_USER_ID,
-                translation_placeholders={"person": person_id},
+                # v0.7.1: a repair is read by a household. The id it has to act
+                # on stays in brackets; the `issue_id` still carries it whole.
+                translation_placeholders={"person": named_entity(self.hass, person_id)},
             )
 
     @staticmethod
@@ -3329,7 +3345,7 @@ class Switchboard:
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_PERSON_WITHOUT_OUTPUTS,
-                translation_placeholders={"person": person_id},
+                translation_placeholders={"person": named_entity(self.hass, person_id)},
             )
 
     @callback
@@ -3349,14 +3365,17 @@ class Switchboard:
         grace check armed by `async_setup`.
         """
         broken = {
-            f"{ISSUE_ALERT_ENTITY_MISSING}_{slug}": (slug, target.alert_entity)
+            f"{ISSUE_ALERT_ENTITY_MISSING}_{slug}": (
+                target.name or slug,
+                target.alert_entity,
+            )
             for slug, target in self.table.targets.items()
             if target.alert_entity and self.hass.states.get(target.alert_entity) is None
         }
         self._async_prune_issues(ISSUE_ALERT_ENTITY_MISSING, set(broken))
         if not create:
             return
-        for issue_id, (slug, entity_id) in broken.items():
+        for issue_id, (name, entity_id) in broken.items():
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
@@ -3364,7 +3383,10 @@ class Switchboard:
                 is_fixable=False,
                 severity=ir.IssueSeverity.WARNING,
                 translation_key=ISSUE_ALERT_ENTITY_MISSING,
-                translation_placeholders={"slug": slug, "entity_id": str(entity_id)},
+                translation_placeholders={
+                    "slug": name,
+                    "entity_id": named_entity(self.hass, str(entity_id)),
+                },
             )
 
     @callback
@@ -3433,6 +3455,37 @@ class Switchboard:
             translation_key="missing_output",
             translation_placeholders={"output": output},
         )
+
+
+def friendly_name(hass: HomeAssistant, entity_id: str) -> str:
+    """Return the name Home Assistant shows for an entity, never its id.
+
+    A `person.*` is renamed in the UI without its id following, so
+    `person.dev_bob` may well be "Bob"; showing the id to a household is the
+    0.7.1 complaint in one line. `State.name` is not the source: it is
+    `friendly_name or object_id.replace("_", " ")` (`homeassistant/core.py`,
+    `State.name`) with no titling, so an entity without a friendly name would
+    read "dev bob". The attribute is read directly and the titled object id is
+    the single fallback -- for a state without a friendly name, and for no
+    state at all, which a restart can reach before `person` has written its
+    states.
+    """
+    state = hass.states.get(entity_id)
+    if state is not None and (name := state.attributes.get(ATTR_FRIENDLY_NAME)):
+        return str(name)
+    return entity_id.partition(".")[2].replace("_", " ").title()
+
+
+def named_entity(hass: HomeAssistant, entity_id: str) -> str:
+    """Return "Name (entity id)": the name to read, the id to go and fix.
+
+    Used wherever the sentence is an explanation the user has to *act* on --
+    which silence entity is on, whom a target names that the table does not
+    know. The name alone would be friendlier and useless: there is no switch
+    called "Quiet hours" in the settings, there is `input_boolean.quiet_hours`.
+    """
+    name = friendly_name(hass, entity_id)
+    return entity_id if name == entity_id else f"{name} ({entity_id})"
 
 
 def companion_service_name(device_name: str) -> str:

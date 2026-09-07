@@ -185,9 +185,7 @@ async def test_the_audience_offers_people_by_name_and_speakers_in_words(
 ) -> None:
     """Every option of the audience selector carries a readable label."""
     async_mock_service(hass, "notify", "airplay_bedroom")
-    hass.states.async_set(
-        "person.dev_bob", "home", {"friendly_name": "Bob"}
-    )
+    hass.states.async_set("person.dev_bob", "home", {"friendly_name": "Bob"})
 
     options = _audience_options(hass, ["person.dev_bob"])
 
@@ -345,11 +343,12 @@ async def test_the_test_result_names_each_person(hass: HomeAssistant) -> None:
 
 def _selector_options(result: Any, key: str) -> list[dict[str, str]]:
     """Return one `SelectSelector`'s options, always as `{value, label}`."""
-    for marker in result["data_schema"].schema:
+    for marker, validator in result["data_schema"].schema.items():
         if str(marker) == key:
-            options = marker.container.config["options"]
             return [
-                option if isinstance(option, dict) else {"value": option, "label": option}
-                for option in options
+                option
+                if isinstance(option, dict)
+                else {"value": option, "label": option}
+                for option in validator.config["options"]
             ]
     raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
