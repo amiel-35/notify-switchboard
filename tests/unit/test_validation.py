@@ -28,7 +28,6 @@ def a_target(**overrides) -> dict:
     row = {
         "slug": "leak",
         "name": "Leak",
-        "class": "building",
         "default_priority": "normal",
         "alert_entity": None,
         "audience": ["person.alice"],

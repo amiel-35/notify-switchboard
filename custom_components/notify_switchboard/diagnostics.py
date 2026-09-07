@@ -2,11 +2,15 @@
 
 Everything a human typed is hidden here: message bodies (they can quote sensor
 names, addresses or anything an `alert` template rendered) and the `default_data`
-of every routing-table row (it can hold a push channel, a URL, a phone-specific
+of every target (it can hold a push channel, a URL, a phone-specific
 payload). Message bodies go through
 `homeassistant.components.diagnostics.async_redact_data`; `default_data` is
-redacted value by value so the *shape* of the row stays readable, which is the
-whole point of a diagnostics dump.
+redacted value by value so the *shape* of the target stays readable, which is
+the whole point of a diagnostics dump.
+
+One key is not redacted but **dropped**: `class` (ADR-0020 §4). A target stored
+by 0.5 may still carry it; the router never reads it, so showing it in a bug
+report would invite somebody to explain what it does.
 
 The three per-row texts of ADR-0016 (`message`, `done_message`,
 `default_title`) are deliberately **not** redacted. They are configuration, not
@@ -21,11 +25,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from homeassistant.components.diagnostics import REDACTED, async_redact_data
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .const import CONF_DEFAULT_DATA, CONF_TARGETS
+
+# The dead routing-table key of 0.1 -> 0.5.1 (ADR-0020 §4). It is not a
+# constant of `const.py` any more, on purpose: nothing in the integration reads
+# it, and the one place it is still spelled is the one place it is removed.
+DEAD_TARGET_KEY = "class"
+
+# The placeholder that stands in for one `default_data` value. Message bodies
+# keep going through core's `async_redact_data`, which writes its own
+# `**REDACTED**`; a `default_data` value is replaced key by key here, and
+# `tests/acceptance/test_s6_class_removed.py` pins this spelling.
+DEFAULT_DATA_PLACEHOLDER = "REDACTED"
 
 if TYPE_CHECKING:
     from . import SwitchboardConfigEntry
@@ -33,22 +48,26 @@ if TYPE_CHECKING:
 TO_REDACT = {"message", "title"}
 
 
+def _dump_target(row: Any) -> Any:
+    """Return one target as a dump shows it: `default_data` hidden, `class` gone."""
+    if not isinstance(row, dict):
+        return row
+    dumped = {key: value for key, value in row.items() if key != DEAD_TARGET_KEY}
+    if isinstance(dumped.get(CONF_DEFAULT_DATA), dict):
+        dumped[CONF_DEFAULT_DATA] = {
+            key: DEFAULT_DATA_PLACEHOLDER for key in dumped[CONF_DEFAULT_DATA]
+        }
+    return dumped
+
+
 def _redact_options(options: dict[str, Any]) -> dict[str, Any]:
     """Return the entry options with every `default_data` value redacted."""
     redacted = dict(options)
-    rows = redacted.get(CONF_TARGETS)
-    if not isinstance(rows, list):
+    targets = redacted.get(CONF_TARGETS)
+    if not isinstance(targets, list):
         return redacted
 
-    redacted[CONF_TARGETS] = [
-        {
-            **row,
-            CONF_DEFAULT_DATA: {key: REDACTED for key in row[CONF_DEFAULT_DATA]},
-        }
-        if isinstance(row, dict) and isinstance(row.get(CONF_DEFAULT_DATA), dict)
-        else row
-        for row in rows
-    ]
+    redacted[CONF_TARGETS] = [_dump_target(row) for row in targets]
     return redacted
 
 

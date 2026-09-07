@@ -72,7 +72,6 @@ def make_target(slug: str, **overrides: Any) -> dict:
     row = {
         "slug": slug,
         "name": slug.title(),
-        "class": "test",
         "default_priority": "normal",
         "alert_entity": None,
         "audience": ["person.alice"],
@@ -690,9 +689,20 @@ async def test_an_unparsable_snooze_or_deferral_row_is_dropped_too(
         },
     }
 
+    # The night is still running, so the setup catch-up leaves the deferral
+    # where it is and this test can look at what actually loaded. Without the
+    # silence, a person with no wake time whose night is demonstrably over has
+    # their queue flushed at setup (ADR-0020 §3).
+    hass.states.async_set("input_boolean.night", "on")
     entry = await install(
         hass,
-        [make_person("person.alice", ["mobile_app_alice"])],
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+            )
+        ],
         [make_target("leak")],
         "leak",
     )

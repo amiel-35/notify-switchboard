@@ -1,4 +1,4 @@
-# Quality scale self-assessment for Notify Switchboard (router 0.5.0).
+# Quality scale self-assessment for Notify Switchboard (router 0.6.0).
 #
 # Every rule of every tier is assessed: `done`, `todo` with a one-line reason,
 # or `exempt` with a one-line reason. Nothing is left "not assessed yet"
@@ -92,7 +92,8 @@ rules:
     status: exempt
     comment: >-
       Same reasoning as entity-unavailable: there is no connection to lose. An
-      output that fails several times in a row is logged once and repaired.
+      output that fails several times in succession is logged once and
+      repaired.
   parallel-updates:
     status: exempt
     comment: No entity polls or writes to a device.
@@ -158,7 +159,7 @@ rules:
   dynamic-devices:
     status: exempt
     comment: >-
-      Devices are routing-table rows, not discovered hardware: a person added
+      Devices are targets, not discovered hardware: a person added
       in the options gets their device on the reload that options change
       already triggers.
   entity-category:
@@ -193,7 +194,7 @@ rules:
     status: exempt
     comment: >-
       The config entry itself holds nothing to reconfigure -- the whole routing
-      table lives in the options flow, which can edit every row.
+      table lives in the options flow, which can edit every target.
   repair-issues:
     status: done
     comment: >-
