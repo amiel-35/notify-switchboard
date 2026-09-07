@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.notify_switchboard.config_flow import _showable
 from custom_components.notify_switchboard.const import (
     CONF_DEFAULT_TARGET,
     CONF_PERSONS,
@@ -696,6 +698,27 @@ async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
     assert parsed["alert"]["leak"]["name"] == "Fuite: eau # urgence", (
         f"the snippet must round-trip the row name through YAML; got {snippet!r}"
     )
+
+
+def test_an_error_with_no_field_to_show_it_on_is_logged_rather_than_lost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Dropping the error is right; dropping it in silence is not.
+
+    Both halves of an editor validate the whole row, so an error can land on a
+    field the current step does not render. Showing it is impossible and
+    refusing the submission would trap the user in a form they cannot fix -- so
+    it is dropped. What the user must not see, a bug report still should.
+    """
+    with caplog.at_level(logging.DEBUG, logger=_showable.__module__):
+        shown = _showable(
+            {"slug": "invalid_slug", "audience": "empty_audience"},
+            frozenset({"slug"}),
+        )
+
+    assert shown == {"slug": "invalid_slug"}
+    assert "empty_audience" in caplog.text
+    assert "slug" not in caplog.text, "only what was dropped is logged"
 
 
 async def test_the_alert_snippet_of_an_observer_row_names_no_notifiers(
