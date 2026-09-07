@@ -43,6 +43,14 @@ def _person_outputs_input(**overrides: Any) -> dict[str, Any]:
     return data
 
 
+def suggested_value(result: Any, key: str) -> Any:
+    """Return what `add_suggested_values_to_schema` pre-filled one field with."""
+    for marker in result["data_schema"].schema:
+        if str(marker) == key:
+            return (marker.description or {}).get("suggested_value")
+    raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
+
+
 def _target_input(**overrides: Any) -> dict[str, Any]:
     data = {
         "slug": "leak",
@@ -96,6 +104,8 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
         "edit_target",
         "remove_target",
         "general",
+        # v0.5 (ADR-0019 §1): the household's time-to-live policy.
+        "ttl",
         # v0.4 (ADR-0018 §6): send one real message and read what happened.
         "test_person",
         "test_target",
@@ -629,3 +639,64 @@ async def test_the_test_result_is_rendered_as_a_markdown_list(
         f"every line must be a markdown list item; got {text!r}"
     )
     assert "person.alice" in text and "person.bob" in text
+
+
+# ---------------------------------------------------------------------------
+# v0.5: the three optional options keys (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+async def test_the_ttl_step_writes_the_mapping_only_when_it_differs(
+    hass: HomeAssistant,
+) -> None:
+    """A household that never changes the policy keeps its three-key options."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    # The form opens on the *effective* policy, defaults included; `high` has
+    # no value at all, because it never expires.
+    result = await _options_step(hass, entry, "ttl")
+    assert result["step_id"] == "ttl"
+    assert suggested_value(result, "info") == 120
+    assert suggested_value(result, "normal") == 720
+    assert suggested_value(result, "high") is None
+
+    # Submitting the defaults back writes nothing.
+    result = await _options_step(
+        hass, entry, "ttl", {"info": 120, "normal": 720, "high": None}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert "ttl_minutes" not in entry.options
+
+    # A real change is written whole; an empty field means "never expires".
+    result = await _options_step(hass, entry, "ttl", {"info": 30})
+    await hass.async_block_till_done()
+    assert entry.options["ttl_minutes"] == {"info": 30, "normal": None, "high": None}
+
+    # ...and the form now opens on what was stored.
+    result = await _options_step(hass, entry, "ttl")
+    assert suggested_value(result, "info") == 30
+    assert suggested_value(result, "normal") is None
+
+
+async def test_summary_and_clear_done_are_written_only_when_they_differ(
+    hass: HomeAssistant,
+) -> None:
+    """Absent means on for `summary` and off for `clear_done` (ADR-0019)."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
+
+    person = entry.options[CONF_PERSONS][0]
+    row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
+    assert "summary" not in person
+    assert "clear_done" not in row
+
+    await _add_person(hass, entry, summary=False)
+    await _add_target(hass, entry, clear_done=True)
+
+    person = entry.options[CONF_PERSONS][0]
+    row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
+    assert person["summary"] is False
+    assert row["clear_done"] is True
