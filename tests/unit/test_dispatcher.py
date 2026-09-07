@@ -24,6 +24,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.notify_switchboard import async_migrate_entry
 from custom_components.notify_switchboard.const import DOMAIN
 from custom_components.notify_switchboard.diagnostics import (
+    _redact_options,
     async_get_config_entry_diagnostics,
 )
 from custom_components.notify_switchboard.dispatcher import (
@@ -783,6 +784,19 @@ async def test_diagnostics_redacts_default_data_values_but_keeps_the_keys(
     assert rows["leak"]["audience"] == ["person.alice"]
     # And the live options are not mutated by the dump.
     assert entry.options["targets"][0]["default_data"]["channel"] == "Alarms"
+
+
+def test_diagnostics_redaction_survives_options_without_a_target_list() -> None:
+    """A dump must never raise on the shape of what it is dumping.
+
+    `_redact_options` walks `options["targets"]`; a migration in flight, or an
+    entry whose options were hand-written, can leave that key absent or not a
+    list. The dump returns the options unchanged instead of failing.
+    """
+    assert _redact_options({"default_target": "leak"}) == {"default_target": "leak"}
+    assert _redact_options({"targets": None}) == {"targets": None}
+    # Non-dict rows in an otherwise valid list are passed through as-is.
+    assert _redact_options({"targets": ["nope"]}) == {"targets": ["nope"]}
 
 
 async def test_snoozes_expire_and_feed_the_person_sensor(

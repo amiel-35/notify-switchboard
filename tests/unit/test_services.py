@@ -655,6 +655,63 @@ async def test_an_unparsable_silence_row_is_dropped_rather_than_fatal(
     assert hass.states.get("binary_sensor.alice_silenced").state == "on"
 
 
+async def test_an_unparsable_snooze_or_deferral_row_is_dropped_too(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """The same tolerance as `silences`, for the other two lists.
+
+    A snooze with no slug and a deferral with no message body are dropped one
+    by one; the well-formed rows next to them still load.
+    """
+    good_until = (dt_util.utcnow() + timedelta(minutes=30)).isoformat()
+    hass_storage["notify_switchboard.data"] = {
+        "version": 1,
+        "minor_version": 3,
+        "key": "notify_switchboard.data",
+        "data": {
+            "snoozes": [
+                {"person": "person.alice", "slug": "leak", "expires_at": good_until},
+                {"person": "person.alice", "expires_at": good_until},  # no slug
+                {"person": "", "slug": "leak", "expires_at": good_until},  # no person
+                {"person": "person.alice", "slug": "leak"},  # no `expires_at`
+            ],
+            "deferrals": [
+                {
+                    "person": "person.alice",
+                    "slug": "leak",
+                    "tag": "t",
+                    "message": "kept",
+                    "queued_at": good_until,
+                },
+                {"person": "person.alice", "slug": "leak", "tag": "u"},  # no message
+                {"person": "person.alice"},  # no slug either
+            ],
+            "silences": [],
+        },
+    }
+
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    store = entry.runtime_data.switchboard.store
+    assert list(store.snoozes) == [("person.alice", "leak")]
+    assert list(store.deferrals) == [("person.alice", "leak", "t")]
+    assert store.deferrals[("person.alice", "leak", "t")].message == "kept"
+
+
+async def test_the_store_refuses_to_read_a_document_from_the_future(
+    hass: HomeAssistant,
+) -> None:
+    """A downgrade is data loss, so the migration raises instead of guessing."""
+    store = SwitchboardStorage(hass, 1, "notify_switchboard.test", minor_version=3)
+    with pytest.raises(ValueError, match="Cannot downgrade"):
+        await store._async_migrate_func(2, 1, {"snoozes": [], "deferrals": []})
+
+
 async def test_the_migration_leaves_a_document_already_at_minor_3_alone(
     hass: HomeAssistant,
 ) -> None:
