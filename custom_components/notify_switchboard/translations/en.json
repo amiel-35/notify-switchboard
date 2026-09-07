@@ -8,7 +8,7 @@
     "default_target_name": "Everybody",
     "test_message": "Notify Switchboard test message.",
     "detail_routed": "This message would be handed to {outputs}.",
-    "detail_deferred": "{person} is silenced by {entities} and has a wake time, so this message would be queued and delivered at {until}.",
+    "detail_deferred": "{person} is silenced by {entities}, so this message would be queued and delivered at {until}.",
     "detail_dropped": "This message would be dropped for {person}, reason {reason}.",
     "detail_presence": "The presence rule of this target is {rule}, and {person} is currently {state}.",
     "detail_silenced": "{person} is silenced by {entities}. Only a critical message would get through.",
@@ -72,14 +72,16 @@
         "menu_options": {
           "person": "Add or update a person",
           "edit_person": "Edit a person",
+          "edit_person_advanced": "Advanced settings of a person",
           "remove_person": "Remove a person",
           "target": "Add or update a target",
           "edit_target": "Edit a target",
+          "edit_target_advanced": "Advanced settings of a target",
           "remove_target": "Remove a target",
           "general": "Default target",
+          "ttl": "Time to live",
           "test_person": "Test a person",
-          "test_target": "Test a target",
-          "ttl": "Time to live"
+          "test_target": "Test a target"
         }
       },
       "person": {
@@ -99,6 +101,37 @@
           "entity_id": "Person"
         }
       },
+      "person_outputs": {
+        "title": "Notify services and silence",
+        "description": "Which notify services reach {person}, and when they are silent. The services of the phones registered to this person's Home Assistant user are listed first and already selected.",
+        "data": {
+          "outputs": "Notify services",
+          "silence_entities": "Silence entities"
+        },
+        "data_description": {
+          "outputs": "Pick from the notify services this instance has, or type one that does not exist yet: it is tolerated and retried.",
+          "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor. An iPhone Focus sensor is proposed automatically."
+        }
+      },
+      "person_advanced": {
+        "title": "Advanced settings of a person",
+        "description": "The night of {person}. Both fields are optional, and leaving the wake time empty is an answer, not a blank: a message held back then waits for the end of the silence itself, when that silence publishes one — a schedule does — and is dropped otherwise, as it always was.",
+        "data": {
+          "wake_time": "Wake time",
+          "summary": "Summarise the night"
+        },
+        "data_description": {
+          "wake_time": "End of the night silence. A message that would be dropped while silent is delivered then instead of being lost. Leave empty to use the end the silence publishes.",
+          "summary": "One notification when the night ends listing everything that was held back, instead of one notification per message. On by default."
+        }
+      },
+      "edit_person_advanced": {
+        "title": "Advanced settings of a person",
+        "description": "Pick whose wake time and night summary you want to open. Their notify services and silence entities are left exactly as they are.",
+        "data": {
+          "entity_id": "Person"
+        }
+      },
       "remove_person": {
         "title": "Remove a person",
         "data": {
@@ -110,36 +143,52 @@
       },
       "target": {
         "title": "Target",
-        "description": "One row of the routing table. It becomes notify.switchboard_[slug].",
+        "description": "A target of the routing table. It becomes notify.switchboard_[slug]. These five are everything a target needs to route; priority, presence, buttons and templates all have a default and live in its advanced settings.",
         "data": {
           "slug": "Slug",
           "name": "Name",
-          "class": "Class",
-          "default_priority": "Default priority",
           "alert_entity": "Alert",
           "audience": "Audience",
+          "observer_mode": "Observer mode"
+        },
+        "data_description": {
+          "slug": "Lowercase, no spaces. Renaming it breaks every alert that lists the old service.",
+          "name": "Shown to people, and used as the message in observer mode when the alert carries none.",
+          "alert_entity": "The alert.* this target is tied to. Required for the Acknowledge button.",
+          "audience": "The people considered for this target. Anyone else is not notified.",
+          "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier."
+        }
+      },
+      "target_saved": {
+        "title": "Target saved",
+        "description": "Here is the alert: block this target expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nThe block follows the observer mode you chose: in observer mode the router watches the alert itself and no notifiers: is needed, and with observer mode off the notifiers: entry is what lets the alert drive the router.\n\nEverything else — priority, presence, buttons, templates — already has a default. Tick the box below to set them now, or come back later through Advanced settings of a target in this menu.",
+        "data": {
+          "advanced": "Open the advanced settings now"
+        },
+        "data_description": {
+          "advanced": "Leave it unticked to save this target as it is. Ticked, the target is saved when the next form is submitted."
+        }
+      },
+      "target_advanced": {
+        "title": "Advanced settings of a target",
+        "description": "Everything about {target} that already has a sensible default. Nothing here is required, and what you leave alone keeps the value it has.",
+        "data": {
+          "default_priority": "Default priority",
           "presence_rule": "Presence rule",
           "allow_acknowledge": "Allow acknowledgement",
           "snooze_minutes": "Snooze durations",
           "default_data": "Default data",
-          "observer_mode": "Observer mode",
           "message": "Message template",
           "done_message": "Back-to-normal template",
           "default_title": "Default title",
           "clear_done": "Clear the back-to-normal message"
         },
         "data_description": {
-          "slug": "Lowercase, no spaces. Renaming it breaks every alert that lists the old service.",
-          "name": "Shown to people, and used as the message in observer mode when the alert carries none.",
-          "class": "Free text used for grouping only, for example building or pets.",
           "default_priority": "Only critical bypasses a person's silence and snoozes.",
-          "alert_entity": "The alert.* this row is tied to. Required for the Acknowledge button.",
-          "audience": "The people considered for this target. Anyone else is not notified.",
           "presence_rule": "Whether the person's person.* state has to be home, away, or does not matter.",
           "allow_acknowledge": "Adds an Acknowledge button that turns the alert off.",
           "snooze_minutes": "Comma-separated minutes, for example 15, 60. Leave empty for no snooze button.",
           "default_data": "Merged under the caller's data; the caller wins on conflicting keys.",
-          "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier.",
           "message": "Optional template used in observer mode when the alert goes off. The alert's state is available as alert, for example {{ alert.attributes.level }}. Leave empty to send the name.",
           "done_message": "Optional template used in observer mode when the alert returns to idle. Leave empty to send the translated back-to-normal text.",
           "default_title": "Title used when the caller gives none, and for every message observer mode sends.",
@@ -148,7 +197,14 @@
       },
       "edit_target": {
         "title": "Edit a target",
-        "description": "Pick the routing-table row to edit. The form opens on its stored settings.",
+        "description": "Pick the target to edit. The form opens on its stored settings.",
+        "data": {
+          "slug": "Target"
+        }
+      },
+      "edit_target_advanced": {
+        "title": "Advanced settings of a target",
+        "description": "Pick the target whose advanced settings you want to open. Its five basic fields are left exactly as they are.",
         "data": {
           "slug": "Target"
         }
@@ -171,63 +227,43 @@
           "default_target": "Used by notify.switchboard when no target is given, and by the notify entity."
         }
       },
-      "person_outputs": {
-        "title": "Notify services and silence",
-        "description": "Which notify services reach {person}, and when they are silent. The services of the phones registered to this person's Home Assistant user are listed first and already selected.",
-        "data": {
-          "outputs": "Notify services",
-          "silence_entities": "Silence entities",
-          "wake_time": "Wake time",
-          "summary": "Summarise the night"
-        },
-        "data_description": {
-          "outputs": "Pick from the notify services this instance has, or type one that does not exist yet: it is tolerated and retried.",
-          "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor. An iPhone Focus sensor is proposed automatically.",
-          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost.",
-          "summary": "One notification at the wake time listing everything that was held back, instead of one notification per message. On by default."
-        }
-      },
-      "target_saved": {
-        "title": "Target saved",
-        "description": "Here is the alert: block this row expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```"
-      },
-      "test_target": {
-        "title": "Test a target",
-        "description": "Send one real test message through this row, to everybody its audience reaches.",
-        "data": {
-          "slug": "Target"
-        },
-        "data_description": {
-          "slug": "The routing-table row to test. The message is counted and evented like any other."
-        }
-      },
-      "test_person": {
-        "title": "Test a person",
-        "description": "Send one real test message to this person, through the row that reaches them.",
-        "data": {
-          "entity_id": "Person"
-        },
-        "data_description": {
-          "entity_id": "The default target is used when it reaches this person, otherwise the first row whose audience contains them."
-        }
-      },
-      "test_result": {
-        "title": "Test result",
-        "description": "The message has been sent. Here is what the router decided for each person:\n\n{result}"
-      },
       "ttl": {
         "title": "Time to live",
-        "description": "How long a message held for somebody's wake time is still worth delivering. Leave a field empty for messages of that priority never to expire. Critical is not listed: it is never held back, so it can never expire.",
+        "description": "How long a message held back while somebody is silent is still worth delivering. Leave a field empty for messages of that priority never to expire. Critical is not listed: it is never held back, so it can never expire.",
         "data": {
           "info": "Info",
           "normal": "Normal",
           "high": "High"
         },
         "data_description": {
-          "info": "Minutes an info message stays worth delivering after it was held back. Default: 120.",
-          "normal": "Minutes a normal message stays worth delivering after it was held back. Default: 720.",
+          "info": "Minutes an info message stays worth delivering after it was held back. Default today: 120, and a future version may pick another number.",
+          "normal": "Minutes a normal message stays worth delivering after it was held back. Default today: 720, and a future version may pick another number.",
           "high": "Minutes a high message stays worth delivering. Empty by default: it never expires."
         }
+      },
+      "test_target": {
+        "title": "Test a target",
+        "description": "Send one real test message through this target, to everybody its audience reaches.",
+        "data": {
+          "slug": "Target"
+        },
+        "data_description": {
+          "slug": "The target to test. The message is counted and evented like any other."
+        }
+      },
+      "test_person": {
+        "title": "Test a person",
+        "description": "Send one real test message to this person, through the target that reaches them.",
+        "data": {
+          "entity_id": "Person"
+        },
+        "data_description": {
+          "entity_id": "The default target is used when it reaches this person, otherwise the first target whose audience contains them."
+        }
+      },
+      "test_result": {
+        "title": "Test result",
+        "description": "The message has been sent. Here is what the router decided for each person:\n\n{result}"
       }
     },
     "error": {
@@ -252,7 +288,7 @@
       "nothing_to_remove": "There is nothing to remove yet.",
       "nothing_to_edit": "There is nothing to edit yet.",
       "nothing_to_configure": "Add a target first.",
-      "nothing_to_test": "No routing-table row has this person in its audience, so there is nothing to send them. Add them to a target's audience first."
+      "nothing_to_test": "No target has this person in its audience, so there is nothing to send them. Add them to a target's audience first."
     }
   },
   "issues": {
@@ -262,11 +298,11 @@
     },
     "missing_output": {
       "title": "Notify service unusable",
-      "description": "The notify service {output} has failed for several notifications in a row: it does not exist, or every call to it raised. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
+      "description": "The notify service {output} has failed for several notifications in succession: it does not exist, or every call to it raised. Messages routed to it are lost. Fix the service, or remove it from the person's outputs."
     },
     "invalid_service_target": {
       "title": "A card or script keeps calling an unknown target",
-      "description": "A notify_switchboard service has been refused several times for the target {value}, which is not in the routing table. Something — most likely a card or a script still pointing at a renamed row — keeps asking for it. Fix the caller, or add the target."
+      "description": "A notify_switchboard service has been refused several times for the target {value}, which is not in the routing table. Something — most likely a card or a script still pointing at a renamed target — keeps asking for it. Fix the caller, or add the target."
     },
     "invalid_service_person": {
       "title": "A card or script keeps naming an unusable person",
@@ -282,11 +318,11 @@
     },
     "person_without_outputs": {
       "title": "A person has no notify service",
-      "description": "{person} is in the audience of at least one routing-table row but has no notify service at all, so every message meant for them is dropped with reason no_outputs. Open the Notify Switchboard options, edit that person and give them at least one notify service."
+      "description": "{person} is in the audience of at least one target but has no notify service at all, so every message meant for them is dropped with reason no_outputs. Open the Notify Switchboard options, edit that person and give them at least one notify service."
     },
     "alert_entity_missing": {
       "title": "A target points at an alert that does not exist",
-      "description": "The routing-table row {slug} is tied to {entity_id}, which is not in the state machine. The row acknowledges nothing and observes nothing. Write that alert: block, or clear the alert field of the row, then reload Notify Switchboard."
+      "description": "The target {slug} is tied to {entity_id}, which is not in the state machine. That target acknowledges nothing and observes nothing. Write that alert: block, or clear the alert field of the target, then reload Notify Switchboard."
     }
   },
   "exceptions": {
@@ -318,29 +354,29 @@
   "services": {
     "acknowledge": {
       "name": "Acknowledge",
-      "description": "Turns off the alert linked to a routing-table row, exactly as the Acknowledge button of a notification does.",
+      "description": "Turns off the alert linked to a target, exactly as the Acknowledge button of a notification does.",
       "fields": {
         "target": {
           "name": "Target",
-          "description": "The slug of the routing-table row. Its row must have an alert and allow acknowledgement."
+          "description": "The slug of the target. It must have an alert and allow acknowledgement."
         }
       }
     },
     "snooze": {
       "name": "Snooze",
-      "description": "Stops notifications from one target for a while, for one person or for the whole audience of the row.",
+      "description": "Stops notifications from one target for a while, for one person or for the whole audience of that target.",
       "fields": {
         "target": {
           "name": "Target",
-          "description": "The slug of the routing-table row to snooze."
+          "description": "The slug of the target to snooze."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "How long to snooze. It has to be one of the durations the row offers."
+          "description": "How long to snooze. It has to be one of the durations the target offers."
         },
         "person": {
           "name": "Person",
-          "description": "Who to snooze it for. Leave empty to snooze everybody in the row's audience."
+          "description": "Who to snooze it for. Leave empty to snooze everybody in the target's audience."
         }
       }
     },
@@ -350,11 +386,11 @@
       "fields": {
         "target": {
           "name": "Target",
-          "description": "The slug of the routing-table row to stop snoozing."
+          "description": "The slug of the target to stop snoozing."
         },
         "person": {
           "name": "Person",
-          "description": "Whose snooze to lift. Leave empty for everybody in the row's audience."
+          "description": "Whose snooze to lift. Leave empty for everybody in the target's audience."
         }
       }
     },
@@ -384,19 +420,19 @@
     },
     "explain": {
       "name": "Explain",
-      "description": "Answers what would happen to a message sent to a routing-table row right now, per person, without sending anything. Call it with return_response.",
+      "description": "Answers what would happen to a message sent to a target right now, per person, without sending anything. Call it with return_response.",
       "fields": {
         "target": {
           "name": "Target",
-          "description": "The slug of the routing-table row to evaluate."
+          "description": "The slug of the target to evaluate."
         },
         "priority": {
           "name": "Priority",
-          "description": "The priority to evaluate with. Leave empty to use the row's default priority, exactly as a real call does."
+          "description": "The priority to evaluate with. Leave empty to use the target's default priority, exactly as a real call does."
         },
         "person": {
           "name": "Person",
-          "description": "Whom to answer about. Leave empty for every person in the row's audience."
+          "description": "Whom to answer about. Leave empty for every person in the target's audience."
         }
       }
     }

@@ -21,7 +21,7 @@ alert:
     notifiers:
       - switchboard_fountain          # -> notify.switchboard_fountain
 
-# Matching routing-table row:
+# Matching target:
 #
 # | Field             | Value                                    |
 # |--------------------|------------------------------------------|
@@ -31,7 +31,7 @@ alert:
 # | snooze_minutes     | [60, 240, 1440]  (a full day is fine for this class) |
 # | allow_acknowledge  | true                                      |
 #
-# Unlike the leak example, this row's `presence_rule` would typically be
+# Unlike the leak example, this target's `presence_rule` would typically be
 # `home_only` (no point paging someone away for a garden fixture) and its
 # `default_priority` `normal` rather than `high` — set both in the options
-# flow row, not here; `alert:` never carries routing decisions (ADR-008).
+# flow target, not here; `alert:` never carries routing decisions (ADR-008).

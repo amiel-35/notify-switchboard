@@ -55,7 +55,6 @@ def make_target(slug: str, **overrides: Any) -> dict:
     row = {
         "slug": slug,
         "name": slug.title(),
-        "class": "test",
         "default_priority": "normal",
         "alert_entity": None,
         "audience": ["person.alice"],
@@ -1570,6 +1569,253 @@ async def test_a_deferral_held_by_a_temporary_silence_is_re_armed_at_its_end(
     assert [call.data["message"] for call in calls] == ["night"]
 
 
+async def test_unsilence_flushes_the_queue_that_silence_alone_was_holding(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """Lifting the silence early must release the queue early too.
+
+    The sibling above leaves the deferral armed on the temporary silence's own
+    end. `unsilence` cancels that silence but used to leave the timer where it
+    was, so a message whose only remaining holder had just been lifted still
+    waited for an expiry that no longer meant anything -- the very wait
+    ADR-0019 §4 removed for a configured silence going `off` early.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    # 07:00 Paris: the night is over but half an hour of quiet, asked for in
+    # the small hours, holds the message on its own.
+    freezer.move_to(datetime(2026, 9, 11, 5, 0, tzinfo=dt_util.UTC))
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 30}, blocking=True
+    )
+    hass.states.async_set("input_boolean.night", "off")
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    switchboard = entry.runtime_data.switchboard
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+    assert "person.alice" in switchboard._deferral_unsubs
+
+    # 07:10 Paris: the quiet is lifted by hand, twenty minutes before its end.
+    freezer.move_to(datetime(2026, 9, 11, 5, 10, tzinfo=dt_util.UTC))
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+    assert switchboard.store.deferrals == {}
+    assert switchboard._deferral_unsubs == {}
+
+
+async def test_unsilence_keeps_a_queue_the_night_is_still_holding(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The other half of the symmetry: lifting one of two holders releases nothing.
+
+    `_async_silence_changed` flushes only when the **last** silence lifts, and
+    `unsilence` owes the queue the same reading: the night is still on, so the
+    message stays queued and the timer goes back on what is left of the two
+    candidates rather than on the expiry that has just been cancelled.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    freezer.move_to(datetime(2026, 9, 10, 21, 35, tzinfo=dt_util.UTC))  # 23:35 Paris
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 30}, blocking=True
+    )
+    freezer.move_to(datetime(2026, 9, 10, 21, 40, tzinfo=dt_util.UTC))  # 23:40 Paris
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    switchboard = entry.runtime_data.switchboard
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+    assert "person.alice" in switchboard._deferral_unsubs
+
+    # 00:10 Paris, past the end of the silence that was lifted: no timer of
+    # that vintage is left to fire, and the night still holds the message.
+    freezer.move_to(datetime(2026, 9, 10, 22, 10, tzinfo=dt_util.UTC))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+
+    # The night ends: the message is still there to be delivered.
+    freezer.move_to(datetime(2026, 9, 11, 4, 0, tzinfo=dt_util.UTC))  # 06:00 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+
+
+async def test_a_silence_asked_for_after_the_deferral_was_armed_moves_the_timer(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """`silence` owes the queue the re-arm `unsilence` already does.
+
+    The deferral timer is armed on the earliest of the wake time and the end of
+    a running temporary silence, but `notify_switchboard.silence` wrote the
+    silence and armed nothing but its own expiry. A silence asked for *after*
+    the deferral was armed therefore never became a candidate:
+
+    * 23:30, the message is queued behind the night; the timer goes on 07:00;
+    * 04:30, ninety minutes of quiet are asked for, ending at 06:00;
+    * 05:00, the night ends -- the early flush of ADR-0019 §4 stands down,
+      because the quiet still holds the message;
+    * 06:00, that quiet expires, and nobody was waiting for it.
+
+    The message then waited until 07:00, a full hour after the last thing that
+    held it had gone.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    switchboard = entry.runtime_data.switchboard
+    assert len(switchboard.store.deferrals) == 1
+
+    # 04:30 Paris: ninety minutes of quiet, ending at 06:00 -- an hour before
+    # the wake time the timer is currently armed on.
+    freezer.move_to(datetime(2026, 9, 11, 2, 30, tzinfo=dt_util.UTC))
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 90}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    # 05:00 Paris: the night ends, and the quiet is what keeps the message.
+    freezer.move_to(datetime(2026, 9, 11, 3, 0, tzinfo=dt_util.UTC))
+    hass.states.async_set("input_boolean.night", "off")
+    await hass.async_block_till_done()
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+
+    # 06:00 Paris: the quiet expires, and nothing else is holding the message.
+    freezer.move_to(datetime(2026, 9, 11, 4, 0, tzinfo=dt_util.UTC))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+    assert switchboard.store.deferrals == {}
+
+
+async def test_a_silence_entity_that_disappears_releases_the_queue(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A renamed or deleted silence entity is a silence that has lifted.
+
+    `_async_silence_changed` read a `new_state` of `None` as "nothing to say"
+    and returned, which is the one reading that cannot be right: the entity the
+    message waits behind has gone, so `has_configured_silence` will never see
+    it `on` again and the early flush of ADR-0019 §4 will never be offered
+    another chance to run. The queue waited for the wake time with nothing left
+    holding it -- the same wait §4 exists to remove.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    switchboard = entry.runtime_data.switchboard
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+
+    # 00:30 Paris: the helper is renamed, so the entity the queue waits behind
+    # simply stops existing.
+    freezer.move_to(datetime(2026, 9, 10, 22, 30, tzinfo=dt_util.UTC))
+    hass.states.async_remove("input_boolean.night")
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+    assert switchboard.store.deferrals == {}
+
+
 async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
     hass: HomeAssistant, hass_storage: dict, freezer: Any
 ) -> None:
@@ -2538,3 +2784,370 @@ async def test_a_deferral_whose_person_left_the_table_is_dropped_not_delivered(
     assert routed is None
     assert reason is None
     assert refusals == ()
+
+
+# ---------------------------------------------------------------------------
+# v0.6 (ADR-0020 §3): an absent wake time means "until the silence ends"
+# ---------------------------------------------------------------------------
+
+NIGHT_UTC = datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC)  # 23:30 Paris
+SEVEN_UTC = datetime(2026, 9, 11, 5, 0, tzinfo=dt_util.UTC)  # 07:00 Paris
+SIX_UTC = datetime(2026, 9, 11, 4, 0, tzinfo=dt_util.UTC)  # 06:00 Paris
+EIGHT_UTC = datetime(2026, 9, 11, 6, 0, tzinfo=dt_util.UTC)  # 08:00 Paris
+
+
+async def _install_without_a_wake_time(
+    hass: HomeAssistant, *silence_entities: str
+) -> MockConfigEntry:
+    """One person, no wake time, silenced by the given entities."""
+    hass.states.async_set("person.alice", "home")
+    return await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=list(silence_entities),
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+
+
+async def test_a_silence_that_publishes_no_end_still_drops_without_a_wake_time(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """The boundary of §3: an `input_boolean` has no end to wait for."""
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await _install_without_a_wake_time(hass, "input_boolean.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+    assert "silenced" in entry.runtime_data.switchboard.drop_reasons
+
+
+async def test_an_end_published_by_a_silence_that_is_off_does_not_count(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """A schedule that is `off` publishes the end of somebody else's night.
+
+    Its `next_event` is then the *start* of the next block, which is exactly
+    the instant a message must not be held until. Only an active silence has
+    an end worth waiting for.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("input_boolean.night", "on")
+    hass.states.async_set(
+        "schedule.night", "off", {"next_event": SEVEN_UTC.isoformat()}
+    )
+    entry = await _install_without_a_wake_time(
+        hass, "input_boolean.night", "schedule.night"
+    )
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_the_earliest_published_end_is_the_one_that_bounds_the_deferral(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """Two schedules, and the fallback timer is armed on the sooner of them."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    hass.states.async_set("schedule.quiet", "on", {"next_event": SIX_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night", "schedule.quiet")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 06:00: the earlier schedule is what the timer was armed on. Both silences
+    # are lifted here, so the flush that timer triggers delivers rather than
+    # holding -- which is what proves the instant it fired at.
+    freezer.move_to(SIX_UTC)
+    hass.states.async_set("schedule.quiet", "off", {})
+    hass.states.async_set("schedule.night", "off", {})
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+
+
+async def test_explain_reports_the_published_end_as_until(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """`until` keeps its frozen meaning: a real instant, and this is the one."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    await _install_without_a_wake_time(hass, "schedule.night")
+
+    response = await hass.services.async_call(
+        DOMAIN,
+        "explain",
+        {"target": "leak"},
+        blocking=True,
+        return_response=True,
+    )
+
+    answer = response["persons"]["person.alice"]
+    assert answer["decision"] == "deferred"
+    assert dt_util.parse_datetime(answer["until"]) == SEVEN_UTC
+
+
+async def test_a_queue_whose_silence_ended_while_ha_was_down_is_caught_up(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The setup catch-up covers a person with no wake time too (ADR-0020 §3).
+
+    A message queued at 23:30 behind a schedule that has since gone `off` has
+    nothing left holding it, and no wake-time timer will ever come round for
+    it: without the catch-up it would sit in the store for good.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(SEVEN_UTC)
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass_storage[STORAGE_KEY] = {
+        "version": 1,
+        "minor_version": 4,
+        "key": STORAGE_KEY,
+        "data": {
+            "snoozes": [],
+            "silences": [],
+            "episodes": [],
+            "deferrals": [
+                {
+                    "person": "person.alice",
+                    "slug": "leak",
+                    "tag": "switchboard-leak",
+                    "message": "queued at 23:30",
+                    "priority": "normal",
+                    "queued_at": NIGHT_UTC.isoformat(),
+                }
+            ],
+        },
+    }
+    hass.states.async_set("schedule.night", "off", {})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    assert [call.data["message"] for call in calls] == ["queued at 23:30"]
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_a_queue_whose_silence_is_still_running_is_not_caught_up(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The other half of the same rule: a night still running holds its queue."""
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 11, 3, 0, tzinfo=dt_util.UTC))  # 05:00 Paris
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass_storage[STORAGE_KEY] = {
+        "version": 1,
+        "minor_version": 4,
+        "key": STORAGE_KEY,
+        "data": {
+            "snoozes": [],
+            "silences": [],
+            "episodes": [],
+            "deferrals": [
+                {
+                    "person": "person.alice",
+                    "slug": "leak",
+                    "tag": "switchboard-leak",
+                    "message": "queued at 23:30",
+                    "priority": "normal",
+                    "queued_at": NIGHT_UTC.isoformat(),
+                }
+            ],
+        },
+    }
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+
+async def test_a_temporary_silence_outliving_the_schedule_does_not_strand_the_queue(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A person with no wake time has exactly one timer: it must not be lost.
+
+    The fallback timer of §3 is armed on the end the *configured* silence
+    publishes. A `notify_switchboard.silence` asked for after the message was
+    queued can outlive that end, and then the sequence is:
+
+    * 07:00, the schedule ends and the timer fires; the flush re-decides,
+      finds the person still temporarily silent and holds the message;
+    * the re-arm that follows reads the schedule, which is now `off` and
+      publishes nothing -- so before this test there was no timer left at all;
+    * 07:30, the temporary silence expires. Nothing was waiting for it.
+
+    The queue then sat in the store until the *next* night ended, which for a
+    message with a time to live usually means it never arrived. Falling back to
+    the temporary silence keeps a timer armed across the handover.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 06:30: an hour of requested quiet, ending half an hour after the night.
+    freezer.move_to(SIX_UTC + timedelta(minutes=30))
+    await hass.services.async_call(
+        DOMAIN,
+        "silence",
+        {"person": "person.alice", "minutes": 60},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # 07:00: the night ends, the timer fires, and the message is still held.
+    freezer.move_to(SEVEN_UTC)
+    hass.states.async_set("schedule.night", "off", {})
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 07:30: the temporary silence lifts. Somebody has to be waiting for it.
+    freezer.move_to(SEVEN_UTC + timedelta(minutes=30))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["water"]
+    assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_the_re_arm_never_targets_an_instant_that_has_already_passed(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A timer firing at the end a schedule published can beat the schedule.
+
+    `async_track_point_in_time` does not refuse a point in the past: it fires
+    on the next pass of the loop
+    (`$HA_CORE_SRC/homeassistant/helpers/event.py`, `_TrackPointUTCTime`). So a
+    flush that runs at 07:00 while `schedule.night` still reads `on` with a
+    `next_event` of 07:00 -- its own state write has not landed yet -- would
+    hold the message, re-arm on 07:00, fire again at once, hold again, and
+    spin until the state finally changed.
+
+    The re-arm is asserted directly rather than by letting the loop run,
+    because the bug this pins is an unbounded loop: a test that drove it would
+    not fail, it would never finish.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    switchboard = entry.runtime_data.switchboard
+    assert len(switchboard.store.deferrals) == 1
+
+    # 07:00 sharp, and the schedule has not caught up: it still publishes the
+    # end that is now behind us.
+    freezer.move_to(SEVEN_UTC)
+    armed: list[datetime] = []
+
+    def _record(_hass: HomeAssistant, _action: Any, when: datetime) -> Any:
+        armed.append(when)
+        return lambda: None
+
+    with patch(
+        "custom_components.notify_switchboard.dispatcher.async_track_point_in_time",
+        side_effect=_record,
+    ):
+        switchboard._async_schedule_deferral("person.alice")
+
+    assert all(when > dt_util.now() for when in armed), (
+        f"re-armed on {armed}, which is not ahead of {dt_util.now()}"
+    )
+
+
+async def test_a_silence_going_on_again_re_arms_a_queue_that_lost_its_timer(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The other half of the stale re-arm: something has to put the timer back.
+
+    The sibling above is why a wake-time-less queue can end up with no timer at
+    all: a flush that runs at the very instant the schedule published reads an
+    end that is no longer ahead of it, and dropping that end is the only thing
+    that does not spin. What it leaves behind is a queue nothing is waiting on,
+    and the next state write of that schedule -- a second block starting where
+    the first ended, so `on` again with a later end -- was ignored, because
+    `_async_silence_changed` only ever looked at a silence *lifting*.
+
+    The timer itself is what this asserts. Every other way into a flush -- the
+    schedule finally going `off`, a restart, a fresh message -- would release
+    the queue on its own, so a delivery here would prove nothing about the
+    re-arm.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    switchboard = entry.runtime_data.switchboard
+    assert len(switchboard.store.deferrals) == 1
+
+    # 07:00 sharp, before the schedule's own state write lands: the flush finds
+    # it still `on`, holds the message, and the re-arm has nothing left but an
+    # end that is no longer ahead of it.
+    freezer.move_to(SEVEN_UTC)
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert len(switchboard.store.deferrals) == 1
+    assert switchboard._deferral_unsubs == {}
+
+    # The schedule writes its second block: still `on`, ending an hour later.
+    hass.states.async_set("schedule.night", "on", {"next_event": EIGHT_UTC.isoformat()})
+    await hass.async_block_till_done()
+
+    armed = switchboard._deferral_unsubs.get("person.alice")
+    assert armed is not None
+
+    # And a further `on` write leaves that timer where it is: the re-arm is for
+    # a queue with nothing waiting on it, not for every state write of every
+    # silence a person owns. The flush the armed timer runs re-reads the end
+    # anyway, so nothing is lost by not rebuilding it here.
+    hass.states.async_set(
+        "schedule.night",
+        "on",
+        {"next_event": (EIGHT_UTC + timedelta(minutes=5)).isoformat()},
+    )
+    await hass.async_block_till_done()
+
+    assert switchboard._deferral_unsubs["person.alice"] is armed

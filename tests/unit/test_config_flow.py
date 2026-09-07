@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
+from custom_components.notify_switchboard.config_flow import _showable
 from custom_components.notify_switchboard.const import (
     CONF_DEFAULT_TARGET,
     CONF_PERSONS,
@@ -51,18 +53,33 @@ def suggested_value(result: Any, key: str) -> Any:
     raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
 
 
+# ADR-0020 §1 splits the target editor in two. The five fields that make a
+# target route are the `target` step; the nine preferences are
+# `target_advanced`, reached from the checkbox `target_saved` grew or from its
+# own menu entry.
+TARGET_BASIC = ("slug", "name", "alert_entity", "audience", "observer_mode")
+
+
 def _target_input(**overrides: Any) -> dict[str, Any]:
+    """The five fields of the `target` step."""
     data = {
         "slug": "leak",
         "name": "Fuite d'eau",
-        "class": "building",
-        "default_priority": "normal",
         "audience": ["person.alice"],
+        "observer_mode": False,
+    }
+    data.update(overrides)
+    return data
+
+
+def _target_advanced_input(**overrides: Any) -> dict[str, Any]:
+    """The nine fields of the `target_advanced` step."""
+    data: dict[str, Any] = {
+        "default_priority": "normal",
         "presence_rule": "always",
         "allow_acknowledge": False,
         "snooze_minutes": "15, 60",
         "default_data": {"channel": "family"},
-        "observer_mode": False,
     }
     data.update(overrides)
     return data
@@ -99,9 +116,13 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
     assert set(result["menu_options"]) == {
         "person",
         "edit_person",
+        # v0.6 (ADR-0020 §1 and §2): a labelled menu entry is a step id, so
+        # each advanced editor needs a picker of its own.
+        "edit_person_advanced",
         "remove_person",
         "target",
         "edit_target",
+        "edit_target_advanced",
         "remove_target",
         "general",
         # v0.5 (ADR-0019 §1): the household's time-to-live policy.
@@ -140,20 +161,55 @@ async def _options_step(
     return result
 
 
+PERSON_ADVANCED = ("wake_time", "summary")
+
+
 async def _add_person(
     hass: HomeAssistant, entry: MockConfigEntry, person: str = "person.alice", **kw: Any
 ) -> Any:
-    """Drive the two-step person editor to the end."""
-    return await _options_step(
+    """Drive the person editor to the end, advanced step included when asked.
+
+    ADR-0020 §2 moved `wake_time` and `summary` to `person_advanced`, which has
+    no shortcut from `person_outputs` on purpose: the one form a first install
+    fills stays at two fields. A caller that names either one therefore walks
+    the picker afterwards, exactly as somebody would in the UI.
+    """
+    advanced = {key: kw.pop(key) for key in PERSON_ADVANCED if key in kw}
+    result = await _options_step(
         hass, entry, "person", {"entity_id": person}, _person_outputs_input(**kw)
+    )
+    if not advanced or result["type"] is not FlowResultType.CREATE_ENTRY:
+        return result
+    return await _options_step(
+        hass,
+        entry,
+        "edit_person_advanced",
+        {"entity_id": person},
+        advanced,
     )
 
 
 async def _add_target(
     hass: HomeAssistant, entry: MockConfigEntry, **overrides: Any
 ) -> Any:
-    """Drive the row editor, confirmation step included (ADR-0018 §7)."""
-    return await _options_step(hass, entry, "target", _target_input(**overrides), {})
+    """Drive the whole target editor: five fields, snippet, then the nine.
+
+    Both halves every time, through the `advanced` checkbox of `target_saved`
+    (ADR-0020 §1), so a helper called with `snooze_minutes=` or `message=`
+    keeps meaning what it meant in 0.5.
+    """
+    basic = {key: value for key, value in overrides.items() if key in TARGET_BASIC}
+    advanced = {
+        key: value for key, value in overrides.items() if key not in TARGET_BASIC
+    }
+    return await _options_step(
+        hass,
+        entry,
+        "target",
+        _target_input(**basic),
+        {"advanced": True},
+        _target_advanced_input(**advanced),
+    )
 
 
 async def test_adding_a_person_bootstraps_the_managed_default_row(
@@ -404,13 +460,21 @@ async def test_an_unparsable_row_template_is_rejected_by_the_schema(
     """
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
+    await _add_target(hass, entry)
 
     for field, bad in (("message", "{{ unclosed "), ("done_message", "{% if %}")):
         with pytest.raises(InvalidData) as err:
-            await _options_step(hass, entry, "target", _target_input(**{field: bad}))
+            await _options_step(
+                hass,
+                entry,
+                "edit_target_advanced",
+                {"slug": "leak"},
+                _target_advanced_input(**{field: bad}),
+            )
         assert field in str(err.value)
 
-    assert [row["slug"] for row in entry.options[CONF_TARGETS]] == ["default"]
+    row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
+    assert row["message"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -456,8 +520,13 @@ async def test_editing_a_target_pre_fills_every_field_it_is_about_to_overwrite(
     suggested = _suggested(result["data_schema"])
     assert suggested["slug"] == "leak"
     assert suggested["name"] == "Fuite d'eau"
-    assert suggested["class"] == "building"
     assert suggested["audience"] == ["person.alice"]
+
+    result = await _options_step(hass, entry, "edit_target_advanced", {"slug": "leak"})
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "target_advanced"
+
+    suggested = _suggested(result["data_schema"])
     assert suggested["allow_acknowledge"] is True
     assert suggested["default_data"] == {"channel": "family"}
     # Stored as a list of ints, edited as the text `parse_snooze_minutes` reads.
@@ -482,13 +551,18 @@ async def test_editing_a_person_pre_fills_their_row(hass: HomeAssistant) -> None
     suggested = _suggested(result["data_schema"])
     assert suggested["outputs"] == ["mobile_app_alice"]
     assert suggested["silence_entities"] == ["input_boolean.night"]
-    assert suggested["wake_time"] == "07:00:00"
+
+    result = await _options_step(
+        hass, entry, "edit_person_advanced", {"entity_id": "person.alice"}
+    )
+    assert result["step_id"] == "person_advanced"
+    assert _suggested(result["data_schema"])["wake_time"] == "07:00:00"
 
 
 async def test_a_validation_error_gives_back_what_was_typed(
     hass: HomeAssistant,
 ) -> None:
-    """A rejected form must not also lose the eleven fields that were fine."""
+    """A rejected form must not also lose the fields that were fine."""
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
 
@@ -501,7 +575,20 @@ async def test_a_validation_error_gives_back_what_was_typed(
     suggested = _suggested(result["data_schema"])
     assert suggested["slug"] == "Not A Slug"
     assert suggested["name"] == "Kept"
-    assert suggested["snooze_minutes"] == "15, 60"
+    assert suggested["audience"] == ["person.alice"]
+
+    # And the same on the other half of the editor (ADR-0020 §1).
+    await _add_target(hass, entry)
+    result = await _options_step(
+        hass,
+        entry,
+        "edit_target_advanced",
+        {"slug": "leak"},
+        _target_advanced_input(snooze_minutes="every hour"),
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"snooze_minutes": "invalid_snooze_minutes"}
+    assert _suggested(result["data_schema"])["snooze_minutes"] == "every hour"
 
 
 async def test_editing_is_refused_while_the_table_is_empty(
@@ -611,6 +698,72 @@ async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
     assert parsed["alert"]["leak"]["name"] == "Fuite: eau # urgence", (
         f"the snippet must round-trip the row name through YAML; got {snippet!r}"
     )
+
+
+def test_an_error_with_no_field_to_show_it_on_is_logged_rather_than_lost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Dropping the error is right; dropping it in silence is not.
+
+    Both halves of an editor validate the whole row, so an error can land on a
+    field the current step does not render. Showing it is impossible and
+    refusing the submission would trap the user in a form they cannot fix -- so
+    it is dropped. What the user must not see, a bug report still should.
+    """
+    with caplog.at_level(logging.DEBUG, logger=_showable.__module__):
+        shown = _showable(
+            {"slug": "invalid_slug", "audience": "empty_audience"},
+            frozenset({"slug"}),
+        )
+
+    assert shown == {"slug": "invalid_slug"}
+    assert "empty_audience" in caplog.text
+    assert "slug" not in caplog.text, "only what was dropped is logged"
+
+
+async def test_the_alert_snippet_of_an_observer_row_names_no_notifiers(
+    hass: HomeAssistant,
+) -> None:
+    """Observer mode is defined by the alert *not* naming the router.
+
+    The router watches the alert entity itself, so the block to paste needs no
+    `notifiers:` at all -- the README says so in as many words. Emitting one
+    anyway wires the row both ways at once: the alert calls the router on every
+    `repeat`, and the router routes the same event again on its own. What the
+    user sees is a duplicated notification they were told to create.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(observer_mode=True)
+    )
+
+    assert result["step_id"] == "target_saved"
+    snippet = (result["description_placeholders"] or {})["snippet"]
+    assert "notifiers" not in snippet, (
+        f"an observer row is wired by the router, not by the alert; got {snippet!r}"
+    )
+    # It is still a complete, pasteable block.
+    parsed = yaml.safe_load(snippet)
+    assert parsed["alert"]["leak"]["state"] == "on"
+
+
+async def test_the_alert_snippet_of_a_notifiers_row_still_names_the_router(
+    hass: HomeAssistant,
+) -> None:
+    """The other half of the same rule: observer mode off keeps `notifiers:`."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(observer_mode=False)
+    )
+
+    snippet = (result["description_placeholders"] or {})["snippet"]
+    assert yaml.safe_load(snippet)["alert"]["leak"]["notifiers"] == ["switchboard_leak"]
 
 
 async def test_the_test_result_is_rendered_as_a_markdown_list(
@@ -730,3 +883,138 @@ async def test_summary_and_clear_done_are_written_only_when_they_differ(
     row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
     assert person["summary"] is False
     assert row["clear_done"] is True
+
+
+# ---------------------------------------------------------------------------
+# v0.6 (ADR-0020 §1 and §2): the two editors, split in two steps each
+# ---------------------------------------------------------------------------
+
+
+async def test_the_advanced_pickers_abort_on_an_empty_table(
+    hass: HomeAssistant,
+) -> None:
+    """Nothing to open advanced settings on, and the menu says so."""
+    entry = await _create_entry(hass)
+
+    for step in ("edit_person_advanced", "edit_target_advanced"):
+        result = await _options_step(hass, entry, step)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "nothing_to_edit"
+
+
+async def test_target_saved_unticked_writes_the_target_and_ends(
+    hass: HomeAssistant,
+) -> None:
+    """The five-field path: a target that routes, without a second form.
+
+    Submitting `{}` -- what every Sprint 4 test does, and what the frontend
+    sends for an unticked box -- has to keep writing the target and ending.
+    """
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(hass, entry, "target", _target_input(), {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
+    assert row["default_priority"] == "normal"
+    assert row["presence_rule"] == "always"
+    assert row["allow_acknowledge"] is False
+    assert row["snooze_minutes"] == []
+    assert row["default_data"] == {}
+    assert "clear_done" not in row
+
+
+async def test_the_basic_step_keeps_the_advanced_values_of_the_target_it_edits(
+    hass: HomeAssistant,
+) -> None:
+    """Renaming a target must not reset the nine fields it does not show."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry, allow_acknowledge=True, default_title="Switchboard")
+
+    result = await _options_step(
+        hass, entry, "edit_target", {"slug": "leak"}, _target_input(name="Renamed"), {}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
+    assert row["name"] == "Renamed"
+    assert row["allow_acknowledge"] is True
+    assert row["default_title"] == "Switchboard"
+    assert row["snooze_minutes"] == [15, 60]
+
+
+async def test_either_half_of_the_target_editor_clears_managed(
+    hass: HomeAssistant,
+) -> None:
+    """Submitting either form is the user taking the default target over.
+
+    ADR-0018 §4 made `managed` mean "this audience follows the people"; a split
+    editor must not leave a half of itself that keeps the flag alive.
+    """
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    assert entry.options[CONF_TARGETS][0]["managed"] is True
+
+    result = await _options_step(
+        hass,
+        entry,
+        "edit_target_advanced",
+        {"slug": "default"},
+        _target_advanced_input(default_priority="high"),
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    row = entry.options[CONF_TARGETS][0]
+    assert "managed" not in row
+    assert row["default_priority"] == "high"
+    assert row["audience"] == ["person.alice"]
+
+
+async def test_person_advanced_writes_only_the_wake_time_and_the_summary(
+    hass: HomeAssistant,
+) -> None:
+    """The other half of ADR-0020 §2, from the side that could lose outputs."""
+    entry = await _create_entry(hass)
+    await _add_person(
+        hass, entry, outputs=["mobile_app_alice"], silence_entities=["schedule.night"]
+    )
+
+    result = await _options_step(
+        hass,
+        entry,
+        "edit_person_advanced",
+        {"entity_id": "person.alice"},
+        {"wake_time": "07:00:00", "summary": False},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    person = entry.options[CONF_PERSONS][0]
+    assert person["wake_time"] == "07:00:00"
+    assert person["summary"] is False
+    assert person["outputs"] == ["mobile_app_alice"]
+    assert person["silence_entities"] == ["schedule.night"]
+
+
+async def test_clearing_the_wake_time_is_a_supported_answer(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0020 §3 gives an absent wake time a meaning, so it must be settable."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry, wake_time="07:00:00")
+    assert entry.options[CONF_PERSONS][0]["wake_time"] == "07:00:00"
+
+    result = await _options_step(
+        hass, entry, "edit_person_advanced", {"entity_id": "person.alice"}, {}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+
+    person = entry.options[CONF_PERSONS][0]
+    assert person["wake_time"] is None
+    assert "summary" not in person

@@ -92,34 +92,34 @@ nothing for a device whose name contains punctuation, instead of silently
 failing to match one. Nothing about the derivation itself changed; the entry
 is kept because the reasoning is what makes it safe to build on.
 
-## 2026-09-06 — S1 — the options flow edits one row at a time
+## 2026-09-06 — S1 — the options flow edits one target at a time
 
-Persons and targets are added or updated one row per step, keyed by
-`entity_id` / `slug`. Re-submitting an existing key edits that row in place, so
+Persons and targets are added or updated one target per step, keyed by
+`entity_id` / `slug`. Re-submitting an existing key edits that target in place, so
 `validate_*`'s `duplicate_person` / `duplicate_slug` rules are unreachable from
 the UI and only guard a hand-edited `.storage` file. Renaming a slug means
-adding the new row and removing the old one.
+adding the new target and removing the old one.
 
 Accepted for S1: it keeps the whole table validated before every write
 (doctrine §5) without a custom panel. Planned resolution: a nicer editor is a
 card/S6 concern.
 
-**Partly addressed in 0.2.0.** The step still writes one whole row at a time,
-but it no longer opens empty: `Edit a person` / `Edit a target` pick the row and
+**Partly addressed in 0.2.0.** The step still writes one whole target at a time,
+but it no longer opens empty: `Edit a person` / `Edit a target` pick the target and
 `add_suggested_values_to_schema` pre-fills every field with what is stored, and
 a validation error hands back what was typed. Before that, opening the target
 form to change one word of `message` silently reset `done_message`,
 `default_title`, `snooze_minutes` and `default_data` to their schema defaults on
 submit — a data-loss bug, not a convenience gap.
 
-**Still one row at a time in 0.4.0, and now more steps per row** (ADR-0018 §2
+**Still one target at a time in 0.4.0, and now more steps per target** (ADR-0018 §2
 and §7): the person editor is split in two (`person` picks the `person.*`,
 `person_outputs` edits it) because a form cannot react to a field it is
 showing and the discovered outputs depend on which person was chosen, and the
-row editor gains a `target_saved` confirmation step carrying the `alert:`
+target editor gains a `target_saved` confirmation step carrying the `alert:`
 snippet. What 0.4.0 does remove is the *reason* most people meet this
 limitation in their first hour: a fresh install no longer needs a hand-written
-row at all, since the first person creates the managed `default` one. Planned
+target at all, since the first person creates the managed `default` one. Planned
 resolution unchanged: a nicer editor is a card concern.
 
 **Split again in 0.6.0, and this time to make the first form shorter**
@@ -153,7 +153,7 @@ needs a physical phone and stays out of scope. What changes is its status: the
 `user_id` link becomes the *canonical* one in the contract rather than merely
 the first tried, the `device_id` lookup is documented as a fallback and logged
 at DEBUG as such, and a person who cannot be resolved through `user_id` while
-sitting in a button-bearing row now raises a `person_without_user_id` repair
+sitting in a button-bearing target now raises a `person_without_user_id` repair
 instead of silently landing in the audience-wide fallback.
 `tests/acceptance/test_s3_callbacks.py` pins that a resolvable `user_id` is
 never overridden by a `device_id` pointing elsewhere.
@@ -190,21 +190,21 @@ carries the reasoning above so nobody "modernises" it back. Planned
 resolution: an editorial correction to ADR-0017 §2 next time that ADR is
 touched.
 
-## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per row
+## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per target
 
 The contract says `authenticationRequired: true` is set "by default" when the
-row's priority is `high` or `critical`, and the brief adds "unless the row
+target's priority is `high` or `critical`, and the brief adds "unless the target
 overrides". No override exists: `AUTHENTICATED_PRIORITIES` is consulted
-directly in `Switchboard._async_build_payload`, so a row cannot ask for an
+directly in `Switchboard._async_build_payload`, so a target cannot ask for an
 unauthenticated Acknowledge on a `critical` alert, nor for an authenticated
 one on an `info` alert.
 
 Accepted for S1: adding a fourth state (unset / forced on / forced off) to
-every routing-table row costs a field in the options flow, a migration and
+every target costs a field in the options flow, a migration and
 three translations, for a case nobody has hit yet. Still open: the Sprint 2
 brief lists `require_authentication` under "Out of scope (must not)", so 0.2.0
-did not take it up even though it added three other per-row fields. Planned
-resolution: a `require_authentication` tri-state on the row when a real use
+did not take it up even though it added three other per-target fields. Planned
+resolution: a `require_authentication` tri-state on the target when a real use
 case shows up.
 
 ## 2026-09-07 — S1 — two `alert` limitations to raise upstream
@@ -215,7 +215,7 @@ This entry exists so the follow-up is not lost:
    attributes at all — both `message` and `done_message` are rendered
    internally to build the `notifiers` payload and never surfaced — so neither
    can be read by observer mode. **No longer blocking this integration**: the
-   row now owns its own `message`/`done_message` templates (ADR-0016, shipped
+   target now owns its own `message`/`done_message` templates (ADR-0016, shipped
    in 0.2.0), which is option (a) the original entry raised. The attribute is
    still checked first, for the day core changes its mind.
 2. `alert.turn_off` sets `_ack` but never calls `self._cancel()`, so
@@ -254,14 +254,14 @@ leaving the Companion buttons — which are events, not service calls, and so
 cannot be role-gated at all — as the only way to acknowledge anything.
 
 What bounds them instead: the ADR-0009 allow-list (only an `alert.*` that is in
-the routing table, on a row with `allow_acknowledge`), `context.user_id` logged
+the routing table, on a target with `allow_acknowledge`), `context.user_id` logged
 on every refusal and carried in the `acknowledged`/`snoozed` events, and
 `authenticationRequired` still set on `high`/`critical` Companion buttons. The
 full reasoning is the "Addendum (2026-09-07, post-review)" section of
 [`ADR/0016`](ADR/0016-ui-services-and-row-texts.md).
 
 Revisit if a household needs it — a child who keeps silencing the smoke alert,
-a guest account. Planned resolution: an optional per-row flag next to
+a guest account. Planned resolution: an optional per-target flag next to
 `allow_acknowledge` in a later version, never a blanket restriction on the
 domain.
 
@@ -287,8 +287,8 @@ as it is everywhere else.
 Still accepted, and this is the narrowed version of the old
 `docs/ARCHITECTURE.md` line "deferred deliveries do not re-run the decision":
 **only the silence is re-checked**, not the rest of the routing decision. A
-person who left the row's audience, who is now away under a `home_only` rule, or
-who has since snoozed that row, still gets their queued message at the wake
+person who left the target's audience, who is now away under a `home_only` rule, or
+who has since snoozed that target, still gets their queued message at the wake
 time. Nothing is lost that way, which is the property the deferral is for; the
 cost is a message that a fresh decision might have dropped. Re-running `decide`
 at flush time would need a `RoutingContext` for a request that no longer exists
@@ -328,7 +328,7 @@ kept because the *reasoning* above is what the ADR had to answer.
 
 What replaces this entry as the open question is narrower: a deferral now also
 carries a **time-to-live** (ADR-0019 §1), which is scoped per priority and per
-call but not per row. A household that wants "this row's messages are worth
+call but not per target. A household that wants "this target's messages are worth
 waking up for, that one's are not" has to say it through the priority.
 
 Two consequences of the resolution are worth recording next to it. The flush is
@@ -347,7 +347,7 @@ adding up.
 Every repair this integration raises is deleted when its cause goes away, with
 two exceptions that are ignorable in the UI rather than defects:
 `unknown_target_<slug>` stays until the routing table is reloaded, so fixing
-the *caller* instead of adding the row leaves it up, and `missing_output_<x>`
+the *caller* instead of adding the target leaves it up, and `missing_output_<x>`
 clears on the first call that succeeds, so an output that is still configured
 but never called again keeps its warning. Neither can be observed by the
 router — nothing tells it a service call it never sees would work now — so
@@ -372,7 +372,7 @@ subscribes only to *future* changes of its watched entity — it never reads tha
 entity's current state — so after a real restart the `alert.*` is `idle` even
 though the leak is still running. The router therefore sees no `on → idle`
 transition: the persisted open episode is never closed and lingers until that
-row's next `idle → on` opens a fresh one.
+target's next `idle → on` opens a fresh one.
 
 Accepted, and recorded as amendment (d) of ADR-0019 §6. The stale record is
 harmless — the only thing it can do is narrow a `done` message that will not be
@@ -388,14 +388,6 @@ nothing ever reads the watched entity's current state. Still not filed.
 
 ## 2026-09-07 — S5 — a flushed deferral can leave the day's figures short
 
-> **Moved to [`accepted-deviations.md`](accepted-deviations.md) in 0.6.0**
-> (ADR-0020 §8). It is not a finding: it is the visible consequence of
-> `not_in_audience` deliberately not counting, which is a decision, not an
-> oversight. Kept here in full so the history stays readable.
-
-A deferral counted in `sensor.switchboard_deferred_today` whose person has left
-the row's audience overnight re-decides at the flush to `not_in_audience` — the
-one drop reason `UNCOUNTED_DROP_REASONS` deliberately does not count — and so
-leaves the queue without reappearing in `routed_today` or `dropped_today`,
-which is accepted rather than a defect because it is exactly what the live path
-already does with that decision.
+**Moved to [`accepted-deviations.md`](accepted-deviations.md) §3 in 0.6.0**
+(ADR-0020 §8): it is not a finding of its own, it is deviation 3 seen from the
+counters. The text lives there, and only there.

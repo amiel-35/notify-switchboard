@@ -7,6 +7,187 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.6.0 — **consolidation** (contract v0.6 addendum, ADR-0020), on top of
+the 0.5.1 and 0.5.0 notes below, which are in `main` but not tagged.
+
+Every release since 0.1.0 added something. This one subtracts: a newcomer now
+meets **five fields** on the first form instead of fifteen, one word per
+concept instead of four, and documents that agree with the code. It introduces
+**no routing rule, no entity, no action and no drop reason** — with one scoped
+exception, the meaning of an absent wake time, because moving that field behind
+an advanced step without deciding what leaving it empty means would have turned
+"hold this until morning" into "drop this".
+
+### Changed
+
+- **The target editor is two steps.** `target` asks exactly five things —
+  `slug`, `name`, `alert_entity`, `audience`, `observer_mode` — and a second
+  step, `target_advanced`, holds the nine that used to sit on the same form
+  (`default_priority`, `presence_rule`, `allow_acknowledge`, `snooze_minutes`,
+  `default_data`, `message`, `done_message`, `default_title`, `clear_done`)
+  with **identical selectors and identical defaults**. A target created
+  through the basic step alone is byte-for-byte the row 0.5 wrote for the same
+  five answers, and routes the same way.
+- **The person editor likewise.** `person_outputs` keeps `outputs` and
+  `silence_entities`; `wake_time` and `summary` move to `person_advanced`.
+- **Each half writes only its own fields.** Changing a priority can never
+  empty an audience, and changing a phone can never delete somebody's night —
+  the 0.2.0 data-loss bug a careless split re-creates. `managed` is cleared by
+  either half of the target editor, as submitting the editor always has.
+- **Two new options-menu entries**, "Advanced settings of a target" and
+  "Advanced settings of a person", plus one checkbox on the step that shows
+  the `alert:` snippet. A menu entry is a step id in Home Assistant, so each
+  needs a picker of its own.
+- **One word per concept.** A routing-table row is a **target**, in every
+  user-facing string, every repair, every error message and every document, in
+  English, French and Spanish. "Rule" survives only as *presence rule*. The
+  `target:` field of a `notify.switchboard` call is spelled "the notify
+  `target` list" where the two meanings meet.
+- **The `ttl_minutes` defaults are documented defaults, not frozen values.**
+  `info` 120, `normal` 720, `high` none are unchanged and stay where they are;
+  what changes is their status — a minor version may pick other numbers, and
+  no caller may rely on a particular one. The mechanism (the option, the
+  per-call override, the meaning of `null` and of `0`) stays frozen.
+- **An absent `wake_time` now means "until the silence ends", not "drop it"** —
+  narrowly. A silenced person with no wake time is **deferred** when one of
+  their configured silence entities publishes its own end; in core 2026.9.1
+  that means a `schedule.*` and its `next_event` attribute. That instant arms
+  the fallback timer, bounds the setup catch-up and is what `explain` reports
+  as `until`. A silence that publishes no end — an `input_boolean`, a
+  Companion Focus sensor, a temporary `notify_switchboard.silence` — still
+  drops with reason `silenced`, exactly as in 0.1 → 0.5, so no installation
+  that has left the field empty since 0.1.0 changes behaviour.
+
+### Fixed
+
+- **A deferral without a wake time no longer loses its timer when a temporary
+  silence outlives the night.** The fallback timer introduced above was armed
+  on the end the person's configured silence published, and on nothing else.
+  A `notify_switchboard.silence` asked for after the message was queued can
+  end later than that: the flush at the schedule's end held the message,
+  correctly, and the re-arm that followed read a schedule that had just gone
+  `off` and published nothing, so no timer was left at all. The queue then
+  waited for the next night to end, which for a message with a time to live
+  usually means it never arrived. Both instants are now weighed together, the
+  way the wake-time branch already weighed them.
+- **`notify_switchboard.unsilence` releases the queue it frees.** The service
+  lifted the silence, cancelled its expiry timer and stopped there, while the
+  deferral timer stayed armed on that same, now meaningless, expiry: a message
+  the silence alone was holding went out at the end of the quiet that had just
+  been cancelled by hand — or, when the wake time was the earlier candidate,
+  not until the next morning. `unsilence` now reads the queue the way ADR-0019
+  §4 reads a configured silence going `off`: nothing else holding it, flush on
+  the spot; a night still on, re-arm on the end that is left.
+- **`notify_switchboard.silence` arms the queue as well as its own expiry.**
+  The deferral timer is armed on the earliest of the wake time and the end of a
+  running temporary silence, and until the silence existed there was nothing to
+  weigh: a quiet hour asked for *after* the message was queued never became a
+  candidate. Somebody who wakes at 07:00, has a message queued behind the
+  night at 23:30 and asks for ninety minutes of quiet at 04:30 saw the night
+  end at 05:00 and the quiet end at 06:00 with nobody waiting for either — the
+  message went out at 07:00, an hour after the last thing that held it had
+  gone. `silence` now re-arms the way `unsilence` does.
+- **A silence entity that is renamed or deleted counts as a silence lifting.**
+  Its state change reaches the router as `new_state is None`, which was read as
+  "nothing to say" and returned on. It is the one reading that cannot be right:
+  the entity will never be seen `on` again, so the early flush of ADR-0019 §4
+  had no second chance to run and the queue waited for the wake time with
+  nothing holding it. A silence that stays `on` is now looked at too, for one
+  narrow case: a queue with no timer at all — the wake-time-less one whose
+  re-arm the bullet below drops as stale — gets one back on the end that write
+  publishes, rather than waiting for an `off` that a schedule moving straight
+  into its next block never sends.
+- **A re-arm never targets an instant that has already passed.** A timer
+  firing exactly at a schedule's `next_event` can run before that schedule's
+  own state write lands, and `async_track_point_in_time` does not refuse a
+  point in the past — it fires on the next pass of the loop. Arming on the end
+  that has just passed had the flush and the re-arm chase each other.
+- **The `alert:` block shown after saving an observer-mode target no longer
+  names `notifiers:`.** Observer mode *is* the router watching the alert
+  itself; the block it needs has no `notifiers:` list, as `README.md` has
+  always said. Emitting one wired the row both ways at once — the alert
+  calling the router on every `repeat`, and the router routing the same
+  transition on its own — so pasting the block as instructed produced
+  duplicated notifications. The step now also says which of the two wirings
+  the block it is showing follows.
+- **`default_data` is redacted in a diagnostics dump with core's own
+  `REDACTED`.** It was replaced with a bare `REDACTED` while message bodies,
+  redacted by `async_redact_data`, read `**REDACTED**`; two spellings in one
+  document read as two different things.
+
+### Removed
+
+- **The `class` key of a routing-table row.** It was asked for on every target
+  since 0.1.0 and read by nothing: `parse_target` copied it into
+  `TargetConfig.target_class` and no consumer existed. Gone from the schema,
+  the strings, the documents and the examples, along with `CONF_CLASS`,
+  `ATTR_CLASS` and `DEFAULT_TARGET_CLASS`. A value already stored is
+  **ignored** — not read, not migrated, not deleted — and is stripped from the
+  routing table a diagnostics dump exposes, so a dead key cannot be mistaken
+  in a bug report for something the router reads. There is no store migration.
+
+### Documentation
+
+- **`README.md` gains a Glossary** defining, once each: target, person,
+  output, audience, presence rule, silence, snooze, wake time, quiet hours,
+  deferral, summary, episode, observer mode. "Quiet hours" is defined as *not
+  a concept of this integration* — it is what a silence entity and a wake time
+  add up to — because it is the phrase people arrive with. The other documents
+  link to it rather than redefining anything.
+- **Observer mode is the primary documented path in `README.md`**, as it
+  already was in the quickstart; the `notifiers:` example comes second.
+- **One duration claim: about ten minutes**, in the quickstart's title, in
+  `README.md`'s documentation list and — as the suite S7 acceptance criterion
+  it has always been — in `docs/ARCHITECTURE.md`. The quickstart says what the
+  ten minutes include (the YAML and the restart) and that the figure is an
+  estimate read off those steps, not a stopwatch reading: nobody has timed it.
+- **`docs/migration-guide.md`** (new): where to start when you already have N
+  inline `notify.mobile_app_*` calls and M `alert:` blocks. One target per
+  alert, the `default` target first, observer mode so nothing in the YAML has
+  to change, `explain` to check a target before trusting it, and a rollback
+  that is one menu action.
+- **`docs/accepted-deviations.md`** (new): the three places where this
+  integration knowingly bends one of its own principles — a temporary silence
+  the router owns, an episode it persists, `not_in_audience` it does not count
+  — each naming the principle it bends and why the maintainer accepted it. The
+  known-issues entry that records the visible consequence of the third moved
+  with it. Nothing was deleted, and `docs/known-issues.md` points here.
+- **`docs/upstream/`** (new): two ready-to-file issue drafts, with core line
+  numbers and a runnable reproduction for the first —
+  `cancel_on_shutdown` being inoperative for the handles `async_call_later`,
+  `async_call_at` and `_TrackPointUTCTime` create, and `AlertEntity` never
+  reading its watched entity at startup.
+- **`docs/ARCHITECTURE.md`'s roadmap is rewritten** to the decided sequence:
+  0.6.0 consolidation, 0.7.0 escalation and places reduced in scope, then —
+  unscheduled — labels, a per-target authentication override, intents and the
+  routing table as an entity. No line anywhere still says a feature is planned
+  for a sprint that no longer covers it.
+- **The Glossary says what the code does.** *Snooze* records that the action
+  without a `person` snoozes the target's whole audience; *Deferral* records
+  that it takes one of the person's **own** silence entities, a temporary
+  `notify_switchboard.silence` alone being dropped rather than deferred.
+  `README.md` no longer claims that every word in bold on the page is defined
+  there — bold is used for emphasis all over it — and names the vocabulary it
+  means instead.
+- **The known-issues entry moved to `accepted-deviations.md` is a pointer, not
+  a copy.** It had been left behind in full, so the same paragraph was
+  maintained in two places.
+- **The upstream drafts are honest about what they are.** Both "possible fix"
+  blocks say they are untested sketches; the `alert` one shows the line that
+  has to store the watched entity id first, because `AlertEntity` never keeps
+  it; and `async_call_at` is cited at its real line.
+- **`docs/migration-guide.md`** says that emptying a `notifiers:` list needs a
+  restart — `alert` ships no reload action — and explains the nested `data:`
+  in its first example rather than leaving it to look like a typo.
+- **`docs/fr/doctrine.md` carries a header saying it is a snapshot** written
+  before 0.6.0, where *classe* still exists and a routing-table row is called a
+  *ligne*. It is not maintained; `docs/contract.md` and the Glossary are.
+- **`target_saved` says that ticking its checkbox defers the save** to the next
+  form, which is what it does: the target is written when `target_advanced` is
+  submitted.
+
+---
+
 Router 0.5.1 — a fix on top of the 0.5.0 notes below, which are in `main` but
 not tagged. No public name, option, event type or drop reason changes.
 

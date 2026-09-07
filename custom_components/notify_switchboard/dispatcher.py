@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
@@ -69,6 +69,7 @@ from .const import (
     ATTR_DECISION,
     ATTR_DETAIL,
     ATTR_MISSING_OUTPUTS,
+    ATTR_NEXT_EVENT,
     ATTR_NOTIFICATION_ID,
     ATTR_OUTPUTS,
     ATTR_PERSON,
@@ -481,6 +482,51 @@ class Switchboard:
             person
         ) or self.store.is_temporarily_silenced(person.entity_id, dt_util.utcnow())
 
+    def configured_silence_end(self, person: PersonConfig) -> datetime | None:
+        """Return the earliest end this person's active silences publish.
+
+        ADR-0020 §3: a wake time is optional, and a silenced person who has
+        none is deferred rather than dropped **when the silence says when it
+        ends**. In core 2026.9.1 exactly one domain publishes such an end:
+        `schedule`, whose entity carries the instant its current block finishes
+        as a `next_event` state attribute
+        (`$HA_CORE_SRC/homeassistant/components/schedule/const.py`,
+        `ATTR_NEXT_EVENT` / `ScheduleEntityStateAttribute.NEXT_EVENT`, set in
+        `schedule/__init__.py`'s extra state attributes). The attribute is read
+        rather than the domain matched, so an entity that publishes the same
+        thing works for the same reason; an `input_boolean`, a Companion Focus
+        `binary_sensor` and a temporary `notify_switchboard.silence` publish
+        nothing and are deliberately left out -- deferring against them would
+        queue a message with no upper bound and nothing to report as `until`.
+
+        Only silences that are **on** count: an end published by a schedule
+        that is already off is the end of somebody else's night.
+        """
+        ends: list[datetime] = []
+        for entity_id in person.silence_entities:
+            state = self.hass.states.get(entity_id)
+            if state is None or not state_is_on(state.state):
+                continue
+            raw = state.attributes.get(ATTR_NEXT_EVENT)
+            if raw is None:
+                continue
+            end = raw if isinstance(raw, datetime) else dt_util.parse_datetime(str(raw))
+            if end is not None:
+                ends.append(dt_util.as_utc(end))
+        return min(ends) if ends else None
+
+    def deferral_until(self, person: PersonConfig) -> datetime | None:
+        """Return when a deferral for this person would be flushed, if ever.
+
+        The wake time when there is one -- unchanged from 0.5.1 -- and the end
+        the silence publishes when there is not (ADR-0020 §3). `None` is the
+        answer that makes `_async_defer` drop instead of queueing: there is no
+        instant to arm a timer on and none to put in `explain`'s `until`.
+        """
+        if person.wake_time is not None:
+            return next_wake_time(dt_util.now(), person.wake_time)
+        return self.configured_silence_end(person)
+
     def has_configured_silence(self, person: PersonConfig) -> bool:
         """Return True when one of the person's own silence entities is `on`."""
         return any(
@@ -727,8 +773,7 @@ class Switchboard:
         # persons it knows, and an explicit `person` may be one of those.
         reason = reason or DROP_NOT_IN_AUDIENCE
 
-        if reason == DROP_SILENCED and self._would_defer(person):
-            until = next_wake_time(dt_util.now(), person.wake_time)  # type: ignore[union-attr]
+        if reason == DROP_SILENCED and (until := self._deferral_until(person)):
             return {
                 ATTR_DECISION: DECISION_DEFERRED,
                 ATTR_UNTIL: until.isoformat(),
@@ -759,21 +804,21 @@ class Switchboard:
             ATTR_MISSING_OUTPUTS: missing,
         }
 
-    def _would_defer(self, person: PersonConfig | None) -> bool:
-        """Return True when `_async_defer` would queue rather than drop.
+    def _deferral_until(self, person: PersonConfig | None) -> datetime | None:
+        """Return the instant `_async_defer` would queue this person until.
 
-        Deliberately the same three conditions the dispatcher applies, so
-        `explain` can never promise a deferral the router would not make: the
-        person has a `wake_time`, one of their *configured* silence entities is
-        on (a temporary `notify_switchboard.silence` is not a night), and the
-        priority is not `critical` -- which is implied here, since a critical
-        message is never dropped for silence in the first place.
+        `None` means it would drop instead. Deliberately the same conditions
+        the dispatcher applies, so `explain` can never promise a deferral the
+        router would not make: one of the person's *configured* silence
+        entities is on (a temporary `notify_switchboard.silence` is not a
+        night), and the night has a known end -- their `wake_time`, or what
+        their silence publishes (ADR-0020 §3). The priority is not `critical`
+        by construction, since a critical message is never dropped for silence
+        in the first place.
         """
-        return (
-            person is not None
-            and person.wake_time is not None
-            and self.has_configured_silence(person)
-        )
+        if person is None or not self.has_configured_silence(person):
+            return None
+        return self.deferral_until(person)
 
     def _split_registered_outputs(
         self, person: PersonConfig | None
@@ -1204,23 +1249,30 @@ class Switchboard:
     def _async_defer(
         self, request: NotificationRequest, person_id: str, slug: str
     ) -> bool:
-        """Queue a silenced message until the person's wake time.
+        """Queue a silenced message until the person's night ends.
 
         Returns True when the message was queued (so it must not be counted as
         a drop: nothing is lost, it is simply late).
+
+        Two conditions, and `deferral_until` is the second of them. One of the
+        person's *configured* silence entities has to be on -- a temporary
+        `notify_switchboard.silence` is not a night: ADR-0016 says such a
+        message is dropped with reason `silenced`, and queueing it until
+        tomorrow morning because somebody asked for an hour of quiet would be
+        the wrong kind of late. And the night has to have a known end: the
+        person's `wake_time` as in 0.5.1, or, when they have none, the end
+        their silence publishes (ADR-0020 §3). With neither, the message is
+        dropped with reason `silenced`, exactly as in 0.1 -> 0.5.
         """
         person = self.table.persons.get(person_id)
         target = self.table.targets.get(slug)
-        if person is None or target is None or person.wake_time is None:
+        if person is None or target is None:
             return False
 
         if not self.has_configured_silence(person):
-            # The only thing silencing this person is a temporary
-            # `notify_switchboard.silence`, which is not a night: ADR-0016 says
-            # such a message is dropped with reason `silenced`. `wake_time` is
-            # documented as "the end of the night silence", so queueing a
-            # message until tomorrow morning because somebody asked for an hour
-            # of quiet would be the wrong kind of late.
+            return False
+
+        if self.deferral_until(person) is None:
             return False
 
         # ADR-0019 §6 only means the `tag` half of the `(person, target, tag)`
@@ -1239,7 +1291,9 @@ class Switchboard:
         self.store.deferrals[deferral.key] = deferral
         self.deferred_today += 1
         self._async_schedule_deferral(person_id)
-        _LOGGER.debug("Deferred %s for %s until %s", slug, person_id, person.wake_time)
+        _LOGGER.debug(
+            "Deferred %s for %s until %s", slug, person_id, self.deferral_until(person)
+        )
         return True
 
     async def _async_catch_up_deferrals(self) -> None:
@@ -1253,17 +1307,28 @@ class Switchboard:
         """
         now = dt_util.now()
         for person_id, person in self.table.persons.items():
-            if person.wake_time is None:
-                continue
-            overdue = [
+            queued = [
                 deferral
                 for key, deferral in self.store.deferrals.items()
                 if key[0] == person_id
-                and next_wake_time(
-                    dt_util.as_local(deferral.queued_at), person.wake_time
-                )
-                <= now
             ]
+            if not queued:
+                continue
+            if person.wake_time is None:
+                # ADR-0020 §3: this queue is bounded by the end its silence
+                # published, and that end has passed exactly when the silence
+                # is no longer on. A silence still running holds the queue, and
+                # the early flush of ADR-0019 §4 releases it.
+                overdue = [] if self.has_configured_silence(person) else queued
+            else:
+                overdue = [
+                    deferral
+                    for deferral in queued
+                    if next_wake_time(
+                        dt_util.as_local(deferral.queued_at), person.wake_time
+                    )
+                    <= now
+                ]
             if overdue:
                 _LOGGER.debug(
                     "Delivering %d deferral(s) for %s whose wake time already passed",
@@ -1276,12 +1341,34 @@ class Switchboard:
     def _async_schedule_deferral(self, person_id: str) -> None:
         """(Re)schedule the delivery of one person's queued messages.
 
-        The instant is whichever comes first: the person's next wake time, or
-        the end of a temporary `notify_switchboard.silence` if one is running
-        and lifts sooner. The second case matters because
-        `_async_flush_deferrals` re-checks the silence and keeps a message that
-        is still covered — without it, a flush held back by an hour of
-        requested quiet would wait until the *next* morning to try again.
+        Two instants can be predicted, and the timer is armed on whichever of
+        them comes first that is still ahead of us:
+
+        * the person's next wake time, or -- when they have none (ADR-0020 §3)
+          -- the end their active `silence_entities` publish, the same instant
+          `explain` reports as `until`;
+        * the end of a temporary `notify_switchboard.silence`, if one is
+          running.
+
+        The second one matters because `_async_flush_deferrals` re-checks both
+        silences and keeps a message that is still covered. Without it, a flush
+        held back by an hour of requested quiet would wait until the *next*
+        morning to try again -- and a person with no wake time would wait for
+        no morning at all: a temporary silence that outlives the night leaves
+        the re-arm reading a schedule that has since gone `off` and publishes
+        nothing, so the queue would be left with no timer whatsoever until some
+        later night ended. A message with a time to live rarely survives that.
+
+        Only an instant **strictly ahead** of `now` is armed on. A timer that
+        fires exactly at the end a schedule published can run before that
+        schedule's own state write lands, so the re-arm may still read the end
+        that has just passed; arming on it would have
+        `async_track_point_in_time` fire again immediately
+        (`$HA_CORE_SRC/homeassistant/helpers/event.py`, `_TrackPointUTCTime`
+        clamps a past instant to "now"), and the flush and the re-arm would
+        chase each other in a loop. Dropping the stale instant leaves the later
+        one -- or, when there is none, nothing to wait for, which is what the
+        early flush of ADR-0019 §4 is for.
 
         A configured `silence_entities` going `off` early is not scheduled for
         here -- the router cannot predict when that happens -- but it is no
@@ -1297,17 +1384,28 @@ class Switchboard:
             return
 
         person = self.table.persons.get(person_id)
-        if person is None or person.wake_time is None:
+        if person is None:
             return
         if not any(key[0] == person_id for key in self.store.deferrals):
             return
 
         now = dt_util.now()
-        when = next_wake_time(now, person.wake_time)
+        candidates: list[datetime] = []
+        if person.wake_time is not None:
+            candidates.append(next_wake_time(now, person.wake_time))
+        elif (end := self.configured_silence_end(person)) is not None:
+            # ADR-0020 §3: no wake time, so the upper bound is the end the
+            # silence published. With nothing published there is nothing to
+            # arm on from here, and the early flush of ADR-0019 §4 is what
+            # releases the queue.
+            candidates.append(dt_util.as_local(end))
         if (until := self.store.silences.get(person_id)) is not None:
-            local_until = dt_util.as_local(until)
-            if now < local_until < when:
-                when = local_until
+            candidates.append(dt_util.as_local(until))
+
+        ahead = [instant for instant in candidates if instant > now]
+        if not ahead:
+            return
+        when = min(ahead)
 
         @callback
         def _deliver(_now: datetime) -> None:
@@ -2089,6 +2187,17 @@ class Switchboard:
         self.store.silences[person] = until
         await self.store.async_save()
         self._async_schedule_silence_expiry(person, until)
+        # The queue has to be told too, and for the same reason `unsilence`
+        # below re-arms: the deferral timer is armed on the earliest of the
+        # wake time and the end of a running temporary silence, and until this
+        # call there was no such silence to be a candidate. Without the re-arm
+        # a quiet hour asked for at 04:30 by somebody who wakes at 07:00 ends
+        # at 06:00 with nobody waiting for it -- the night that queued the
+        # message may well have lifted in between, so the message would wait an
+        # hour past the last thing that held it. `_async_schedule_deferral`
+        # returns on the spot when there is nothing queued, which is the
+        # ordinary case.
+        self._async_schedule_deferral(person)
         self._async_notify_entities()
         _LOGGER.debug("Silenced %s until %s", person, until.isoformat())
 
@@ -2097,8 +2206,19 @@ class Switchboard:
 
         Idempotent by contract: a person who is not temporarily silenced has
         nothing to undo, and that is not an error.
+
+        "Immediately" has to cover the queue as well as the sensor. A deferral
+        is armed on the earliest of the wake time and this silence's end
+        (`_async_schedule_deferral`), so lifting the silence by hand without
+        touching that timer would leave a message waiting for an expiry that no
+        longer holds anything -- the same wait ADR-0019 §4 removed for a
+        configured silence going `off` early, reached through the one silence
+        source the router owns. The answer is the same as
+        `_async_silence_changed`'s: with nothing left to hold the queue, flush
+        now; with a configured silence still on, re-arm on what remains, which
+        is the end that silence publishes or the wake time.
         """
-        self._require_person(person)
+        known = self._require_person(person)
         self._async_clear_invalid_service_call(ATTR_PERSON, person)
         if self.store.silences.pop(person, None) is None:
             return
@@ -2106,6 +2226,16 @@ class Switchboard:
         self._async_cancel_silence_expiry(person)
         await self.store.async_save()
         self._async_notify_entities()
+
+        if not any(key[0] == person for key in self.store.deferrals):
+            return
+        if self.has_configured_silence(known):
+            self._async_schedule_deferral(person)
+            return
+        _LOGGER.debug(
+            "The temporary silence of %s was lifted by hand: flushing", person
+        )
+        self._async_schedule_flush(person)
 
     # ------------------------------------------------------------------
     # Service-call validation
@@ -2546,7 +2676,7 @@ class Switchboard:
             )
         except TemplateError as err:
             _LOGGER.error(
-                "Target %s: could not render the row text %r: %s", target.slug, raw, err
+                "Target %s: could not render its text %r: %s", target.slug, raw, err
             )
             return None
         text = str(rendered).strip()
@@ -2616,6 +2746,14 @@ class Switchboard:
     def _async_silence_changed(self, event: Event[EventStateChangedData]) -> None:
         """Refresh `binary_sensor.<person>_silenced`, and flush if the night ended.
 
+        Three readings of the new state, and only the first is §4's:
+
+        * gone (`off`, or the entity removed): flush, when this was the last
+          thing holding the queue;
+        * still `on`: nothing to release, but possibly a timer to give back --
+          `_async_rearm_silenced_queues`;
+        * `on` with a queue that is already armed: nothing at all.
+
         ADR-0019 §4: the router was already subscribed to every configured
         `silence_entities` of every person -- it simply refreshed a binary
         sensor and returned, so a schedule ending at 05:00 left the queue
@@ -2637,15 +2775,20 @@ class Switchboard:
         """
         self._async_notify_entities()
 
+        entity_id = event.data["entity_id"]
         new_state = event.data["new_state"]
-        if new_state is None or state_is_on(new_state.state):
+        if new_state is not None and state_is_on(new_state.state):
+            self._async_rearm_silenced_queues(entity_id)
             return
 
-        entity_id = event.data["entity_id"]
+        # `None` is an entity that has been renamed or removed, and it is the
+        # one state that cannot mean "keep waiting": it will never be seen `on`
+        # again, so a queue held behind it would never be offered §4 a second
+        # time. `has_configured_silence` reads `hass.states`, where the entity
+        # is now absent, so the loop below already treats it as lifted -- what
+        # this needed was to reach the loop at all.
         now = dt_util.utcnow()
-        for person_id, person in self.table.persons.items():
-            if entity_id not in person.silence_entities:
-                continue
+        for person_id, person in self._persons_silenced_by(entity_id):
             if self.has_configured_silence(person):
                 continue
             if self.store.is_temporarily_silenced(person_id, now):
@@ -2657,6 +2800,49 @@ class Switchboard:
                 person_id,
             )
             self._async_schedule_flush(person_id)
+
+    def _persons_silenced_by(
+        self, entity_id: str
+    ) -> Iterator[tuple[str, PersonConfig]]:
+        """Yield the persons who named `entity_id` among their silences.
+
+        The listener is subscribed to the union of everybody's
+        `silence_entities`, so every handler starts by asking whose entity this
+        was.
+        """
+        for person_id, person in self.table.persons.items():
+            if entity_id in person.silence_entities:
+                yield person_id, person
+
+    @callback
+    def _async_rearm_silenced_queues(self, entity_id: str) -> None:
+        """Give back a timer to a queue behind `entity_id` that has none.
+
+        A silence going `on` normally changes nothing: the deferral is already
+        armed on the wake time, and a person who has one is never left without
+        a timer. A person who has *not* can be, and `_async_schedule_deferral`
+        explains how -- a re-arm that runs at the exact instant the schedule
+        published reads an end that is no longer ahead of it, drops it rather
+        than spin, and leaves nothing armed. That is correct at the time and
+        would be permanent afterwards: the queue's only remaining hope is the
+        early flush of §4, and a schedule that goes `on` again for a second
+        block before it goes `off` never offers one.
+
+        So this is deliberately the narrow case: a queue exists, and nothing is
+        waiting for it. Re-arming a person who already has a timer would cancel
+        and rebuild it on every state write of every silence they own, for no
+        change of instant.
+        """
+        for person_id, _person in self._persons_silenced_by(entity_id):
+            if person_id in self._deferral_unsubs:
+                continue
+            if not any(key[0] == person_id for key in self.store.deferrals):
+                continue
+            _LOGGER.debug(
+                "A silence of %s went on with nothing armed for their queue: re-arming",
+                person_id,
+            )
+            self._async_schedule_deferral(person_id)
 
     @callback
     def _async_notify_entities(self) -> None:

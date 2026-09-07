@@ -28,7 +28,6 @@ from .const import (
     CONF_ALERT_ENTITY,
     CONF_ALLOW_ACKNOWLEDGE,
     CONF_AUDIENCE,
-    CONF_CLASS,
     CONF_CLEAR_DONE,
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
@@ -114,7 +113,6 @@ class TargetConfig:
 
     slug: str
     name: str
-    target_class: str = ""
     default_priority: str = DEFAULT_PRIORITY
     alert_entity: str | None = None
     audience: tuple[str, ...] = ()
@@ -288,7 +286,6 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
     return TargetConfig(
         slug=slug,
         name=str(raw.get("name") or slug),
-        target_class=str(raw.get(CONF_CLASS) or ""),
         default_priority=priority,
         alert_entity=raw.get(CONF_ALERT_ENTITY) or None,
         audience=tuple(str(person) for person in raw.get(CONF_AUDIENCE) or ()),

@@ -14,12 +14,32 @@ From 0.4.0 (ADR-0018) the flow also *discovers*, *bootstraps* and *tests*:
   belonging to this person's Companion registrations first and pre-selects them
   together with their iOS Focus sensors;
 - the first person added to an empty routing table creates the managed
-  `default` row and points `default_target` at it, so `notify.switchboard`
-  works without anybody writing a row by hand;
-- the row editor ends on `target_saved`, which shows the `alert:` block to
+  `default` target and points `default_target` at it, so `notify.switchboard`
+  works without anybody writing a target by hand;
+- the target editor ends on `target_saved`, which shows the `alert:` block to
   paste;
 - `test_person` / `test_target` send one real message and show the `explain`
   answer for it.
+
+From 0.6.0 (ADR-0020) both editors are split in two, because a config flow
+renders one voluptuous schema per step and Home Assistant has no "collapsed"
+or "expert" marker a selector can carry (`async_show_form`,
+`homeassistant/data_entry_flow.py` line 706): a second step *is* the
+collapsible section.
+
+- `target` asks the five things that make a target route -- `slug`, `name`,
+  `alert_entity`, `audience`, `observer_mode` -- and `target_advanced` holds
+  the nine preferences that used to sit on the same form;
+- `person_outputs` keeps `outputs` and `silence_entities`, and
+  `person_advanced` holds `wake_time` and `summary`;
+- each half writes **only its own fields**. Editing the priority of a target
+  must never be able to empty its audience, which is the 0.2.0 data-loss bug
+  (`docs/known-issues.md`) a careless split re-introduces;
+- an advanced step is reached from a menu entry of its own, through the
+  pickers `edit_target_advanced` / `edit_person_advanced`. A menu entry *is* a
+  step id: `async_show_menu` (`homeassistant/data_entry_flow.py` line 878)
+  builds `vol.Schema({"next_step_id": vol.In(menu_options)})` at line 894, so
+  a labelled entry cannot be a parameterised call into an existing step.
 
 Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/helpers/selector.py: SelectSelector / SelectSelectorConfig
@@ -40,6 +60,7 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -64,7 +85,6 @@ from .const import (
     CONF_ALERT_ENTITY,
     CONF_ALLOW_ACKNOWLEDGE,
     CONF_AUDIENCE,
-    CONF_CLASS,
     CONF_CLEAR_DONE,
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
@@ -86,7 +106,6 @@ from .const import (
     CONF_WAKE_TIME,
     DEFAULT_PRESENCE_RULE,
     DEFAULT_PRIORITY,
-    DEFAULT_TARGET_CLASS,
     DEFAULT_TARGET_SLUG,
     DEFAULT_TTL_MINUTES,
     DOMAIN,
@@ -100,6 +119,8 @@ from .validation import parse_snooze_minutes, validate_person, validate_target
 
 if TYPE_CHECKING:
     from .dispatcher import Switchboard
+
+_LOGGER = logging.getLogger(__name__)
 
 TITLE = "Notify Switchboard"
 
@@ -144,6 +165,83 @@ ALERT_SNIPPET_ENTITY_PLACEHOLDER = "binary_sensor.CHANGE_ME"
 # deferral that outlives a month is a message nobody was waiting for, and an
 # unbounded field is the same `OverflowError` trap `MAX_SILENCE_MINUTES` closes.
 MAX_TTL_MINUTES = 43200
+
+# ADR-0020 §1 and §2: which step owns which field. Spelled out here because
+# both halves of an editor have to agree on the split -- one writes exactly
+# these keys and the other must not touch them -- and because the errors a
+# step can show are exactly the errors on its own fields.
+TARGET_BASIC_FIELDS: frozenset[str] = frozenset(
+    {CONF_SLUG, "name", CONF_ALERT_ENTITY, CONF_AUDIENCE, CONF_OBSERVER_MODE}
+)
+TARGET_ADVANCED_FIELDS: frozenset[str] = frozenset(
+    {
+        CONF_DEFAULT_PRIORITY,
+        CONF_PRESENCE_RULE,
+        CONF_ALLOW_ACKNOWLEDGE,
+        CONF_SNOOZE_MINUTES,
+        CONF_DEFAULT_DATA,
+        CONF_MESSAGE,
+        CONF_DONE_MESSAGE,
+        CONF_DEFAULT_TITLE,
+        CONF_CLEAR_DONE,
+    }
+)
+PERSON_BASIC_FIELDS: frozenset[str] = frozenset({CONF_OUTPUTS, CONF_SILENCE_ENTITIES})
+PERSON_ADVANCED_FIELDS: frozenset[str] = frozenset({CONF_WAKE_TIME, CONF_SUMMARY})
+
+# The checkbox `target_saved` grows (ADR-0020 §1): ticked, the flow carries on
+# into `target_advanced` for the target just described instead of writing and
+# ending. Not a public name -- `target_saved` itself is internal.
+CONF_ADVANCED = "advanced"
+
+
+def _advanced_target_values(stored: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the nine advanced values of a target: stored, or documented.
+
+    This is what makes the split invisible in the store: a target created
+    through the basic step alone is the exact row 0.5.1 wrote for the same five
+    answers, because the nine fields nobody was asked about take the defaults
+    the form used to show.
+    """
+    stored = stored or {}
+    return {
+        CONF_DEFAULT_PRIORITY: stored.get(CONF_DEFAULT_PRIORITY) or DEFAULT_PRIORITY,
+        CONF_PRESENCE_RULE: stored.get(CONF_PRESENCE_RULE) or DEFAULT_PRESENCE_RULE,
+        CONF_ALLOW_ACKNOWLEDGE: bool(stored.get(CONF_ALLOW_ACKNOWLEDGE)),
+        CONF_SNOOZE_MINUTES: list(stored.get(CONF_SNOOZE_MINUTES) or []),
+        CONF_DEFAULT_DATA: dict(stored.get(CONF_DEFAULT_DATA) or {}),
+        CONF_MESSAGE: stored.get(CONF_MESSAGE) or None,
+        CONF_DONE_MESSAGE: stored.get(CONF_DONE_MESSAGE) or None,
+        CONF_DEFAULT_TITLE: stored.get(CONF_DEFAULT_TITLE) or None,
+    } | ({CONF_CLEAR_DONE: True} if stored.get(CONF_CLEAR_DONE) else {})
+
+
+def _showable(errors: dict[str, str], fields: frozenset[str]) -> dict[str, str]:
+    """Keep only the errors this step has a field to show them on.
+
+    Both halves of an editor validate the **whole** target or person, because a
+    rule can span two fields (`audience` against the known persons, a slug
+    against the other slugs). An error on a field the current form does not
+    show has nowhere to appear, and a form that refuses a submission without
+    saying why is a flow the user cannot leave. The values that could carry
+    such an error came from the store, where they were validated when they were
+    written.
+
+    That reasoning holds for values the store wrote; it stops holding the day
+    the store holds something the current validation rejects -- a row written
+    by an older version, or hand-edited in `.storage`. The submission then goes
+    through and the complaint is dropped on the floor, which is the right
+    behaviour and an awful thing to debug in silence. What is dropped is
+    logged, at debug: nothing is wrong for the user, so nothing should be said
+    to them, but a bug report should be able to say what the flow decided not
+    to show.
+    """
+    shown = {field: error for field, error in errors.items() if field in fields}
+    if hidden := {
+        field: error for field, error in errors.items() if field not in shown
+    }:
+        _LOGGER.debug("Not shown on this step, which has no field for them: %s", hidden)
+    return shown
 
 
 def _ttl_value(raw: Any) -> int | None:
@@ -253,28 +351,39 @@ def _output_options(
 
 
 def _alert_snippet(row: dict[str, Any]) -> str:
-    """Return the ready-to-paste `alert:` block for one routing-table row."""
+    """Return the ready-to-paste `alert:` block for one routing-table row.
+
+    A row in **observer mode** gets no `notifiers:`. That is not a shortening
+    of the block, it is what observer mode *is*: the router watches the alert
+    entity itself, and the README says the block "needs no `notifiers:` at
+    all". Emitting one anyway wires the row both ways at once -- the alert
+    calls the router on every `repeat`, and the router routes the same
+    transition on its own -- so the first thing the user would see after
+    pasting the block they were handed is a duplicated notification.
+    """
     alert_entity = row.get(CONF_ALERT_ENTITY)
     object_id = (
         str(alert_entity).partition(".")[2] if alert_entity else str(row[CONF_SLUG])
     )
     acknowledge = "true" if row.get(CONF_ALLOW_ACKNOWLEDGE) else "false"
-    return "\n".join(
-        (
-            "alert:",
-            f"  {object_id}:",
-            # A row name is free text: an unquoted `Fuite: eau # urgence`
-            # is a nested mapping truncated at the `#`. `json.dumps` emits a
-            # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
-            f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
-            f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
-            '    state: "on"',
-            "    repeat: [5, 15, 60]",
-            f"    can_acknowledge: {acknowledge}",
+    lines = [
+        "alert:",
+        f"  {object_id}:",
+        # A row name is free text: an unquoted `Fuite: eau # urgence`
+        # is a nested mapping truncated at the `#`. `json.dumps` emits a
+        # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
+        f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
+        f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
+        '    state: "on"',
+        "    repeat: [5, 15, 60]",
+        f"    can_acknowledge: {acknowledge}",
+    ]
+    if not row.get(CONF_OBSERVER_MODE):
+        lines += [
             "    notifiers:",
             f"      - {LEGACY_SERVICE_NAME}_{row[CONF_SLUG]}",
-        )
-    )
+        ]
+    return "\n".join(lines)
 
 
 def _explain_summary(response: dict[str, Any]) -> str:
@@ -407,9 +516,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
             menu_options=[
                 "person",
                 "edit_person",
+                "edit_person_advanced",
                 "remove_person",
                 "target",
                 "edit_target",
+                "edit_target_advanced",
                 "remove_target",
                 "general",
                 "ttl",
@@ -432,14 +543,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
         ]
 
     async def _async_bootstrap_default_target(self) -> None:
-        """Create the `default` row the first time a person meets an empty table.
+        """Create the `default` target the first time a person meets an empty table.
 
         Up to 0.3.0 a fresh install had an empty routing table, so
         `notify.switchboard` resolved to no target and did nothing at all until
-        the user had invented a slug, a name, a class, a priority, an audience
-        and a presence rule. This is the one row that removes all of that -- and
-        only that: the row exists to bootstrap an empty table, never to add
-        itself to a table somebody has already built.
+        the user had invented a slug, a name, a priority, an audience and a
+        presence rule. This is the one target that removes all of that -- and
+        only that: it exists to bootstrap an empty table, never to add itself to
+        a table somebody has already built.
         """
         if self._targets or not self._persons:
             return
@@ -451,7 +562,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
             {
                 CONF_SLUG: DEFAULT_TARGET_SLUG,
                 "name": name,
-                CONF_CLASS: DEFAULT_TARGET_CLASS,
                 CONF_DEFAULT_PRIORITY: DEFAULT_PRIORITY,
                 CONF_ALERT_ENTITY: None,
                 CONF_AUDIENCE: [row["entity_id"] for row in self._persons],
@@ -504,6 +614,13 @@ class SwitchboardOptionsFlow(OptionsFlow):
             CONF_SILENCE_ENTITIES: _discovered_focus_sensors(self.hass, person_id),
         }
 
+    def _stored_target(self, slug: str | None) -> dict[str, Any] | None:
+        """Return the stored target with that slug, if there is one."""
+        for row in self._targets:
+            if row[CONF_SLUG] == slug:
+                return row
+        return None
+
     def _suggested_target(self) -> dict[str, Any] | None:
         """Return the stored values of the target row being edited.
 
@@ -512,20 +629,17 @@ class SwitchboardOptionsFlow(OptionsFlow):
         rendered here rather than handed over raw — a suggested value is put
         straight into the field the user sees.
         """
-        if self._editing_slug is None:
+        row = self._stored_target(self._editing_slug)
+        if row is None:
             return None
-        for row in self._targets:
-            if row[CONF_SLUG] != self._editing_slug:
-                continue
-            suggested = {
-                key: value for key, value in row.items() if value not in (None, [])
-            }
-            suggested[CONF_AUDIENCE] = list(row.get(CONF_AUDIENCE) or [])
-            suggested[CONF_SNOOZE_MINUTES] = ", ".join(
-                str(minutes) for minutes in row.get(CONF_SNOOZE_MINUTES) or []
-            )
-            return suggested
-        return None
+        suggested = {
+            key: value for key, value in row.items() if value not in (None, [])
+        }
+        suggested[CONF_AUDIENCE] = list(row.get(CONF_AUDIENCE) or [])
+        suggested[CONF_SNOOZE_MINUTES] = ", ".join(
+            str(minutes) for minutes in row.get(CONF_SNOOZE_MINUTES) or []
+        )
+        return suggested
 
     # ------------------------------------------------------------------
     # Persons
@@ -562,12 +676,20 @@ class SwitchboardOptionsFlow(OptionsFlow):
     async def async_step_person_outputs(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Edit one person's outputs, silence entities and wake time."""
+        """Edit one person's notify services and silence entities.
+
+        The two fields a first install has to fill, and only those: the wake
+        time and the night summary are preferences, and they moved to
+        `person_advanced` (ADR-0020 §2). Both advanced values are carried over
+        from the stored person untouched, so changing a phone can never delete
+        somebody's night.
+        """
         self._load()
         person_id = self._editing_person
         if person_id is None:  # pragma: no cover - unreachable from the UI
             return await self.async_step_person()
 
+        stored = self._stored_person() or {}
         errors: dict[str, str] = {}
         if user_input is not None:
             row = {
@@ -580,19 +702,23 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 CONF_SILENCE_ENTITIES: list(
                     user_input.get(CONF_SILENCE_ENTITIES) or []
                 ),
-                CONF_WAKE_TIME: user_input.get(CONF_WAKE_TIME) or None,
+                # Written by `person_advanced`, never by this step. A new
+                # person gets the documented absence of a wake time, whose
+                # meaning ADR-0020 §3 spells out.
+                CONF_WAKE_TIME: stored.get(CONF_WAKE_TIME) or None,
             }
             # v0.5 (ADR-0019 §2): the key is only written when it is False, so
             # a person row edited without touching it keeps the exact dict it
             # had and an absent key keeps meaning "summarise".
-            if not user_input.get(CONF_SUMMARY, True):
+            if stored.get(CONF_SUMMARY) is False:
                 row[CONF_SUMMARY] = False
             persons = self._persons
             is_new = not any(other["entity_id"] == person_id for other in persons)
-            errors = validate_person(row, persons, is_new=is_new)
             # `entity_id` was settled by the previous step and is not a field
             # of this form, so an error on it would have nowhere to show.
-            errors.pop("entity_id", None)
+            errors = _showable(
+                validate_person(row, persons, is_new=is_new), PERSON_BASIC_FIELDS
+            )
             if not errors:
                 persons = [
                     other for other in persons if other["entity_id"] != person_id
@@ -627,10 +753,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
                         multiple=True,
                     )
                 ),
-                vol.Optional(CONF_WAKE_TIME): selector.TimeSelector(
-                    selector.TimeSelectorConfig()
-                ),
-                vol.Optional(CONF_SUMMARY, default=True): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -644,6 +766,97 @@ class SwitchboardOptionsFlow(OptionsFlow):
             errors=errors,
             description_placeholders={"person": person_id},
         )
+
+    async def async_step_person_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit one person's wake time and night summary (ADR-0020 §2).
+
+        Like `target_advanced`, this step writes its own two fields and touches
+        neither of the basic ones. Leaving the wake time empty is a supported
+        answer, not an unfinished form: ADR-0020 §3 gives its absence a
+        meaning.
+        """
+        self._load()
+        person_id = self._editing_person
+        stored = self._stored_person()
+        if stored is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_edit_person_advanced()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            row = {
+                key: value
+                for key, value in stored.items()
+                if key not in PERSON_ADVANCED_FIELDS
+            }
+            row[CONF_WAKE_TIME] = user_input.get(CONF_WAKE_TIME) or None
+            if not user_input.get(CONF_SUMMARY, True):
+                row[CONF_SUMMARY] = False
+            errors = _showable(
+                validate_person(row, self._persons, is_new=False),
+                PERSON_ADVANCED_FIELDS,
+            )
+            if not errors:
+                self._options[CONF_PERSONS] = [
+                    row if other["entity_id"] == person_id else other
+                    for other in self._persons
+                ]
+                return self._save()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_WAKE_TIME): selector.TimeSelector(
+                    selector.TimeSelectorConfig()
+                ),
+                vol.Optional(CONF_SUMMARY, default=True): selector.BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="person_advanced",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input
+                if user_input is not None
+                else {
+                    key: value
+                    for key, value in stored.items()
+                    if key in PERSON_ADVANCED_FIELDS and value is not None
+                },
+            ),
+            errors=errors,
+            description_placeholders={"person": str(person_id)},
+        )
+
+    async def async_step_edit_person_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick whose advanced settings to open.
+
+        The person editor has no confirmation step to hang a shortcut on and
+        `person_outputs` deliberately does not grow a checkbox (ADR-0020 §2),
+        so this labelled menu entry is the only way in. Internal, like
+        `edit_target_advanced`.
+        """
+        self._load()
+        persons = self._persons
+        if not persons:
+            return self.async_abort(reason="nothing_to_edit")
+
+        if user_input is not None:
+            self._editing_person = user_input["entity_id"]
+            return await self.async_step_person_advanced()
+
+        schema = vol.Schema(
+            {
+                vol.Required("entity_id"): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[row["entity_id"] for row in persons]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_person_advanced", data_schema=schema)
 
     async def _async_owned_device_marker(self) -> str:
         """Return the translated "this person's device" option marker."""
@@ -721,30 +934,115 @@ class SwitchboardOptionsFlow(OptionsFlow):
     async def async_step_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Add or update one routing-table row."""
+        """Add or update one target: the five things that make it route.
+
+        `slug` and `name` are the identity the user chooses, `alert_entity` is
+        the alert the target is about, `audience` is who it is for, and
+        `observer_mode` says whether the router watches that alert itself or
+        waits to be called. Everything else has a default that is right for
+        almost everybody and lives in `target_advanced` (ADR-0020 §1).
+
+        The whole target is still built here, the nine advanced values coming
+        from the target being edited when there is one and from the documented
+        defaults when there is not -- which is what makes a target created
+        through this step alone the exact row 0.5.1 wrote for the same answers.
+        """
         self._load()
         errors: dict[str, str] = {}
         persons = self._persons
         known_persons = [row["entity_id"] for row in persons]
 
         if user_input is not None:
-            minutes, _ok = parse_snooze_minutes(user_input.get(CONF_SNOOZE_MINUTES))
             row = {
                 CONF_SLUG: user_input[CONF_SLUG],
                 "name": user_input.get("name") or user_input[CONF_SLUG],
-                CONF_CLASS: user_input.get(CONF_CLASS) or "",
+                CONF_ALERT_ENTITY: user_input.get(CONF_ALERT_ENTITY) or None,
+                CONF_AUDIENCE: list(user_input.get(CONF_AUDIENCE) or []),
+                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE)),
+                **_advanced_target_values(self._stored_target(user_input[CONF_SLUG])),
+            }
+            targets = self._targets
+            is_new = not any(other[CONF_SLUG] == row[CONF_SLUG] for other in targets)
+            errors = _showable(
+                validate_target(row, targets, known_persons, is_new=is_new),
+                TARGET_BASIC_FIELDS,
+            )
+            if not errors:
+                # Nothing is written yet: the confirmation step shows the
+                # `alert:` block this target expects, and submitting *that* is
+                # what writes `entry.options` (ADR-0018 §7). The target is
+                # rebuilt from scratch here, without `managed`, which is
+                # exactly how editing the default target takes ownership of it
+                # (ADR-0018 §4).
+                self._pending_target = row
+                return await self.async_step_target_saved()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SLUG): selector.TextSelector(
+                    selector.TextSelectorConfig()
+                ),
+                vol.Required("name"): selector.TextSelector(
+                    selector.TextSelectorConfig()
+                ),
+                vol.Optional(CONF_ALERT_ENTITY): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="alert")
+                ),
+                vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
+                    selector.SelectSelectorConfig(options=known_persons, multiple=True)
+                ),
+                vol.Optional(
+                    CONF_OBSERVER_MODE, default=False
+                ): selector.BooleanSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="target",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input if user_input is not None else self._suggested_target(),
+            ),
+            errors=errors,
+        )
+
+    async def async_step_target_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit the nine preferences of one target (ADR-0020 §1).
+
+        This step writes its own nine fields and **touches none of the five**.
+        Rebuilding the target from the form instead would let somebody who came
+        to change a priority walk away with an empty audience -- the 0.2.0
+        data-loss bug (`docs/known-issues.md`), re-introduced by a split.
+        """
+        self._load()
+        slug = self._editing_slug
+        stored = self._stored_target(slug) if slug is not None else None
+        if stored is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_edit_target_advanced()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            minutes, _ok = parse_snooze_minutes(user_input.get(CONF_SNOOZE_MINUTES))
+            row = {
+                # The five basic fields, exactly as they are stored, and
+                # `managed` deliberately dropped: submitting either half of the
+                # editor is the user taking ownership of the target
+                # (ADR-0018 §4, kept by ADR-0020 §1).
+                key: value
+                for key, value in stored.items()
+                if key in TARGET_BASIC_FIELDS
+            }
+            row |= {
                 CONF_DEFAULT_PRIORITY: user_input.get(
                     CONF_DEFAULT_PRIORITY, DEFAULT_PRIORITY
                 ),
-                CONF_ALERT_ENTITY: user_input.get(CONF_ALERT_ENTITY) or None,
-                CONF_AUDIENCE: list(user_input.get(CONF_AUDIENCE) or []),
                 CONF_PRESENCE_RULE: user_input.get(
                     CONF_PRESENCE_RULE, DEFAULT_PRESENCE_RULE
                 ),
                 CONF_ALLOW_ACKNOWLEDGE: bool(user_input.get(CONF_ALLOW_ACKNOWLEDGE)),
                 CONF_SNOOZE_MINUTES: minutes,
                 CONF_DEFAULT_DATA: dict(user_input.get(CONF_DEFAULT_DATA) or {}),
-                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE)),
                 # v0.2 addendum (ADR-0016). Absent stays absent: an empty text
                 # field means "no override", not an empty message.
                 CONF_MESSAGE: user_input.get(CONF_MESSAGE) or None,
@@ -759,41 +1057,26 @@ class SwitchboardOptionsFlow(OptionsFlow):
             row_for_validation[CONF_SNOOZE_MINUTES] = user_input.get(
                 CONF_SNOOZE_MINUTES
             )
-            targets = self._targets
-            is_new = not any(other[CONF_SLUG] == row[CONF_SLUG] for other in targets)
-            errors = validate_target(
-                row_for_validation, targets, known_persons, is_new=is_new
+            known_persons = [person["entity_id"] for person in self._persons]
+            errors = _showable(
+                validate_target(
+                    row_for_validation, self._targets, known_persons, is_new=False
+                ),
+                TARGET_ADVANCED_FIELDS,
             )
             if not errors:
-                # Nothing is written yet: the confirmation step shows the
-                # `alert:` block this row expects, and submitting *that* is what
-                # writes `entry.options` (ADR-0018 §7). The row is rebuilt from
-                # scratch here, without `managed`, which is exactly how editing
-                # the default row takes ownership of it (ADR-0018 §4).
-                self._pending_target = row
-                return await self.async_step_target_saved()
+                self._options[CONF_TARGETS] = [
+                    row if other[CONF_SLUG] == row[CONF_SLUG] else other
+                    for other in self._targets
+                ]
+                return self._save()
 
         schema = vol.Schema(
             {
-                vol.Required(CONF_SLUG): selector.TextSelector(
-                    selector.TextSelectorConfig()
-                ),
-                vol.Required("name"): selector.TextSelector(
-                    selector.TextSelectorConfig()
-                ),
-                vol.Optional(CONF_CLASS, default=""): selector.TextSelector(
-                    selector.TextSelectorConfig()
-                ),
                 vol.Required(
                     CONF_DEFAULT_PRIORITY, default=DEFAULT_PRIORITY
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(options=list(VALID_PRIORITIES))
-                ),
-                vol.Optional(CONF_ALERT_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="alert")
-                ),
-                vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=known_persons, multiple=True)
                 ),
                 vol.Required(
                     CONF_PRESENCE_RULE, default=DEFAULT_PRESENCE_RULE
@@ -807,9 +1090,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
                     selector.TextSelectorConfig()
                 ),
                 vol.Optional(CONF_DEFAULT_DATA, default={}): selector.ObjectSelector(),
-                vol.Optional(
-                    CONF_OBSERVER_MODE, default=False
-                ): selector.BooleanSelector(),
                 # `TemplateSelector.__call__` runs `cv.template`
                 # (`homeassistant/helpers/selector.py`), so an unparsable
                 # template is already refused by the schema and needs no rule
@@ -824,28 +1104,66 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 ): selector.BooleanSelector(),
             }
         )
-        # Same reasoning as `person`: the three v0.2 texts (`message`,
-        # `done_message`, `default_title`) are exactly the fields somebody
-        # comes back to tweak, and every other field of the row would otherwise
-        # have to be retyped alongside them or be silently reset to its default.
         return self.async_show_form(
-            step_id="target",
+            step_id="target_advanced",
             data_schema=self.add_suggested_values_to_schema(
                 schema,
                 user_input if user_input is not None else self._suggested_target(),
             ),
             errors=errors,
+            description_placeholders={
+                "target": stored.get("name") or stored[CONF_SLUG]
+            },
         )
+
+    async def async_step_edit_target_advanced(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick which target's advanced settings to open.
+
+        A menu entry is a step id (`async_show_menu`,
+        `homeassistant/data_entry_flow.py` line 878), so the labelled entry
+        "Advanced settings of a target" needs a step of its own; this is it.
+        Internal, and deliberately not one of the four public step ids.
+        """
+        self._load()
+        targets = self._targets
+        if not targets:
+            return self.async_abort(reason="nothing_to_edit")
+
+        if user_input is not None:
+            self._editing_slug = user_input[CONF_SLUG]
+            return await self.async_step_target_advanced()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SLUG): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[row[CONF_SLUG] for row in targets]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(step_id="edit_target_advanced", data_schema=schema)
 
     async def async_step_target_saved(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Confirm a validated row, showing the `alert:` block to paste.
+        """Confirm a validated target, showing the `alert:` block to paste.
 
-        A row has just been described in the UI; the `alert:` that feeds it
-        still has to be written by hand against a `notifiers:` name the user
-        would otherwise have to derive (`switchboard_<slug>`). Showing it here
-        is the cheapest possible answer to "and now what?".
+        A target has just been described in the UI; the `alert:` that feeds it
+        still has to be written by hand, and what goes in it depends on the row
+        -- `_alert_snippet` names `switchboard_<slug>` under `notifiers:` for
+        an ordinary row and emits no `notifiers:` at all for an observer one,
+        which is a distinction the user should not have to know to make.
+        Showing the finished block here is the cheapest possible answer to "and
+        now what?".
+
+        The one checkbox (ADR-0020 §1) is the second way into the advanced
+        settings, and the one that matters for somebody who has just met the
+        five-field form: ticked, the flow carries on into `target_advanced`
+        instead of writing and ending. Unticked -- and `{}` submitted, as every
+        Sprint 4 test does -- nothing changes at all.
         """
         row = self._pending_target
         if row is None:  # pragma: no cover - unreachable from the UI
@@ -858,11 +1176,19 @@ class SwitchboardOptionsFlow(OptionsFlow):
             targets.append(row)
             self._options[CONF_TARGETS] = targets
             self._pending_target = None
+            if user_input.get(CONF_ADVANCED):
+                # Still nothing written to `entry.options`: the working copy
+                # now holds the target so the advanced step has something to
+                # open on, and submitting *that* is what saves.
+                self._editing_slug = row[CONF_SLUG]
+                return await self.async_step_target_advanced()
             return self._save()
 
         return self.async_show_form(
             step_id="target_saved",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(
+                {vol.Optional(CONF_ADVANCED, default=False): selector.BooleanSelector()}
+            ),
             description_placeholders={"snippet": _alert_snippet(row)},
         )
 

@@ -8,7 +8,7 @@
     "default_target_name": "Tout le monde",
     "test_message": "Message de test de Notify Switchboard.",
     "detail_routed": "Ce message serait remis à {outputs}.",
-    "detail_deferred": "{person} est en silence à cause de {entities} et a une heure de réveil : ce message serait mis en attente et délivré à {until}.",
+    "detail_deferred": "{person} est en silence à cause de {entities} : ce message serait mis en attente et délivré à {until}.",
     "detail_dropped": "Ce message serait écarté pour {person}, motif {reason}.",
     "detail_presence": "La règle de présence de cette cible est {rule}, et {person} est actuellement {state}.",
     "detail_silenced": "{person} est en silence à cause de {entities}. Seul un message critical passerait.",
@@ -72,14 +72,16 @@
         "menu_options": {
           "person": "Ajouter ou modifier une personne",
           "edit_person": "Modifier une personne",
+          "edit_person_advanced": "Réglages avancés d'une personne",
           "remove_person": "Supprimer une personne",
           "target": "Ajouter ou modifier une cible",
           "edit_target": "Modifier une cible",
+          "edit_target_advanced": "Réglages avancés d'une cible",
           "remove_target": "Supprimer une cible",
           "general": "Cible par défaut",
+          "ttl": "Durée de vie",
           "test_person": "Tester une personne",
-          "test_target": "Tester une cible",
-          "ttl": "Durée de vie"
+          "test_target": "Tester une cible"
         }
       },
       "person": {
@@ -99,6 +101,37 @@
           "entity_id": "Personne"
         }
       },
+      "person_outputs": {
+        "title": "Services notify et silence",
+        "description": "Quels services notify joignent {person}, et quand cette personne est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
+        "data": {
+          "outputs": "Services notify",
+          "silence_entities": "Entités de silence"
+        },
+        "data_description": {
+          "outputs": "Choisissez parmi les services notify de cette instance, ou saisissez-en un qui n'existe pas encore : il est toléré et réessayé.",
+          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire. Un capteur Focus d'iPhone est proposé automatiquement."
+        }
+      },
+      "person_advanced": {
+        "title": "Réglages avancés d'une personne",
+        "description": "La nuit de {person}. Les deux champs sont facultatifs, et laisser l'heure de réveil vide est une réponse, pas un oubli : un message retenu attend alors la fin du silence lui-même, quand ce silence en publie une — un schedule le fait — et est écarté sinon, comme il l'a toujours été.",
+        "data": {
+          "wake_time": "Heure de réveil",
+          "summary": "Résumer la nuit"
+        },
+        "data_description": {
+          "wake_time": "Fin du silence de nuit. Un message qui serait écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu. Laissez vide pour utiliser la fin que le silence publie.",
+          "summary": "Une seule notification à la fin de la nuit listant tout ce qui a été retenu, au lieu d'une notification par message. Activé par défaut."
+        }
+      },
+      "edit_person_advanced": {
+        "title": "Réglages avancés d'une personne",
+        "description": "Choisissez la personne dont vous voulez ouvrir l'heure de réveil et le résumé de nuit. Ses services notify et ses entités de silence sont laissés tels quels.",
+        "data": {
+          "entity_id": "Personne"
+        }
+      },
       "remove_person": {
         "title": "Supprimer une personne",
         "data": {
@@ -110,36 +143,52 @@
       },
       "target": {
         "title": "Cible",
-        "description": "Une ligne de la table de routage. Elle devient notify.switchboard_[slug].",
+        "description": "Une cible de la table de routage. Elle devient notify.switchboard_[slug]. Ces cinq champs suffisent à router ; la priorité, la présence, les boutons et les modèles ont tous une valeur par défaut et vivent dans les réglages avancés.",
         "data": {
           "slug": "Identifiant",
           "name": "Nom",
-          "class": "Classe",
-          "default_priority": "Priorité par défaut",
           "alert_entity": "Alerte",
           "audience": "Audience",
+          "observer_mode": "Mode observateur"
+        },
+        "data_description": {
+          "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
+          "name": "Affiché aux personnes, et utilisé comme message en mode observateur quand l'alerte n'en porte pas.",
+          "alert_entity": "L'alert.* à laquelle cette cible est liée. Nécessaire pour le bouton « J'ai vu ».",
+          "audience": "Les personnes concernées par cette cible. Les autres ne sont pas notifiées.",
+          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier."
+        }
+      },
+      "target_saved": {
+        "title": "Cible enregistrée",
+        "description": "Voici le bloc alert: que cette cible attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nLe bloc suit le mode observateur que vous avez choisi : en mode observateur le routeur surveille l'alerte lui-même et aucun notifiers: n'est nécessaire, et si le mode observateur est désactivé c'est l'entrée notifiers: qui permet à l'alerte de piloter le routeur.\n\nTout le reste — priorité, présence, boutons, modèles — a déjà une valeur par défaut. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
+        "data": {
+          "advanced": "Ouvrir les réglages avancés maintenant"
+        },
+        "data_description": {
+          "advanced": "Laissez décoché pour enregistrer cette cible telle quelle. Si vous cochez, la cible est enregistrée à la validation du formulaire suivant."
+        }
+      },
+      "target_advanced": {
+        "title": "Réglages avancés d'une cible",
+        "description": "Tout ce qui, sur {target}, a déjà une valeur par défaut raisonnable. Rien n'est obligatoire ici, et ce que vous ne touchez pas garde la valeur qu'il a.",
+        "data": {
+          "default_priority": "Priorité par défaut",
           "presence_rule": "Règle de présence",
           "allow_acknowledge": "Autoriser l'acquittement",
           "snooze_minutes": "Durées de report",
           "default_data": "Données par défaut",
-          "observer_mode": "Mode observateur",
           "message": "Modèle de message",
           "done_message": "Modèle de retour à la normale",
           "default_title": "Titre par défaut",
           "clear_done": "Effacer le message de retour à la normale"
         },
         "data_description": {
-          "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
-          "name": "Affiché aux personnes, et utilisé comme message en mode observateur quand l'alerte n'en porte pas.",
-          "class": "Texte libre, uniquement pour regrouper, par exemple bâtiment ou animaux.",
           "default_priority": "Seul `critical` lève le silence et les reports d'une personne.",
-          "alert_entity": "L'alert.* à laquelle cette ligne est liée. Nécessaire pour le bouton « J'ai vu ».",
-          "audience": "Les personnes concernées par cette cible. Les autres ne sont pas notifiées.",
           "presence_rule": "Si l'état person.* doit être à la maison, absent, ou peu importe.",
           "allow_acknowledge": "Ajoute un bouton « J'ai vu » qui éteint l'alerte.",
           "snooze_minutes": "Minutes séparées par des virgules, par exemple 15, 60. Laissez vide pour ne pas proposer de report.",
           "default_data": "Fusionné sous le data de l'appelant ; en cas de conflit, l'appelant gagne.",
-          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier.",
           "message": "Modèle facultatif utilisé en mode observateur quand l'alerte se déclenche. L'état de l'alerte est disponible sous alert, par exemple {{ alert.attributes.level }}. Laissez vide pour envoyer le nom.",
           "done_message": "Modèle facultatif utilisé en mode observateur quand l'alerte revient au repos. Laissez vide pour envoyer le texte traduit de retour à la normale.",
           "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur.",
@@ -148,7 +197,14 @@
       },
       "edit_target": {
         "title": "Modifier une cible",
-        "description": "Choisissez la ligne de la table de routage à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "description": "Choisissez la cible à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "data": {
+          "slug": "Cible"
+        }
+      },
+      "edit_target_advanced": {
+        "title": "Réglages avancés d'une cible",
+        "description": "Choisissez la cible dont vous voulez ouvrir les réglages avancés. Ses cinq champs de base sont laissés tels quels.",
         "data": {
           "slug": "Cible"
         }
@@ -171,63 +227,43 @@
           "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify."
         }
       },
-      "person_outputs": {
-        "title": "Services notify et silence",
-        "description": "Quels services notify joignent {person}, et quand cette personne est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
-        "data": {
-          "outputs": "Services notify",
-          "silence_entities": "Entités de silence",
-          "wake_time": "Heure de réveil",
-          "summary": "Résumer la nuit"
-        },
-        "data_description": {
-          "outputs": "Choisissez parmi les services notify de cette instance, ou saisissez-en un qui n'existe pas encore : il est toléré et réessayé.",
-          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire. Un capteur Focus d'iPhone est proposé automatiquement.",
-          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu.",
-          "summary": "Une seule notification à l'heure de réveil listant tout ce qui a été retenu, au lieu d'une notification par message. Activé par défaut."
-        }
-      },
-      "target_saved": {
-        "title": "Cible enregistrée",
-        "description": "Voici le bloc alert: que cette ligne attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```"
-      },
-      "test_target": {
-        "title": "Tester une cible",
-        "description": "Envoie un vrai message de test par cette ligne, à toute son audience.",
-        "data": {
-          "slug": "Cible"
-        },
-        "data_description": {
-          "slug": "La ligne de la table de routage à tester. Le message est compté et évènementé comme n'importe quel autre."
-        }
-      },
-      "test_person": {
-        "title": "Tester une personne",
-        "description": "Envoie un vrai message de test à cette personne, par la ligne qui la joint.",
-        "data": {
-          "entity_id": "Personne"
-        },
-        "data_description": {
-          "entity_id": "La cible par défaut est utilisée si elle joint cette personne, sinon la première ligne dont l'audience la contient."
-        }
-      },
-      "test_result": {
-        "title": "Résultat du test",
-        "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
-      },
       "ttl": {
         "title": "Durée de vie",
-        "description": "Combien de temps un message retenu jusqu'à l'heure de réveil mérite encore d'être délivré. Laissez un champ vide pour que les messages de cette priorité n'expirent jamais. Critical n'est pas listé : il n'est jamais retenu, donc jamais expiré.",
+        "description": "Combien de temps un message retenu pendant qu'une personne est en silence vaut encore la peine d'être délivré. Laissez un champ vide pour que les messages de cette priorité n'expirent jamais. Critical n'est pas listé : il n'est jamais retenu, donc il ne peut pas expirer.",
         "data": {
           "info": "Info",
           "normal": "Normal",
           "high": "Haute"
         },
         "data_description": {
-          "info": "Minutes pendant lesquelles un message info reste utile après avoir été retenu. Par défaut : 120.",
-          "normal": "Minutes pendant lesquelles un message normal reste utile après avoir été retenu. Par défaut : 720.",
-          "high": "Minutes pendant lesquelles un message de priorité haute reste utile. Vide par défaut : il n'expire jamais."
+          "info": "Minutes pendant lesquelles un message info reste utile après avoir été retenu. Valeur par défaut aujourd'hui : 120, et une version future peut en choisir une autre.",
+          "normal": "Minutes pendant lesquelles un message normal reste utile après avoir été retenu. Valeur par défaut aujourd'hui : 720, et une version future peut en choisir une autre.",
+          "high": "Minutes pendant lesquelles un message high reste utile. Vide par défaut : il n'expire jamais."
         }
+      },
+      "test_target": {
+        "title": "Tester une cible",
+        "description": "Envoie un vrai message de test par cette cible, à toute son audience.",
+        "data": {
+          "slug": "Cible"
+        },
+        "data_description": {
+          "slug": "La cible à tester. Le message est compté et évènementé comme n'importe quel autre."
+        }
+      },
+      "test_person": {
+        "title": "Tester une personne",
+        "description": "Envoie un vrai message de test à cette personne, par la cible qui la joint.",
+        "data": {
+          "entity_id": "Personne"
+        },
+        "data_description": {
+          "entity_id": "La cible par défaut est utilisée si elle joint cette personne, sinon la première cible dont l'audience la contient."
+        }
+      },
+      "test_result": {
+        "title": "Résultat du test",
+        "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
       }
     },
     "error": {
@@ -252,7 +288,7 @@
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
       "nothing_to_edit": "Il n'y a encore rien à modifier.",
       "nothing_to_configure": "Ajoutez d'abord une cible.",
-      "nothing_to_test": "Aucune ligne de la table de routage n'a cette personne dans son audience : il n'y a rien à lui envoyer. Ajoutez-la d'abord à l'audience d'une cible."
+      "nothing_to_test": "Aucune cible n'a cette personne dans son audience : il n'y a rien à lui envoyer. Ajoutez-la d'abord à l'audience d'une cible."
     }
   },
   "issues": {
@@ -266,7 +302,7 @@
     },
     "invalid_service_target": {
       "title": "Une carte ou un script appelle sans cesse une cible inconnue",
-      "description": "Un service notify_switchboard a été refusé plusieurs fois pour la cible {value}, qui n'est pas dans la table de routage. Quelque chose — le plus souvent une carte ou un script resté sur une ligne renommée — continue de la demander. Corrigez l'appelant, ou ajoutez la cible."
+      "description": "Un service notify_switchboard a été refusé plusieurs fois pour la cible {value}, qui n'est pas dans la table de routage. Quelque chose — le plus souvent une carte ou un script resté sur une cible renommée — continue de la demander. Corrigez l'appelant, ou ajoutez la cible."
     },
     "invalid_service_person": {
       "title": "Une carte ou un script nomme sans cesse une personne inutilisable",
@@ -282,11 +318,11 @@
     },
     "person_without_outputs": {
       "title": "Une personne n'a aucun service notify",
-      "description": "{person} fait partie de l'audience d'au moins une ligne de la table de routage mais n'a aucun service notify : tout message qui lui est destiné est écarté avec le motif no_outputs. Ouvrez les options de Notify Switchboard, modifiez cette personne et donnez-lui au moins un service notify."
+      "description": "{person} fait partie de l'audience d'au moins une cible mais n'a aucun service notify : tout message qui lui est destiné est écarté avec le motif no_outputs. Ouvrez les options de Notify Switchboard, modifiez cette personne et donnez-lui au moins un service notify."
     },
     "alert_entity_missing": {
       "title": "Une cible pointe vers une alerte qui n'existe pas",
-      "description": "La ligne {slug} de la table de routage est liée à {entity_id}, qui n'est pas dans la machine à états. Cette ligne n'acquitte rien et n'observe rien. Écrivez ce bloc alert:, ou videz le champ alerte de la ligne, puis rechargez Notify Switchboard."
+      "description": "La cible {slug} est liée à {entity_id}, qui n'est pas dans la machine à états. Cette cible n'acquitte rien et n'observe rien. Écrivez ce bloc alert:, ou videz le champ alerte de la cible, puis rechargez Notify Switchboard."
     }
   },
   "exceptions": {
@@ -318,29 +354,29 @@
   "services": {
     "acknowledge": {
       "name": "Acquitter",
-      "description": "Éteint l'alerte liée à une ligne de la table de routage, exactement comme le bouton « J'ai vu » d'une notification.",
+      "description": "Éteint l'alerte liée à une cible, exactement comme le bouton « J'ai vu » d'une notification.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la ligne de la table de routage. Sa ligne doit avoir une alerte et autoriser l'acquittement."
+          "description": "L'identifiant de la cible. Elle doit avoir une alerte et autoriser l'acquittement."
         }
       }
     },
     "snooze": {
       "name": "Reporter",
-      "description": "Coupe les notifications d'une cible pendant un moment, pour une personne ou pour toute l'audience de la ligne.",
+      "description": "Coupe les notifications d'une cible pendant un moment, pour une personne ou pour toute son audience.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la ligne de la table de routage à reporter."
+          "description": "L'identifiant de la cible à reporter."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Durée du report. Elle doit faire partie des durées proposées par la ligne."
+          "description": "Durée du report. Elle doit faire partie des durées proposées par la cible."
         },
         "person": {
           "name": "Personne",
-          "description": "Pour qui reporter. Laissez vide pour reporter pour toute l'audience de la ligne."
+          "description": "Pour qui reporter. Laissez vide pour reporter pour toute l'audience de la cible."
         }
       }
     },
@@ -350,11 +386,11 @@
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la ligne de la table de routage à ne plus reporter."
+          "description": "L'identifiant de la cible à ne plus reporter."
         },
         "person": {
           "name": "Personne",
-          "description": "De qui lever le report. Laissez vide pour toute l'audience de la ligne."
+          "description": "De qui lever le report. Laissez vide pour toute l'audience de la cible."
         }
       }
     },
@@ -384,19 +420,19 @@
     },
     "explain": {
       "name": "Expliquer",
-      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette ligne ? », personne par personne, sans rien envoyer. À appeler avec return_response.",
+      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette cible ? », personne par personne, sans rien envoyer. À appeler avec return_response.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "Le slug de la ligne de la table de routage à évaluer."
+          "description": "Le slug de la cible à évaluer."
         },
         "priority": {
           "name": "Priorité",
-          "description": "La priorité à utiliser pour l'évaluation. Laissez vide pour la priorité par défaut de la ligne, exactement comme un vrai appel."
+          "description": "La priorité à utiliser pour l'évaluation. Laissez vide pour la priorité par défaut de la cible, exactement comme un vrai appel."
         },
         "person": {
           "name": "Personne",
-          "description": "Sur qui répondre. Laissez vide pour toute l'audience de la ligne."
+          "description": "Sur qui répondre. Laissez vide pour toute l'audience de la cible."
         }
       }
     }

@@ -50,7 +50,6 @@ CONF_SUMMARY: Final = "summary"
 
 # Target (routing table) row keys.
 CONF_SLUG: Final = "slug"
-CONF_CLASS: Final = "class"
 CONF_DEFAULT_PRIORITY: Final = "default_priority"
 CONF_ALERT_ENTITY: Final = "alert_entity"
 CONF_AUDIENCE: Final = "audience"
@@ -82,7 +81,6 @@ CONF_DEFAULT_TITLE: Final = "default_title"
 # `data` payload attributes (contract "Input")
 # ---------------------------------------------------------------------------
 
-ATTR_CLASS: Final = "class"
 ATTR_PRIORITY: Final = "priority"
 ATTR_SOURCE_ENTITY: Final = "source_entity"
 ATTR_TAG: Final = "tag"
@@ -115,6 +113,15 @@ ATTR_REASONS: Final = "reasons"
 # so the integration keeps no dependency on the `person` component.
 ATTR_USER_ID: Final = "user_id"
 
+# State attribute a `schedule.*` publishes holding the instant its current
+# block finishes (`homeassistant/components/schedule/const.py`,
+# `ATTR_NEXT_EVENT` / `ScheduleEntityStateAttribute.NEXT_EVENT`). It is the one
+# end a silence entity publishes in core 2026.9.1, and therefore the instant a
+# deferral made for a person with no `wake_time` is bounded by (v0.6 addendum,
+# ADR-0020 §3). Spelled out here rather than imported, exactly like
+# `ATTR_USER_ID`, so the integration keeps no dependency on `schedule`.
+ATTR_NEXT_EVENT: Final = "next_event"
+
 # The tag every message sent by the options flow's "test this person" /
 # "test this target" steps carries under `data.tag` (contract v0.4,
 # ADR-0018 §6). Public: a caller, an automation or a Companion channel may
@@ -139,12 +146,10 @@ CLEAR_NOTIFICATION_MESSAGE: Final = "clear_notification"
 # reading `data.notification_id`, so it is the only one the router adds it for.
 PERSISTENT_NOTIFICATION_OUTPUT: Final = "persistent_notification"
 
-# The routing-table row the first person creates on an empty table
+# The target the first person creates on an empty routing table
 # (ADR-0018 §4). Its name is translated (`common.default_target_name`); its
-# slug and class are not, because the slug is a public service name and the
-# class is free text the user groups rows by.
+# slug is not, because a slug is a public service name.
 DEFAULT_TARGET_SLUG: Final = "default"
-DEFAULT_TARGET_CLASS: Final = "general"
 
 # ---------------------------------------------------------------------------
 # Priorities

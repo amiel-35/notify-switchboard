@@ -16,7 +16,7 @@ creates no channel of its own and no dependency on an external service.
           (repeat, ack, done)                       |                     (entity, degraded)
         (or: observer mode watches alert.*)         |
                                                     v
-                       routing table: target -> class, priority, alert.*, audience
+                       routing table: target -> priority, alert.*, audience
                                                     |  per person:
                                                     |  in the audience?
                                                     |  present, if the rule requires it?
@@ -42,7 +42,7 @@ entities. There is no intermediate "house" sensor.
 | `services.py` | The six `notify_switchboard.*` domain services — the five acting ones (v0.2, ADR-0016) and the read-only `explain` (v0.4, ADR-0018): schemas and registration only, every decision delegated to `dispatcher.py`. |
 | `notify.py` | The degraded `NotifyEntity`. |
 | `entity.py`, `sensor.py`, `binary_sensor.py`, `event.py` | Contract §3.5 entities. |
-| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. From v0.4 it also discovers a person's Companion outputs and Focus sensors out of the `mobile_app` config entries, bootstraps the managed `default` row, and drives the two test steps. |
+| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. From v0.4 it also discovers a person's Companion outputs and Focus sensors out of the `mobile_app` config entries, bootstraps the managed `default` target, and drives the two test steps. |
 
 The pure/impure split is what makes the decision engine unit-testable at 100 %
 branch coverage without a `HomeAssistant` instance.
@@ -51,7 +51,7 @@ branch coverage without a `HomeAssistant` instance.
 
 See `docs/contract.md` (frozen). In short: `message`, `title`, `target` (a list
 of routing-table slugs), and `data` carrying `priority`, `source_entity`, `tag`
-and anything else, which is merged over the row's `default_data` and forwarded
+and anything else, which is merged over the target's `default_data` and forwarded
 unchanged.
 
 ## Output contract
@@ -65,19 +65,19 @@ Decisions taken in Sprint 1, where the contract left room:
   `mobile_app_`.** Other outputs get the merged `data` without `actions` and
   without `authenticationRequired`. Since 0.5.1 the same holds for every key
   the router adds, `tag` included (ADR-0019 §6, amendment 2026-09-07 (2)):
-  what an output receives is the caller's `data` merged with the row's
+  what an output receives is the caller's `data` merged with the target's
   `default_data`, plus only the keys that output reads.
 - **`authenticationRequired` is written both at the top level of `data` and on
   each action.** The acceptance suite pins the top-level key; the per-action
   key is what the Companion app actually reads.
 - **`not_in_audience` is recorded but not counted.** The decision lists every
-  configured person a row does not name, so diagnostics can show why somebody
+  configured person a target does not name, so diagnostics can show why somebody
   was quiet, but `sensor.switchboard_dropped_today` ignores that reason: the
   contract says such a person is "not considered", and counting them would
   make the daily figure meaningless in a house with several people.
-- **`unknown_person` is counted.** A row whose `audience` names somebody the
+- **`unknown_person` is counted.** A target whose `audience` names somebody the
   persons table does not know about (a hand-edited `.storage`, a person
-  deleted after the row was written) is a real loss: the row asked for that
+  deleted after the target was written) is a real loss: the target asked for that
   person to be notified and nobody was. It is a separate reason from
   `not_in_audience` and it counts towards `sensor.switchboard_dropped_today`.
 - **A partially recursive output list still delivers.** If a person has one
@@ -86,7 +86,7 @@ Decisions taken in Sprint 1, where the contract left room:
 - **A silenced message with a `wake_time` is deferred, not dropped**, and is
   therefore not counted as a drop. Deferrals are de-duplicated on
   `(person, target, tag)`; since 0.5.0 the `tag` half is always populated (the
-  row's default `switchboard-<slug>` when the caller supplies none), so an
+  target's default `switchboard-<slug>` when the caller supplies none), so an
   untagged message still de-duplicates on `(person, target)` in practice.
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
@@ -102,10 +102,12 @@ Decisions taken in Sprint 1, where the contract left room:
 
 A deferral is a promise that a message is *late*, not that it is eternal, and
 not that the decision that queued it is still true. From 0.5.0 the queue has
-**three** entry points into a flush and four possible outcomes per message.
-Two of them -- the wake-time timer and the early flush of §4 -- reach it
-through `_async_schedule_flush` and therefore share one config-entry task; the
-third, the catch-up of overdue deferrals at setup, calls the flush inline.
+**four** entry points into a flush and four possible outcomes per message.
+Three of them -- the wake-time timer and the two early flushes of §4, the last
+configured silence going `off` and a `notify_switchboard.unsilence` that lifts
+the last silence there was -- reach it through `_async_schedule_flush` and
+therefore share one config-entry task; the fourth, the catch-up of overdue
+deferrals at setup, calls the flush inline.
 
 ```
                  silenced + wake_time
@@ -113,6 +115,7 @@ inbound message ─────────────────────�
                                          │
               wake_time timer  ──────────┤
               last silence entity off ───┤   (early flush, §4)
+              unsilence, last silence ───┤   (early flush, §4)
               overdue at setup ──────────┘   (catch-up, inline)
                                          │
                         ┌────────────────┴────────────────┐
@@ -145,7 +148,7 @@ inbound message ─────────────────────�
                         └───────────────┘   └──────────────────────┘
 ```
 
-- **Both entry points go through one task.** `_async_schedule_flush` hands the
+- **The scheduled entry points go through one task.** `_async_schedule_flush` hands the
   flush to a task of the config entry's own, so it never runs inside the timer
   sweep or the state write that triggered it. Unloading the entry **waits** for
   that task rather than cancelling it — `_async_process_on_unload`
@@ -176,19 +179,19 @@ inbound message ─────────────────────�
   and removes the message from the store.
 - **The summary is built, not merged**: `tag: switchboard-summary`, the union
   of the `switchboard_*` keys of the collapsed survivors, and nothing else —
-  no caller key, no row `default_data`, and no Companion buttons, which on a
+  no caller key, no target `default_data`, and no Companion buttons, which on a
   digest of three alerts could only act on an arbitrary one of them. Each
   **line** counts as one routed message and fires one `routed` event, so the
   daily figures still add up to what was queued.
 - **A digest is a delivery, so it is recorded into the episodes it
   summarises** (ADR-0019 §6, amendment (b)): each kept line writes the person,
-  the outputs that answered and the tag `switchboard-summary` into its row's
+  the outputs that answered and the tag `switchboard-summary` into its target's
   open episode. Without it the person a digest woke would be filtered out of
   the `done` message by the `not_notified` rule, and the digest would stay on
   their phone after the alert ended.
 
   The side effect is literal and deliberate: a digest carries **one** tag for
-  the several rows it collapses, so the first of those episodes to close
+  the several targets it collapses, so the first of those episodes to close
   clears `switchboard-summary` and the whole digest goes with it — including
   its lines about alerts that are still running. The alternative — one tag per
   line — would need one notification per line, which is exactly what the
@@ -201,7 +204,7 @@ inbound message ─────────────────────�
   `Context(user_id=…)`), and a `person.*` entity publishes the user it is
   linked to as a `user_id` attribute
   (`homeassistant/components/person/const.py`,
-  `PersonEntityStateAttribute.USER_ID`). If a person in the row's audience
+  `PersonEntityStateAttribute.USER_ID`). If a person in the target's audience
   matches, only that person is snoozed.
   Failing that, the Companion `device_id` is looked up directly and as a
   `("mobile_app", <id>)` identifier; the device's name, its user-given name and
@@ -209,7 +212,7 @@ inbound message ─────────────────────�
   way core does it — `slugify(f"mobile_app_{name}")`,
   `homeassistant/components/notify/legacy.py` — and matched against the
   persons' outputs. When nothing matches — the documented ambiguous case —
-  every person in the row's audience is snoozed.
+  every person in the target's audience is snoozed.
 - **Outputs are stored without their `notify.` prefix.** `parse_person`
   normalises `notify.mobile_app_x` to `mobile_app_x`, so the two spellings a
   user may reasonably write behave identically for person resolution, for
@@ -249,7 +252,7 @@ Decisions taken in Sprint 2, where the contract left room:
 - **The voluptuous schemas are strict about shape, permissive about value.**
   `homeassistant/core.py`, `ServiceRegistry.async_call`, re-raises a schema's
   `vol.Invalid` as-is, and a `vol.Invalid` is not a `ServiceValidationError`.
-  So `minutes: 0`, a duration the row does not offer, an unknown slug and an
+  So `minutes: 0`, a duration the target does not offer, an unknown slug and an
   unknown person are all checked in the handler, never in the schema.
 - **A recurring refusal raises a `repairs` issue, and fixing the cause clears
   it.** One bad call is answered to its caller; the same unknown target or
@@ -278,7 +281,7 @@ Decisions taken in Sprint 2, where the contract left room:
   `alert.turn_off` gets a **child** of the caller's `Context`, not the caller's
   own: a non-empty `context.user_id` on an entity service call makes
   `homeassistant/helpers/service.py` run an auth lookup and a per-entity
-  permission check, which would put the row's `allow_acknowledge` allow-list
+  permission check, which would put the target's `allow_acknowledge` allow-list
   behind whatever entity policy the calling account has. The logbook resolves
   the parent context for attribution
   (`homeassistant/components/logbook/processor.py`). The
@@ -314,19 +317,22 @@ message silenced only by a `notify_switchboard.silence` is dropped, because
 quiet. When a configured night silence is also active, the message is deferred
 as before — nothing is lost. A temporary silence still running when that
 deferral comes due holds it back (both sources are read at flush time), and the
-flush is then re-armed for the end of the silence.
+flush is then re-armed for the end of the silence. `notify_switchboard.unsilence`
+moves that end: it flushes on the spot when nothing else is holding the queue,
+and otherwise re-arms on what is left, so a queue is never waiting on an expiry
+that has been cancelled.
 
 ### Episodes, and closing the loop (v0.5, ADR-0019 §5 and §6)
 
-An **episode** is one run of a row's `alert_entity`: it opens on that entity's
+An **episode** is one run of a target's `alert_entity`: it opens on that entity's
 `idle → on` transition and closes on its `→ idle` one. Episodes exist for
-every row that names an `alert_entity`, in observer mode or not, so the router
-subscribes to *every row's* alert rather than only to the observed ones.
+every target that names an `alert_entity`, in observer mode or not, so the router
+subscribes to *every target's* alert rather than only to the observed ones.
 
 While an episode is open, each successful delivery records the person, the
 `notify.*` outputs that answered and the message's effective `data.tag`. The
 record is closed — not deleted — when the alert returns to `idle`, and reset
-when that row's **next** episode opens: a `done` message is by definition sent
+when that target's **next** episode opens: a `done` message is by definition sent
 after the alert is already back to `idle`, so the recipients have to outlive
 the episode's end. Everything is persisted with the snoozes, the deferrals and
 the temporary silences (store minor version 4).
@@ -334,7 +340,7 @@ the temporary silences (store minor version 4).
 A `done` message — observer mode's `on|off → idle` message, or any call
 carrying `data.switchboard_done: true` — reaches only the persons in that set;
 everybody else in the audience is dropped with `not_notified`, before the rest
-of the decision runs. A row with no `alert_entity` has no episodes at all, so
+of the decision runs. A target with no `alert_entity` has no episodes at all, so
 that key routes to the whole audience there, exactly like any other message.
 
 **Every outgoing message carries a name.** `data.tag` defaults to
@@ -348,7 +354,7 @@ service handler).
 That name is the router's own key, so it travels no further than the outputs
 that read it: the **default** `tag` is written on `mobile_app_*` outputs and on
 `persistent_notification` (where it is the source of the id), and nowhere else.
-Every other output gets the caller's `data` merged with the row's
+Every other output gets the caller's `data` merged with the target's
 `default_data` and nothing added — the router is a proxy, and the sibling
 adapters of this suite refuse an unknown `data` key by design (AirPlay
 Notifier's `PREVENT_EXTRA` schema, Assist Satellite Notifier's
@@ -360,13 +366,13 @@ episode's tag: `clear_done` defaults to off, and a message carrying
 `switchboard-<slug>` could not be kept on the phone while the episode's own
 notifications are cleared.
 
-When an **observer** row's episode ends, in this order: the `done` message is
+When an **observer** target's episode ends, in this order: the `done` message is
 routed (filtered as above); every `mobile_app_*` output the episode reached is
 called with `message: clear_notification` and the episode's tag
 (`homeassistant/components/mobile_app/const.py`, `CLEAR_NOTIFICATION` — core
 forwards the payload to the push relay and the Companion app is what removes
 the notification); `persistent_notification.dismiss` is called for the
-matching id when that output was reached; and, if the row carries
+matching id when that output was reached; and, if the target carries
 `clear_done: true`, the `done` message is cleared the same way on the outputs
 that received it.
 
@@ -380,14 +386,14 @@ state written into the `alert` domain by a template, a script or a test is
 tidied up after exactly like one the `alert` integration owns — the router
 observed it and notified on the strength of it either way.
 
-### Per-row texts and the template context
+### Per-target texts and the template context
 
-`message`, `done_message` and `default_title` are optional per-row strings,
+`message`, `done_message` and `default_title` are optional per-target strings,
 absent by default. The two templates are rendered with
 `Template(raw, hass).async_render({"alert": <State|None>}, parse_result=False)`
-(`homeassistant/helpers/template/__init__.py`): `alert` is the row's
-`alert_entity`'s current `State`, or `None` when the row has no alert or the
-entity does not exist, so a row can write `{{ alert.attributes.level }}`
+(`homeassistant/helpers/template/__init__.py`): `alert` is the target's
+`alert_entity`'s current `State`, or `None` when the target has no alert or the
+entity does not exist, so a target can write `{{ alert.attributes.level }}`
 without waiting for a real `AlertEntity` to gain state attributes. A template
 that raises is logged and treated as absent; so is one that renders to an
 empty string. `parse_result=False` keeps a message a string rather than
@@ -397,21 +403,21 @@ Resolution order, unchanged when the new fields are absent:
 
 | Transition | Order |
 |---|---|
-| `idle -> on` | alert's `message` attribute → row's `message` template → row's `name` |
-| `on\|off -> idle` | row's `done_message` template → alert's `done_message` attribute → translated `common.back_to_normal` |
-| title | caller's `title` → row's `default_title` → (observer mode only) row's `name` |
+| `idle -> on` | alert's `message` attribute → target's `message` template → target's `name` |
+| `on\|off -> idle` | target's `done_message` template → alert's `done_message` attribute → translated `common.back_to_normal` |
+| title | caller's `title` → target's `default_title` → (observer mode only) target's `name` |
 
 The two orders differ because the contract and ADR-0016 order them
 differently; on a real `alert.*`, which exposes no attributes at all, both
 chains behave identically. `default_title` is applied per delivery, in
-`_async_deliver`, not per request, so a call fanned out over several rows gets
-each row's own default.
+`_async_deliver`, not per request, so a call fanned out over several targets gets
+each target's own default.
 
 ## Explainability (v0.4, ADR-0018)
 
 `notify_switchboard.explain` is a sixth domain service, registered next to the
 five acting ones and declared `SupportsResponse.ONLY`. It answers, per person,
-what would happen to a message sent to a row right now: `decision` (`routed` /
+what would happen to a message sent to a target right now: `decision` (`routed` /
 `deferred` / `dropped`), the `until` of a deferral, the `reason` of a drop, a
 translated `detail` naming the deciding object, and the `notify.*` services the
 message would reach (`outputs`) or that are configured but not registered
@@ -449,10 +455,10 @@ the hard way:
   Android's Do Not Disturb is a `sensor` with several string states and is
   deliberately not proposed; `docs/quickstart.md` shows the one-line template
   that bridges it.
-- **That a fresh install needs a row at all.** The first person added to an
+- **That a fresh install needs a target at all.** The first person added to an
   empty routing table creates one, slug `default`, flagged `managed`, and
-  `default_target` points at it. While the flag is true the row's audience is
-  every configured person; submitting the row editor for it — any field —
+  `default_target` points at it. While the flag is true the target's audience is
+  every configured person; submitting the target editor for it — any field —
   clears the flag for good. `managed` is the only new options key of 0.4 and is
   optional, so no storage migration is needed.
 
@@ -469,9 +475,9 @@ Home Assistant's `alert` integration lists `notifiers:` by legacy `notify.*`
 service name; there is no way to point `alert` at a `NotifyEntity`
 (`homeassistant/components/notify/legacy.py`). So the legacy service is the
 main entry point, and its `targets` property is what creates one
-`notify.switchboard_<slug>` service per routing-table row. The `NotifyEntity`
+`notify.switchboard_<slug>` service per target. The `NotifyEntity`
 is the forward-looking surface and is documented as degraded: `send_message`
-carries only `message` and `title`, so it routes to the default row with
+carries only `message` and `title`, so it routes to the default target with
 priority `normal`.
 
 The legacy service is registered **directly** (`BaseNotificationService.
@@ -483,18 +489,18 @@ entry reload.
 
 ## Observer mode (plan B, ADR-007)
 
-For a row with `observer_mode`, the router watches the row's `alert.*` instead
+For a target with `observer_mode`, the router watches the target's `alert.*` instead
 of waiting to be called:
 
 | Transition | What is routed |
 |---|---|
-| `idle -> on` | the alert's `message` attribute, else the row's `message` template, else the row's name |
-| `on\|off -> idle` | the row's `done_message` template, else the alert's `done_message` attribute, else the translated `common.back_to_normal` |
+| `idle -> on` | the alert's `message` attribute, else the target's `message` template, else the target's name |
+| `on\|off -> idle` | the target's `done_message` template, else the alert's `done_message` attribute, else the translated `common.back_to_normal` |
 | `on -> off` | nothing (the alert was acknowledged) |
 
 `AlertEntity` in core 2026.9.1 exposes **no** state attributes at all, so on a
-real alert the row's own templates (v0.2, ADR-0016) are what actually fires
-today; absent them, the fallbacks are. See "Per-row texts and the template
+real alert the target's own templates (v0.2, ADR-0016) are what actually fires
+today; absent them, the fallbacks are. See "Per-target texts and the template
 context" above.
 
 ## Entities
@@ -525,14 +531,14 @@ switchboard schedules is cancelled both on unload and on
 One `Store` (`notify_switchboard.data`, version 1, minor version 4) holds the
 snoozes (`(person, target) -> expiry`, expired lazily), the night deferrals,
 the temporary silences (`person -> until`, expired lazily too) and the episodes
-(one per row that has an `alert_entity`). Minor version 2
+(one per target that has an `alert_entity`). Minor version 2
 added `queued_at` to every deferral; the migration lives in
-`store.SwitchboardStorage._async_migrate_func` and stamps the existing rows
+`store.SwitchboardStorage._async_migrate_func` and stamps the existing targets
 with the migration time, so an upgrade never fires a backlog. Minor version 3
 added the `silences` list, which starts empty: an upgrade never invents a
 silence. Minor version 4 added the `episodes` list, empty for the same reason —
 a restart in the middle of a leak must not turn "back to normal" into a message
-for people who slept through it. Any row that will not parse is dropped rather than fatal — a
+for people who slept through it. Any target that will not parse is dropped rather than fatal — a
 hand-edited `.storage` file must not stop the entry from loading. The recorder
 database is never touched.
 
@@ -545,35 +551,36 @@ per sprint.
 |---|---|---|
 | Suite S0 | Foundations: repo, template, CI, dev instance | CI green on the skeleton; `hassfest` passes |
 | Suite S1 | Router v0.1: routing table, per-person decision, acknowledge / snooze buttons, night deferral, observer mode, diagnostics, config flow | A test alert routes to a present phone, not to an absent one; silence blocks unless `critical`; acknowledging from a phone stops the repeat; a 1 h snooze holds across a restart |
-| Suite S2 | Router v0.2: five UI services (acknowledge/snooze/unsnooze/silence/unsilence), temporary person-wide silence, per-row `message`/`done_message`/`default_title` | A card silences somebody for an hour and the message is dropped, not lost; a snooze the row does not offer is refused with a translated error |
+| Suite S2 | Router v0.2: five UI services (acknowledge/snooze/unsnooze/silence/unsilence), temporary person-wide silence, per-target `message`/`done_message`/`default_title` | A card silences somebody for an hour and the message is dropped, not lost; a snooze the target does not offer is refused with a translated error |
 | Suite S3 | `notify-cast` v0.1: a `notify` per Cast speaker that talks — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard in the kitchen |
 | Suite S4 | `notify-airplay` v0.1: same for AirPlay speakers — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard on an AirPlay speaker |
 | Suite S5 | `notify-alexa` v0.1: same via Alexa Media Player | An announcement is heard on an Echo |
 | Suite S6 | Cards v0.1: alert bubble, silence tiles | The wall shows active alerts and can acknowledge them |
-| Suite S7 | Blueprints + docs site | An external user routes an alert in 10 minutes |
+| Suite S7 | Blueprints + docs site | An external user routes an alert in ten minutes |
 | Suite S8 | HACS default submission, quality scale silver | HACS acceptance |
 
-This repository (`notify-switchboard`) covers the router rows; the others live
+This repository (`notify-switchboard`) covers the router lines; the others live
 in sibling repositories per the umbrella doctrine. The quickstart
 (`docs/quickstart.md`) and the three importable blueprints
 (`blueprints/automation/notify_switchboard/`) landed early, ahead of the
-suite S7 row that planned them.
+suite S7 line that planned them.
 
 ### Router roadmap
 
-The router has its own sprint sequence inside those rows, numbered
+The router has its own sprint sequence inside those lines, numbered
 independently of the suite roadmap above: suite S3 is `notify-cast`, router S3
-is this release, and the two S7 rows have nothing to do with each other.
-**Router S4 is done** and is what 0.4.0 ships.
+is a router release, and the two S7 lines have nothing to do with each other.
+**Router S6 is done** and is what 0.6.0 ships.
 
 | Router # | Router increment | State |
 |---|---|---|
-| Router S0-S2 | Foundations, the router itself, the UI services and the per-row texts | Shipped (0.1.0, 0.2.0) |
+| Router S0-S2 | Foundations, the router itself, the UI services and the per-target texts | Shipped (0.1.0, 0.2.0) |
 | Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | Shipped (0.3.0) |
-| Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` row, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | **Done — 0.4.0** |
-| Router S5 | Night: time-to-live on a deferral, one wake-time summary, a full re-decision at the flush, an early flush when the silence really ends, episodes and cleared notifications (ADR-0019) | Done (0.5.0) |
-| Router S6 | Escalation: what happens when nobody acknowledges — a second person, a louder output, a delay per row | Planned |
-| Router S7 | Places: route on where somebody is, not only on whether they are home | Planned |
+| Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` target, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | Shipped (0.4.0) |
+| Router S5 | Night: time-to-live on a deferral, one wake-time summary, a full re-decision at the flush, an early flush when the silence really ends, episodes and cleared notifications (ADR-0019) | Shipped (0.5.0, 0.5.1) |
+| Router S6 | Consolidation: a five-field target editor and a two-field person editor with their advanced steps, `class` removed, an optional wake time with a documented meaning, one vocabulary, a glossary, a migration guide, and documents that match the code (ADR-0020) | **Done — 0.6.0** |
+| Router S7 | Escalation and places, reduced in scope: what happens when nobody acknowledges, and routing on where somebody is rather than only on whether they are home | Next — 0.7.0 |
+| Later | Unscheduled, each needing an ADR of its own: labels on a target (the successor of `class`), a per-target authentication override, intents, and the routing table as an entity | Not scheduled |
 
 ## Engineering rules learned
 
@@ -639,8 +646,8 @@ for its own concurrent fixes — works in its own
 | [0013](ADR/0013-source-unavailability-as-blueprint.md) | Source-unavailability monitoring ships as a blueprint, not in the router |
 | [0014](ADR/0014-cast-notifier-name.md) | The Cast voice adapter is named "Cast Notifier" |
 | [0015](ADR/0015-refusals-raise-service-validation-error.md) | A refused notification raises `ServiceValidationError`, never fails silently |
-| [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-row message texts |
+| [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-target message texts |
 | [0017](ADR/0017-debts-and-robustness.md) | Debts and robustness — frozen ids under any language, parallel fan-out, canonical callbacks, services without an entry |
-| [0018](ADR/0018-zero-config-and-explainability.md) | Zero-config and explainability — `explain`, discovered Companion outputs, a managed default row, consistency repairs |
+| [0018](ADR/0018-zero-config-and-explainability.md) | Zero-config and explainability — `explain`, discovered Companion outputs, a managed default target, consistency repairs |
 | [0019](ADR/0019-night-catch-up-and-closing-the-loop.md) | Night, catch-up and closing the loop — TTL, one wake-time summary, a full re-decision at flush, early flush, episode recipients, cleared notifications |
 | [0020](ADR/0020-consolidation.md) | Consolidation — a five-field target, an optional wake time, one vocabulary, and documents that tell the truth |
