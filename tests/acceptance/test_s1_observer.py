@@ -125,10 +125,16 @@ async def test_observer_mode_routes_done_message_on_return_to_idle(
     )
     await hass.async_block_till_done()
 
-    assert len(calls["mobile_app_alice"]) == 2
-    assert (
-        calls["mobile_app_alice"][1].data["message"] == "Tout est revenu à la normale"
-    )
+    # From 0.5.0 the `→ idle` transition of an observer row also pushes a
+    # `clear_notification` to the Companion outputs the episode reached
+    # (ADR-0019 §6). A clear is not a message, so it is filtered out here.
+    messages = [
+        call.data["message"]
+        for call in calls["mobile_app_alice"]
+        if call.data["message"] != "clear_notification"
+    ]
+    assert len(messages) == 2
+    assert messages[1] == "Tout est revenu à la normale"
 
 
 async def test_observer_mode_stops_without_routing_when_alert_transitions_to_off(

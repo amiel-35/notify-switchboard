@@ -41,7 +41,10 @@ from datetime import datetime, timedelta
 import homeassistant.util.dt as dt_util
 import pytest
 from homeassistant.core import SupportsResponse
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from pytest_homeassistant_custom_component.common import (
+    async_fire_time_changed,
+    async_mock_service,
+)
 
 from custom_components.notify_switchboard.const import DOMAIN
 
@@ -349,6 +352,13 @@ async def test_the_default_tag_and_notification_id_are_the_documented_values(
         default_target="leak",
     )
     await install(entry)
+    # `notify`'s own setup registers `notify.persistent_notification`
+    # (core `components/notify/__init__.py`, `async_setup`) and replaces a mock
+    # made earlier (`core.py`, `ServiceRegistry._async_register`), so the bare
+    # output is mocked once the entry is up.
+    calls["persistent_notification"] = async_mock_service(
+        hass, "notify", "persistent_notification"
+    )
 
     await hass.services.async_call(
         "notify", "switchboard_leak", {"message": "m"}, blocking=True
