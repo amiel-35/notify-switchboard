@@ -4,6 +4,14 @@ Findings from the tester or reviewer that were explicitly accepted by the
 orchestrator instead of blocking a release. Each entry: date, sprint, finding,
 why accepted, planned resolution.
 
+> **0.6.0 (ADR-0020 §8).** This file is for findings accepted *instead of being
+> fixed*. Design the maintainer chose on purpose — which bends a stated
+> doctrine principle for a stated reason — belongs in
+> [`accepted-deviations.md`](accepted-deviations.md) instead: the temporary
+> silence the router owns, the episode it persists, and the `not_in_audience`
+> decision it does not count. Nothing was deleted; the entries that moved are
+> marked below and repeated there with the principle each one bends.
+
 ## 2026-09-06 — S1 — `alert` leaves an un-cancellable repeat timer in tests
 
 `tests/acceptance/test_s1_actions.py::test_acknowledge_action_turns_off_the_row_alert_when_allowed`
@@ -114,6 +122,15 @@ limitation in their first hour: a fresh install no longer needs a hand-written
 row at all, since the first person creates the managed `default` one. Planned
 resolution unchanged: a nicer editor is a card concern.
 
+**Split again in 0.6.0, and this time to make the first form shorter**
+(ADR-0020 §1 and §2). The target editor becomes `target` (five fields) then
+`target_advanced` (the other nine); the person editor becomes `person_outputs`
+(two fields) then `person_advanced` (`wake_time`, `summary`). It is still one
+whole target or person written at a time, and each half now writes only its
+own fields, so editing a priority cannot reset an audience. The four step ids
+are public names from 0.6.0 (`docs/contract.md` §v0.6): documents and cards
+link to them.
+
 ## 2026-09-07 — S1 — the Companion `device_id` path is unverified on a real device
 
 `Switchboard._resolve_persons` matches the `device_id` carried by a
@@ -212,6 +229,12 @@ Neither issue has been filed against home-assistant/core yet. Planned
 resolution: file (2) and link the issue number here; (1) is now a
 nice-to-have rather than a gap.
 
+**Written up in 0.6.0** (ADR-0020 §9): `docs/upstream/` carries a ready-to-file
+draft of (2), with the reproduction and the exact core lines — the flag is
+unenforceable for every handle `async_call_later` and `async_call_at` create as
+well, not only for the alert's repeat. Still not filed; filing is the
+maintainer's.
+
 **Still open in 0.5.0, and still only those three tests.** The episode tests
 of ADR-0019 §5 drive a real `alert.*` too, but they end it by moving the
 watched entity out of the alert state, which reaches `end_alerting` and
@@ -296,6 +319,12 @@ kept because the *reasoning* above is what the ADR had to answer.
   `notify_switchboard.silence` is running, their queue goes out immediately.
   `wake_time` stays the upper bound, so nothing waits longer than it did.
   Pinned by `tests/acceptance/test_s5_early_flush.py`.
+- **Widened in 0.6.0** (ADR-0020 §3): that early flush is now reachable
+  *without* a wake time. A person who never opened the advanced step and is
+  silenced by a `schedule.*` — the one silence entity that publishes its own
+  end, as `next_event` — has their message deferred until that end instead of
+  dropped with `silenced`. A silence that publishes no end still drops, which
+  is the boundary `tests/acceptance/test_s6_person_editor.py` pins.
 
 What replaces this entry as the open question is narrower: a deferral now also
 carries a **time-to-live** (ADR-0019 §1), which is scoped per priority and per
@@ -353,7 +382,16 @@ performs is not affected: the `alert.*` entity survives it, so a later
 `→ idle` still arrives. Planned resolution: an upstream issue asking
 `AlertEntity` to read its watched entity's state at `async_added_to_hass`.
 
+**Drafted in 0.6.0** (ADR-0020 §9): `docs/upstream/` carries it, with the core
+lines showing that the subscription is made in `AlertEntity.__init__` and that
+nothing ever reads the watched entity's current state. Still not filed.
+
 ## 2026-09-07 — S5 — a flushed deferral can leave the day's figures short
+
+> **Moved to [`accepted-deviations.md`](accepted-deviations.md) in 0.6.0**
+> (ADR-0020 §8). It is not a finding: it is the visible consequence of
+> `not_in_audience` deliberately not counting, which is a decision, not an
+> oversight. Kept here in full so the history stays readable.
 
 A deferral counted in `sensor.switchboard_deferred_today` whose person has left
 the row's audience overnight re-decides at the flush to `not_in_audience` — the
