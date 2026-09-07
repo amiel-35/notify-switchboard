@@ -30,3 +30,7 @@ No end-user documentation or HACS listing is ever published under the
 with the existing Node.js project. The rename happened before the
 adapter's first tagged release, so no installs or HACS repository
 registrations needed to migrate.
+
+> **Correction (2026-09-07):** the `cast-notifier` repository was archived,
+> superseded by core's own `notify: platform: tts`. This ADR is kept as the
+> record of the naming decision.

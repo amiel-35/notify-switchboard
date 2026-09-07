@@ -2,7 +2,7 @@
 
 Dépôt : https://github.com/FernandoZueet/messages_store
 Analyse factuelle uniquement, sans copie de code. Comparé au contrat
-[`docs/notify-switchboard-contract-v0.md`](../notify-switchboard-contract-v0.md).
+[`docs/contract.md`](../contract.md).
 
 ## 1. Nature et fiche d'identité
 
