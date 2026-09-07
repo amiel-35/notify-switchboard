@@ -7,26 +7,35 @@ Notify Switchboard never delivers a notification. It receives a request on
 already-existing `notify.*` services should receive it, and calls them. It
 creates no channel of its own and no dependency on an external service.
 
+```mermaid
+flowchart LR
+    BS["binary_sensor.*<br/>state that persists"] --> AL
+    EV["event.* / automation<br/>a one-off fact"] --> SW
+    AL["alert.*<br/>repeat, acknowledge, back to idle"]
+    AL -- "listed in notifiers:" --> SW
+    AL -. "or watched directly, in observer mode" .-> SW
+    SW["notify.switchboard_SLUG<br/>routing table, decision, episodes"]
+    SW --> PH["notify.mobile_app_*<br/>Companion phones"]
+    SW --> PN["notify.persistent_notification<br/>the dashboard drawer"]
+    SW --> TTS["notify.SPEAKER<br/>core's own tts notify platform,<br/>aimed at a Music Assistant player"]
+    SW --> SAT["notify.satellite_*<br/>Assist Satellite Notifier"]
+    PH -- "Acknowledge or Snooze tapped" --> SW
+    AL --> CARDS["Cards<br/>a separate repository"]
+    SW --> CARDS
 ```
-             state that persists              one-off fact
-                    |                               |
-             binary_sensor.*                  event.* / automation
-                    |                               |
-                 alert.*  -- notifiers --> notify.switchboard_<slug> <-- notify.send_message
-          (repeat, ack, done)                       |                     (entity, degraded)
-        (or: observer mode watches alert.*)         |
-                                                    v
-                       routing table: target -> priority, alert.*, audience
-                                                    |  per person:
-                                                    |  in the audience?
-                                                    |  present, if the rule requires it?
-                                                    |  silenced (schedule / input_boolean read, never owned)?
-                                                    |  priority that overrides? active snooze?
-                                                    v
-                notify.mobile_app_<person>   notify.<voice adapter>   notify.persistent_notification
-                                |
-                 "Acknowledge" / "Snooze" --> router --> alert.turn_off (allow-list) / stored snooze
-```
+
+*What the map does not show:* the decision itself (the next diagram does that),
+the six `notify_switchboard.*` domain services a card calls, and the stored
+snoozes and temporary silences. Every box on the right is a `notify.*` service
+or entity that exists **before** this integration is installed: the switchboard
+creates no channel of its own. A speaker is not a special case — core's own
+legacy `platform: tts` notify platform
+(`homeassistant/components/tts/notify.py`) makes any `media_player` a
+`notify.*` service, and aiming it at a Music Assistant player is what buys
+pause and resume. Two sibling adapters that used to sit where that box is,
+**Cast Notifier** and **AirPlay Notifier**, were archived on 2026-09-07 for
+exactly that reason; **Assist Satellite Notifier** stays, in maintenance mode,
+because `assist_satellite` has no `notify` platform of its own.
 
 Cards (a separate repository) read `alert.*` and this integration's own
 entities. There is no intermediate "house" sensor.
@@ -42,7 +51,7 @@ entities. There is no intermediate "house" sensor.
 | `services.py` | The six `notify_switchboard.*` domain services — the five acting ones (v0.2, ADR-0016) and the read-only `explain` (v0.4, ADR-0018): schemas and registration only, every decision delegated to `dispatcher.py`. |
 | `notify.py` | The degraded `NotifyEntity`. |
 | `entity.py`, `sensor.py`, `binary_sensor.py`, `event.py` | Contract §3.5 entities. |
-| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. From v0.4 it also discovers a person's Companion outputs and Focus sensors out of the `mobile_app` config entries, bootstraps the managed `default` target, and drives the two test steps. |
+| `config_flow.py`, `validation.py` | Options flow and its pure validation rules. It discovers a person's Companion outputs and Focus sensors out of the `mobile_app` config entries, bootstraps the managed `default` target, and drives the two test steps (v0.4). Since v0.6 the two editors are split in two steps each — `target` / `target_advanced` and `person_outputs` / `person_advanced` — and v0.7 adds a third target step, `target_escalation`. |
 
 The pure/impure split is what makes the decision engine unit-testable at 100 %
 branch coverage without a `HomeAssistant` instance.
@@ -60,7 +69,9 @@ unchanged.
 at **decision time**, from entities that already exist: the router owns no
 timer and no counter of its own for any of it.
 
-1. **The effective priority.** `data.priority` overrides the target's
+1. **The target.** A slug the routing table does not know is dropped with
+   `unknown_target`, and a `repairs` issue is raised once.
+2. **The effective priority.** `data.priority` overrides the target's
    `default_priority` as it always has; then, when the target carries
    `escalate_when_nobody_home` and **no** person of its audience is in the
    literal state `home`, the priority is raised **one step** —
@@ -69,20 +80,68 @@ timer and no counter of its own for any of it.
    bare outputs is not an empty house. From here on, "the priority" means the
    escalated one, everywhere: the silence and snooze bypass,
    `authenticationRequired`, the `routed` event and the critical payload.
-2. **The audience, entry by entry, split by domain.** An entry in the `notify`
-   domain is a **bare output** and skips steps 3 to 5 entirely; anything else
-   is a person, known or not.
-3. **The presence rule** of the target, against the person's `person.*` state.
+3. **The audience, entry by entry, split by domain.** An entry in the `notify`
+   domain is a **bare output** and skips steps 5 to 7 entirely; anything else
+   is a person, known or not. Two `notify` services can never be an audience
+   entry — `notify.notify`, the undifferentiated fan-out this router exists to
+   replace, and `notify.send_message`, the entity action, whose schema requires
+   an `entity_id`. The options flow hides both from the picker and
+   `validation.py` refuses either typed by hand, so neither ever reaches
+   `decide`. `notify.persistent_notification` is deliberately allowed.
+4. **The episode filter**, for a `done` message only, and before anything
+   below it. A call carrying `data.switchboard_done` — or observer mode's own
+   `on|off → idle` message — reaches only the audience entries that target's
+   open episode actually recorded; every other entry is dropped with
+   `not_notified`. A target with no `alert_entity` has no episodes, so the key
+   changes nothing there.
+5. **The presence rule** of the target, against the person's `person.*` state.
    The escalation never overrides it: a `home_only` target with nobody home
    drops every person with `presence`, escalated or not.
-4. **Silence**, unless the priority is `critical`. A configured silence entity
+6. **Silence**, unless the priority is `critical`. A configured silence entity
    that is `on` catches this call when it carries no `min_priority` state
    attribute, or when the call's priority is **below** the floor that
    attribute names. The strictest `on` silence decides, and an unreadable
    floor is ignored, so the entity silences everything: a floor fails towards
    quiet. A temporary `notify_switchboard.silence` carries no floor.
-5. **Snooze**, unless the priority is `critical`.
-6. **The outputs.** A person's, or the bare output's single one.
+7. **Snooze**, unless the priority is `critical`.
+8. **The outputs.** A person's, or the bare output's single one.
+
+A person the persons table does not know is dropped with `unknown_person`
+before step 5, and every configured person a target does *not* name is
+recorded as `not_in_audience` at the end — recorded, not counted (see
+[`accepted-deviations.md`](accepted-deviations.md) §3).
+
+Deferral is not part of `decide`: it is what `dispatcher.Switchboard._async_defer`
+does with a `silenced` drop, and the next diagram places it where it happens.
+
+```mermaid
+flowchart TD
+    IN(["An alert's notifiers list, observer mode, notify.switchboard_SLUG, or the degraded entity"]) --> T
+    T{"Target in the table?"} -- no --> DUT["dropped, unknown_target"]
+    T -- yes --> P["Priority: the caller's over the target's, one step up when nobody is home"]
+    P --> B{"Audience entry: a notify.* service, or a person?"}
+    B -- "a bare output" --> BARE["Delivered now. No presence, silence, snooze, deferral or router key"]
+    B -- "a person" --> D{"A back-to-normal the episode never reached?"}
+    D -- yes --> DNN["dropped, not_notified"]
+    D -- no --> PR{"Presence rule allows it?"}
+    PR -- no --> DPR["dropped, presence"]
+    PR -- yes --> SIL{"A silence on that catches this priority?"}
+    SIL -- yes --> DEF{"Their own silence, and a night with a known end?"}
+    DEF -- yes --> Q["queued until the night ends"]
+    DEF -- no --> DSI["dropped, silenced"]
+    SIL -- no --> SN{"A snooze running for this person and target?"}
+    SN -- yes --> DSN["dropped, snoozed"]
+    SN -- no --> OUT["Each of their outputs is called: a registered legacy notify.* service, else a notify entity"]
+```
+
+*What the path does not show:* a `critical` message walks past the two silence
+and snooze questions rather than answering them; the `unknown_person` and
+`not_in_audience` branches; the `recursion` refusal an output pointing back at
+`notify.switchboard*` earns, which can sit *beside* a delivery when a person
+has one good output and one bad; and everything that happens to a queued
+message, which is the deferral diagram further down. Everything from the
+audience question downwards runs **once per audience entry**, and the whole
+diagram runs once per target named in the call.
 
 ## Output contract
 
@@ -93,14 +152,19 @@ merged `data`.
 An output is resolved in one fixed order (ADR-0021 §6): a **registered legacy
 notify service** first, which is what every output that works today is, then a
 `notify` **entity id**, delivered through `notify.send_message` with `message`
-and `title` and nothing else. A legacy service and an entity share one
-namespace, so the order is stated rather than discovered. The router resolves
-the entity itself before calling — absent from the state machine, or
-`unavailable`, is a missing output — because `notify.send_message` is an entity
-service and core logs and skips an entity it cannot resolve rather than
-raising, so calling and hoping would count a delivery that never happened.
+and `title` and nothing else — no `data`, so no target `default_data`, no
+caller key, no tag, no buttons and no critical payload. A legacy service and an
+entity share one namespace, so the order is stated rather than discovered. The
+router resolves the entity itself before calling — absent from the state
+machine, or `unavailable`, is a missing output — because `notify.send_message`
+is an entity service and core logs and skips an entity it cannot resolve rather
+than raising, so calling and hoping would count a delivery that never happened.
+The `title` is sent only to an entity whose published `supported_features`
+declares `NotifyEntityFeature.TITLE`, or that publishes none at all; that is
+one step further than ADR-0021 §6 asks, and why is in
+[`accepted-deviations.md`](accepted-deviations.md) §5.
 
-Decisions taken in Sprint 1, where the contract left room:
+Where the contract left room, the router settled it like this:
 
 - **Companion buttons are added only to outputs whose service name starts with
   `mobile_app_`.** Other outputs get the merged `data` without `actions` and
@@ -108,6 +172,10 @@ Decisions taken in Sprint 1, where the contract left room:
   the router adds, `tag` included (ADR-0019 §6, amendment 2026-09-07 (2)):
   what an output receives is the caller's `data` merged with the target's
   `default_data`, plus only the keys that output reads.
+- **`data.priority` is removed from what a `mobile_app_*` output receives**,
+  unconditionally, since 0.7.0. It is a router input, not a Companion key. See
+  "The critical payload, per OS" below; every other kind of output still
+  receives it untouched.
 - **`authenticationRequired` is written both at the top level of `data` and on
   each action.** The acceptance suite pins the top-level key; the per-action
   key is what the Companion app actually reads.
@@ -124,11 +192,20 @@ Decisions taken in Sprint 1, where the contract left room:
 - **A partially recursive output list still delivers.** If a person has one
   `switchboard_*` output and one real one, the real one is used and a
   `recursion` drop is recorded alongside.
-- **A silenced message with a `wake_time` is deferred, not dropped**, and is
-  therefore not counted as a drop. Deferrals are de-duplicated on
-  `(person, target, tag)`; since 0.5.0 the `tag` half is always populated (the
-  target's default `switchboard-<slug>` when the caller supplies none), so an
-  untagged message still de-duplicates on `(person, target)` in practice.
+- **A silenced message whose night has a known end is deferred, not dropped**,
+  and is therefore not counted as a drop. Two conditions, both in
+  `_async_defer`: one of the person's **own** silence entities is `on` (a
+  temporary `notify_switchboard.silence` is an hour of requested quiet, not a
+  night), and there is an instant to wake up at — the person's `wake_time`,
+  or, since 0.6.0 (ADR-0020 §3), the end their silence publishes when they have
+  none. Exactly one core domain publishes such an end today: a `schedule`
+  entity's `next_event` attribute. An `input_boolean` and a Focus
+  `binary_sensor` publish nothing, so a person with neither a wake time nor a
+  schedule is dropped with `silenced`, as in 0.1 → 0.5. Deferrals are
+  de-duplicated on `(person, target, tag)`; since 0.5.0 the `tag` half is
+  always populated (the target's default `switchboard-<slug>` when the caller
+  supplies none), so an untagged message still de-duplicates on
+  `(person, target)` in practice.
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
   right local hour (`dispatcher.next_wake_time`).
@@ -139,55 +216,49 @@ Decisions taken in Sprint 1, where the contract left room:
   is already late, instead of rescheduling it for the following day. The
   `(person, target, tag)` key still de-duplicates, so nothing is sent twice.
 
-### The deferral lifecycle (v0.5, ADR-0019)
+### The deferral lifecycle (v0.5, ADR-0019; v0.6, ADR-0020 §3)
 
 A deferral is a promise that a message is *late*, not that it is eternal, and
 not that the decision that queued it is still true. From 0.5.0 the queue has
-**four** entry points into a flush and four possible outcomes per message.
+**four** entry points into a flush, and a message leaves it expired, dropped,
+delivered or folded into a summary — or does not leave it at all.
 Three of them -- the wake-time timer and the two early flushes of §4, the last
 configured silence going `off` and a `notify_switchboard.unsilence` that lifts
 the last silence there was -- reach it through `_async_schedule_flush` and
 therefore share one config-entry task; the fourth, the catch-up of overdue
 deferrals at setup, calls the flush inline.
 
+```mermaid
+stateDiagram-v2
+    [*] --> Queued: silenced, with a night that has a known end
+    Queued --> Flush: the wake time arrives
+    Queued --> Flush: the last silence entity goes off
+    Queued --> Flush: unsilence lifts the last silence
+    Queued --> Flush: overdue at setup, the catch-up
+    Flush --> Expired: the time-to-live has run out
+    Flush --> Queued: still silenced, so kept and re-armed
+    Flush --> Dropped: re-decided and refused
+    Flush --> Delivered: one survivor, or no summary
+    Flush --> Summarised: several survivors, summary on
+    Expired --> [*]
+    Dropped --> [*]
+    Delivered --> [*]
+    Summarised --> [*]
 ```
-                 silenced + wake_time
-inbound message ─────────────────────► queued  (deferred_today +1)
-                                         │
-              wake_time timer  ──────────┤
-              last silence entity off ───┤   (early flush, §4)
-              unsilence, last silence ───┤   (early flush, §4)
-              overdue at setup ──────────┘   (catch-up, inline)
-                                         │
-                        ┌────────────────┴────────────────┐
-                        │ 1. time-to-live (§1)            │
-                        │    queued_at + ttl <= now ?     │
-                        └────────────────┬────────────────┘
-                          yes │          │ no
-                     ┌────────▼───┐      │
-                     │  expired   │      │
-                     │  (dropped) │      │
-                     └────────────┘      │
-                        ┌────────────────▼────────────────┐
-                        │ 2. the whole decision again (§3)│
-                        │    router.decide, fresh context,│
-                        │    the message's own priority   │
-                        └────────────────┬────────────────┘
-              silenced │      routed │             │ any other reason
-          ┌────────────▼──┐  ┌───────▼──────┐  ┌───▼──────────────┐
-          │ kept + re-arm │  │  survivor    │  │ dropped for real │
-          └───────────────┘  └───────┬──────┘  │ (presence,       │
-                                     │         │  snoozed, ...)   │
-                        ┌────────────▼───────┐ └──────────────────┘
-                        │ 3. one or many (§2)│
-                        └────────────┬───────┘
-                     1 survivor,     │      2+ survivors and
-                     or summary off  │      summary on
-                        ┌────────────▼──┐   ┌──────────────────────┐
-                        │ delivered as  │   │ one summary per      │
-                        │ 0.4.0 did     │   │ output, tags collapsed│
-                        └───────────────┘   └──────────────────────┘
-```
+
+*What the lifecycle does not show:* the three steps inside **Flush** run in
+that order — the time-to-live first, then the whole routing decision over a
+fresh context, then the one-or-many question — so a message that has expired is
+never re-decided. Nor does it show that queueing bumps
+`sensor.switchboard_deferred_today` while every arrow that *leaves* **Flush**
+is counted, as a routed message or as a drop with its own reason; that a
+`recursion` refusal can be counted beside a survivor that goes out anyway;
+that a summary is built rather than merged, and each of its lines counts as
+one routed message;
+or that the two middle arrows into **Flush** are ADR-0019 §4's early flushes,
+and that the three scheduled entry points share one config-entry task while the
+catch-up runs inline. Bare outputs never appear here at all: they are delivered
+now or not delivered.
 
 - **The scheduled entry points go through one task.** `_async_schedule_flush` hands the
   flush to a task of the config entry's own, so it never runs inside the timer
@@ -281,7 +352,7 @@ is loaded; a call made while none is refuses with the translated
 entry owning the domain's services safe. The read-only `explain` of v0.4 joins
 them under exactly the same rules (see "Explainability" below).
 
-Decisions taken in Sprint 2, where the contract left room:
+Where the contract left the UI services room, they settled it like this:
 
 - **Validation lives in one place.** `Switchboard.acknowledge_is_allowed`,
   `_require_target`, `_require_person`, `_require_persons` and
@@ -337,7 +408,10 @@ Decisions taken in Sprint 2, where the contract left room:
 
 A kitchen speaker, a wall tablet's toast overlay: a thing that can be told
 something, with no presence, no phone and no bedtime. An `audience` entry in
-the `notify` domain is one, and the domain is the whole rule.
+the `notify` domain is one, and the domain is the whole rule — with two
+exceptions the options flow refuses before anything is stored,
+`notify.notify` and `notify.send_message` (`router.is_component_service_output`
+says why each one cannot be a recipient).
 
 `decide` turns such an entry into its own `RoutedDelivery` with `person=None`
 and exactly one output. It has no presence rule, no silence, no snooze, no
@@ -411,8 +485,8 @@ lazily, in `build_context`, the way snoozes already do; and on an
 `async_track_point_in_time` timer per person, so
 `binary_sensor.<person>_silenced` returns to `off` at the minute the silence
 lifts rather than at the next notification. That entity gains an `until`
-attribute while a temporary silence runs; `sources` keeps its Sprint 1
-meaning (the configured entities only).
+attribute while a temporary silence runs; `sources` keeps the meaning it has
+had since 0.1.0 (the configured entities only).
 
 Night deferral is deliberately **not** extended to temporary silence: a
 message silenced only by a `notify_switchboard.silence` is dropped, because
@@ -441,10 +515,37 @@ the episode's end. Everything is persisted with the snoozes, the deferrals and
 the temporary silences (store minor version 4).
 
 A `done` message — observer mode's `on|off → idle` message, or any call
-carrying `data.switchboard_done: true` — reaches only the persons in that set;
-everybody else in the audience is dropped with `not_notified`, before the rest
-of the decision runs. A target with no `alert_entity` has no episodes at all, so
-that key routes to the whole audience there, exactly like any other message.
+carrying `data.switchboard_done: true` — reaches only the audience entries in
+that set; everybody else in the audience is dropped with `not_notified`, before
+the rest of the decision runs. A target with no `alert_entity` has no episodes
+at all, so that key routes to the whole audience there, exactly like any other
+message.
+
+```mermaid
+stateDiagram-v2
+    [*] --> NoEpisode
+    NoEpisode --> Open: the alert goes idle to on
+    Open --> Closed: the alert returns to idle
+    Closed --> Announced: observer mode only, the back-to-normal reaches the recorded recipients
+    Announced --> Cleared: their notifications are cleared, tag by tag
+    Cleared --> Open: the next episode replaces it
+    Closed --> Open: the next episode replaces it
+    note right of Open
+        Every delivery writes the person,
+        the outputs that answered
+        and the tag into the record.
+    end note
+```
+
+*What the episode lifecycle does not show:* the `on → off` transition, which is
+an acknowledgement and changes nothing here — the alert is still firing. Nor
+does it show that the announce-and-clear half is **observer mode's alone**: a
+target driven by its alert's own `notifiers:` list keeps an episode, and its
+recipients still filter a `done` message, but the router sends nothing and
+clears nothing for it. Also absent: `clear_done`, which extends the clear to
+the back-to-normal message itself; the bare outputs recorded in the same
+record, which are told it is over but can never be cleared; and the store
+write behind each transition.
 
 **Every outgoing message carries a name.** `data.tag` defaults to
 `switchboard-<slug>`, `switchboard-<slug>-done` for a `done` message and
@@ -458,11 +559,13 @@ That name is the router's own key, so it travels no further than the outputs
 that read it: the **default** `tag` is written on `mobile_app_*` outputs and on
 `persistent_notification` (where it is the source of the id), and nowhere else.
 Every other output gets the caller's `data` merged with the target's
-`default_data` and nothing added — the router is a proxy, and the sibling
-adapters of this suite refuse an unknown `data` key by design (AirPlay
-Notifier's `PREVENT_EXTRA` schema, Assist Satellite Notifier's
-`ALLOWED_DATA_KEYS`), so a stray router key is a `ServiceValidationError` on
-every call rather than harmless noise. The effective tag is still computed for
+`default_data` and nothing added — the router is a proxy, and an adapter that
+validates its `data` refuses an unknown key by design, so a stray router key is
+a `ServiceValidationError` on every call rather than harmless noise. That is
+not hypothetical: it is the bug 0.5.1 fixed, and Assist Satellite Notifier's
+`ALLOWED_DATA_KEYS` is the surviving example (AirPlay Notifier's
+`PREVENT_EXTRA` schema was the other, before that repository was archived).
+The effective tag is still computed for
 every message: the episode record, the de-duplication key and the closing
 sequence all read it. The `done` message deliberately does **not** share the
 episode's tag: `clear_done` defaults to off, and a message carrying
@@ -526,6 +629,16 @@ translated `detail` naming the deciding object, and the `notify.*` services the
 message would reach (`outputs`) or that are configured but not registered
 (`missing_outputs`).
 
+Two top-level keys came with v0.7 (ADR-0021 §8). `escalated` names the rule
+that raised the priority, and is `null` when nothing did — including on a
+target that has the flag on and nobody home but was already `critical`, because
+a rule that changed nothing is not an answer to "why is this louder than I
+configured?". The top-level `priority` reports the **escalated** priority for
+the same reason. The other new key, the top-level `outputs`, lists the target's
+bare outputs: they are not persons, so they have nowhere else to appear.
+Since 0.7.1 `detail` names devices, presence rules, importance floors and
+whereabouts in words rather than raw values, in the instance language.
+
 It is a **pure evaluation** — `Switchboard.build_context()` and `router.decide`,
 and nothing else. No `notify.*` call, no counter, no
 `event.switchboard_delivery`, no queued deferral, no `Store` write. That is not
@@ -571,6 +684,36 @@ setup (an options change reloads the entry, which is when the gap closes), and
 after setup because at setup the `alert` component may not exist yet. The
 `async_call_later` handle joins `Switchboard._unsubs`, so unloading the entry
 cancels a grace check that has not fired.
+
+## The editors, and the words on them
+
+The options flow has two editors and each is split in two, so that the first
+form somebody meets is short and nothing they are not editing can be
+overwritten. A target is `slug`, `name`, `alert_entity`, `audience` and
+`observer_mode` on the `target` step; the other nine fields live on
+`target_advanced`, with the same choices and the same defaults, so a target
+created from the basic step alone routes exactly as a fully-filled one would.
+A person is outputs and silence entities on `person_outputs`, wake time and
+`summary` on `person_advanced`. **Each half writes only its own fields**, which
+is the point: changing a phone cannot erase somebody's night. Those four step
+ids are public names (contract v0.6). `escalate_when_nobody_home` sits on a
+third, internal step of its own, `target_escalation`, rather than on
+`target_advanced` where ADR-0021 put it —
+[`accepted-deviations.md`](accepted-deviations.md) §4 says why.
+
+The `class` field of a target was removed in 0.6.0. Nothing ever read it; a
+value already stored is ignored rather than migrated or deleted.
+
+From 0.7.1 every screen, label, error, warning, entity name and action
+description is written in plain language, in French, English and Spanish:
+people, devices and targets appear under the names the household gave them,
+and an entity id is shown only where somebody has to go somewhere and change
+something. Importance and presence are picked from translated labels rather
+than `info` / `normal` / `high` / `critical` and `always` / `home_only` /
+`away_only`. **Nothing beneath the screens moved** — entity ids, service names,
+option keys and stored values are unchanged, which is why this document and the
+contract keep using the stored vocabulary. The mapping between the two is the
+"Words used in the interface" table in [`../README.md`](../README.md#glossary).
 
 ## Why both a legacy service and an entity
 
@@ -628,7 +771,8 @@ target's `default_data`, which is where a user's secrets end up and which a
 state attribute would make world-readable, nor a person's `outputs`. Both
 attributes are declared `_unrecorded_attributes`: they are configuration, they
 change only on an options edit, and their history is not worth a database row
-per state write.
+per state write. The entity publishes no `state_class` either, so a count of
+targets is not compiled into long-term statistics.
 
 Counters reset at local midnight (`homeassistant/helpers/event.py`,
 `async_track_time_change`). They are `SensorStateClass.TOTAL` with an explicit
@@ -666,9 +810,10 @@ per sprint.
 | Suite S0 | Foundations: repo, template, CI, dev instance | CI green on the skeleton; `hassfest` passes |
 | Suite S1 | Router v0.1: routing table, per-person decision, acknowledge / snooze buttons, night deferral, observer mode, diagnostics, config flow | A test alert routes to a present phone, not to an absent one; silence blocks unless `critical`; acknowledging from a phone stops the repeat; a 1 h snooze holds across a restart |
 | Suite S2 | Router v0.2: five UI services (acknowledge/snooze/unsnooze/silence/unsilence), temporary person-wide silence, per-target `message`/`done_message`/`default_title` | A card silences somebody for an hour and the message is dropped, not lost; a snooze the target does not offer is refused with a translated error |
-| Suite S3 | `notify-cast` v0.1: a `notify` per Cast speaker that talks — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard in the kitchen |
-| Suite S4 | `notify-airplay` v0.1: same for AirPlay speakers — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard on an AirPlay speaker |
-| Suite S5 | `notify-alexa` v0.1: same via Alexa Media Player | An announcement is heard on an Echo |
+| Suite S3 | `notify-cast` (Cast Notifier): a `notify` per Cast speaker that talks | **Archived 2026-09-07** — core's own `notify: platform: tts`, aimed at a Music Assistant player, does the same on any `media_player` |
+| Suite S4 | `notify-airplay` (AirPlay Notifier): the same for AirPlay speakers | **Archived 2026-09-07** — same reason |
+| Suite S5 | `notify-alexa` via Alexa Media Player | **Not planned** — core's Alexa Devices integration ships `Speak` and `Announce` entities |
+| Suite S5b | `assist-satellite-notifier` (Assist Satellite Notifier) v0.1: a `notify` service and entity per `assist_satellite` | Shipped, **maintenance mode since 2026-09-07** — the one adapter of the suite that still fills a gap, because `assist_satellite` has no `notify` platform of its own. Never exercised on real hardware |
 | Suite S6 | Cards v0.1: alert bubble, silence tiles | The wall shows active alerts and can acknowledge them |
 | Suite S7 | Blueprints + docs site | An external user routes an alert in ten minutes |
 | Suite S8 | HACS default submission, quality scale silver | HACS acceptance |
@@ -679,12 +824,21 @@ in sibling repositories per the umbrella doctrine. The quickstart
 (`blueprints/automation/notify_switchboard/`) landed early, ahead of the
 suite S7 line that planned them.
 
+The voice lines are the part of this roadmap that reality overtook. Home
+Assistant does have a `notify` service that speaks — core's legacy
+`platform: tts` platform (`homeassistant/components/tts/notify.py`) turns any
+`media_player` into a `notify.*` service — so two of the three adapters the
+suite planned were redundant with core and were archived rather than
+maintained. What the router needed from them it now gets from a five-line YAML
+block, documented in `README.md` and `docs/quickstart.md`. Nothing in the
+router changed: a speaker was always just another `notify.*` service to it.
+
 ### Router roadmap
 
 The router has its own sprint sequence inside those lines, numbered
-independently of the suite roadmap above: suite S3 is `notify-cast`, router S3
+independently of the suite roadmap above: suite S3 was `notify-cast`, router S3
 is a router release, and the two S7 lines have nothing to do with each other.
-**Router S6 is done** and is what 0.6.0 ships; **router S7 is in progress** and is what 0.7.0 will ship.
+The latest release is **0.7.1**; router S8 is written up but has not started.
 
 | Router # | Router increment | State |
 |---|---|---|
@@ -692,9 +846,11 @@ is a router release, and the two S7 lines have nothing to do with each other.
 | Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | Shipped (0.3.0) |
 | Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` target, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | Shipped (0.4.0) |
 | Router S5 | Night: time-to-live on a deferral, one wake-time summary, a full re-decision at the flush, an early flush when the silence really ends, episodes and cleared notifications (ADR-0019) | Shipped (0.5.0, 0.5.1) |
-| Router S6 | Consolidation: a five-field target editor and a two-field person editor with their advanced steps, `class` removed, an optional wake time with a documented meaning, one vocabulary, a glossary, a migration guide, and documents that match the code (ADR-0020) | **Done — 0.6.0** |
-| Router S7 | Escalation and places, reduced: one step up when nobody is home, a scheduled priority floor carried by a silence entity, `sensor.switchboard_routing_table`, acknowledgement authorship in the `acknowledged` event, audience entries and outputs that are not people, and a critical payload translated per OS (ADR-0021) | In progress — 0.7.0 |
-| Later | Unscheduled, each needing an ADR of its own: escalation after N minutes, a delivery cap, labels on a target (the successor of `class`), a per-target authentication override, and intents — the deferred list of ADR-0021 §9, each with the native answer that stands in for it today | Not scheduled |
+| Router S6 | Consolidation: a five-field target editor and a two-field person editor with their advanced steps, `class` removed, an optional wake time with a documented meaning, one vocabulary, a glossary, a migration guide, and documents that match the code (ADR-0020) | Shipped (0.6.0) |
+| Router S7 | Escalation and places, reduced: one step up when nobody is home, a scheduled priority floor carried by a silence entity, `sensor.switchboard_routing_table`, acknowledgement authorship in the `acknowledged` event, audience entries and outputs that are not people, and a critical payload translated per OS (ADR-0021) | Shipped (0.7.0) |
+| Router S7.1 | Plain language: the whole interface — setup, options menu, field labels, errors, warnings, entity names, action descriptions — rewritten for somebody who does not read code, in three languages, with `notify.persistent_notification` offered in the pickers. No routing rule, no option, no stored data changed | Shipped (0.7.1) |
+| Router S8 | "A first alert without code": the slug derived from the name rather than typed, observer mode on by default so the `alert:` snippet only appears when it is off, a menu in three blocks, confirmation before a removal, a night `schedule` helper created for a person, and a summary line in the pickers (`docs/sprints/sprint-8-brief.md`) | **Proposed, not started** — awaiting the maintainer, and an ADR-0022 with a contract v0.8 addendum, because the frozen `target` field list changes |
+| Later | Unscheduled, each needing an ADR of its own: escalation after N minutes, a delivery cap, labels on a target (the successor of `class`), a per-target authentication override, a per-person priority floor, an acknowledgement history sensor, a `places` object, and intents — the deferred list of ADR-0021 §9, each with the native answer that stands in for it today | Not scheduled |
 
 ## Engineering rules learned
 
@@ -709,8 +865,10 @@ Reviews of the suite's Cast and AirPlay voice adapters surfaced the same
 class of bug twice, for the same underlying reason: Home Assistant core
 never retires a legacy `notify.*` service on its own, and never
 re-registers one that already exists (`homeassistant/components/notify/
-legacy.py` returns early in that case). Any integration that registers a
-legacy `notify` platform must therefore handle this itself:
+legacy.py` returns early in that case). Both repositories have since been
+archived, but the rule outlived them — this integration registers a legacy
+platform too, and so does Assist Satellite Notifier. Any integration that
+registers a legacy `notify` platform must handle this itself:
 
 1. Remove its own service in `entry.async_on_unload`, and clear its own
    entry out of `hass.data[NOTIFY_SERVICES]` — otherwise a config entry
@@ -758,7 +916,7 @@ for its own concurrent fixes — works in its own
 | [0011](ADR/0011-frozen-contract-and-contract-test.md) | Frozen input contract and a contract test |
 | [0012](ADR/0012-roadmap-reordered.md) | Roadmap reordered — acknowledge, cards and blueprints before voice |
 | [0013](ADR/0013-source-unavailability-as-blueprint.md) | Source-unavailability monitoring ships as a blueprint, not in the router |
-| [0014](ADR/0014-cast-notifier-name.md) | The Cast voice adapter is named "Cast Notifier" |
+| [0014](ADR/0014-cast-notifier-name.md) | The Cast voice adapter is named "Cast Notifier" (the repository was archived on 2026-09-07; the ADR is kept as the record of the naming decision) |
 | [0015](ADR/0015-refusals-raise-service-validation-error.md) | A refused notification raises `ServiceValidationError`, never fails silently |
 | [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-target message texts |
 | [0017](ADR/0017-debts-and-robustness.md) | Debts and robustness — frozen ids under any language, parallel fan-out, canonical callbacks, services without an entry |
