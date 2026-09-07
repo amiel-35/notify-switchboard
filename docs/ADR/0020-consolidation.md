@@ -337,13 +337,15 @@ and `snooze_minutes` are required until the routing-table entity ships in
 
 ## Alternatives rejected
 
-**Hide the advanced fields behind a collapsible section of one form.** This is
-what every UI toolkit would do and Home Assistant cannot do it: a config or
-options flow renders one voluptuous schema per step
-(`$HA_CORE_SRC/homeassistant/data_entry_flow.py`, `async_show_form` line 706),
-and there is no "collapsed", "section" or "expert" marker a selector can carry
-that hides a field from the first render. A second step *is* the collapsible
-section here.
+**Hide the advanced fields behind a collapsible section of one form.**
+Possible in core 2026.9.1: `data_entry_flow.section` with `collapsed: True`
+(`homeassistant/data_entry_flow.py`, line 939) groups fields of one form and
+folds them by default — the first version of this ADR wrongly said no such
+marker existed (corrected 2026-09-07 after the 0.6.0 implementation). Rejected
+anyway, for a different reason: a section has no step id, so the cards and the
+documentation could not link to "the advanced settings of a target", and the
+`target_saved` snippet step would have to sit after a longer form. A second
+step *is* the collapsible section here, and it has a public name.
 
 **Keep `class` "for later".** It costs one line to keep and it looks free. It
 is not: it is a field on the form this release exists to shorten, a key in the
