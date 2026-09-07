@@ -305,7 +305,7 @@ counters.
    1552) schedules `loop.call_at(loop.time() + delay,
    _run_async_call_action, hass, job)` at line 1570, so `args[0]` is the
    `HomeAssistant` object and the flag is never seen; `async_call_at` (line
-   1532) has the same shape at line 1548. The same is true of
+   1533) has the same shape at line 1548. The same is true of
    `_TrackPointUTCTime.async_attach` (line 1461), which schedules
    `loop.call_at(..., self)` at line 1464, so `args[0]` is the dataclass —
    which is why `AlertEntity._schedule_notify`
