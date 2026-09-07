@@ -86,7 +86,8 @@ user-facing concept: no TTL, no summary, no escalation, no new option key.
   issue registry is persisted and neither of those two was ever deleted, so the
   warning outlived the very change it asked for. Creating the missing routing
   row now clears its `unknown_target` repair on the reload; an output clears
-  its `missing_output` repair on the first call that succeeds, or when it is
+  its `missing_output` repair on the first call that succeeds — restart or
+  not, the deletion no longer depends on an in-memory counter — or when it is
   removed from every person's outputs.
 - **A person lost from the counters.** When one person's delivery raised an
   unexpected error, the fan-out logged it and moved on without counting that

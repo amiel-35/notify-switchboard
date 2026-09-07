@@ -633,9 +633,13 @@ class Switchboard:
             return False
 
         # The output answered: whatever the repair said about it is no longer
-        # true, and nothing else would ever delete a persisted issue.
-        if self.failing_outputs.pop(output, 0) > MAX_CONSECUTIVE_OUTPUT_MISSES:
-            ir.async_delete_issue(self.hass, DOMAIN, f"missing_output_{output}")
+        # true, and nothing else would ever delete a persisted issue. The
+        # deletion is unconditional because the issue registry outlives this
+        # process while the counter does not -- after a restart the repair is
+        # still on screen with an empty `failing_outputs`. Deleting an issue
+        # that is not there is a no-op (`issue_registry.async_delete`).
+        self.failing_outputs.pop(output, None)
+        ir.async_delete_issue(self.hass, DOMAIN, f"missing_output_{output}")
         return True
 
     @callback
@@ -1348,7 +1352,8 @@ class Switchboard:
         cleared for every slug the new table knows, and `missing_output_<x>`
         for every output no person routes to any more (an output that is still
         configured is cleared instead by the first call that succeeds, in
-        `_async_call_output`).
+        `_async_call_output` — unconditionally there, since the in-memory
+        counters do not survive a reload either).
         """
         for slug in self.table.targets:
             ir.async_delete_issue(
