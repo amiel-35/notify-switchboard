@@ -125,6 +125,14 @@ Rules that make the shape unambiguous:
   `dropped` / `not_in_audience`. That is the single most likely question
   ("why does Bob never get this one?") and refusing it would send the user
   back to reading the options.
+- **One answer per person, even when `decide` produces two.** A person whose
+  outputs include a `switchboard*` service yields both a routed delivery and a
+  `recursion` drop today. `explain` reports the routed answer — that is what
+  would happen — and leaves the recursive services out of `outputs`, where
+  they do not belong, and out of `missing_outputs`, which is about services
+  that are absent, not about services that are refused. The options flow
+  refuses such an output at config time, so this is only reachable through a
+  hand-edited `.storage` file.
 - **An unknown target, or a `person` the router does not know, raises**
   `ServiceValidationError` with the existing translation keys
   `unknown_target` / `unknown_person`, like every other service (ADR-0015).
@@ -169,8 +177,9 @@ custom_value=True, sort=False))`
 (`homeassistant/helpers/selector.py`, `SelectSelectorConfig` line 1883,
 `SelectOptionDict` line 1869). `custom_value` keeps the 0.1 behaviour of
 typing a service that does not exist yet — a phone that has not registered,
-an output created later — and `sort=False` is load-bearing: the frontend
-would otherwise re-sort the list and destroy the ordering below.
+an output created later — and `sort` stays at its default `False`, which is
+load-bearing rather than incidental: the frontend sorts when asked to, and a
+sorted list destroys the ordering below.
 
 The option list is **every registered `notify.*` service except this
 integration's own** (`switchboard`, `switchboard_<slug>`), read from
@@ -311,7 +320,11 @@ every alert during startup would train users to ignore it. The check runs once,
 **60 seconds** and lives in `dispatcher.py`, as a plain module constant, for
 exactly the reason `OUTPUT_TIMEOUT_SECONDS` does (ADR-0017 §3): it is a
 backstop, not a tuning knob, and the acceptance suite must be able to reach
-past it without waiting a minute. Issues for a slug the table no longer has,
+past it without waiting a minute. The handle `async_call_later` returns joins
+`Switchboard._unsubs`, so unloading the entry cancels a grace check that has
+not fired yet — a config entry that leaves a live timer behind is exactly the
+class of bug ADR-0017's `_async_stop_event` note is about. Issues for a slug
+the table no longer has,
 or for a row that no longer names an alert, are deleted at setup; a row whose
 alert has since appeared has its issue deleted at the next grace check.
 
