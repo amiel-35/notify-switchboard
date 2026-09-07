@@ -680,6 +680,36 @@ async def test_the_ttl_step_writes_the_mapping_only_when_it_differs(
     assert suggested_value(result, "normal") is None
 
 
+async def test_editing_a_person_carries_the_ttl_policy_through(
+    hass: HomeAssistant,
+) -> None:
+    """The options flow's working copy is built key by key, so it can lose one.
+
+    `_load` rebuilds `self._options` from four named keys rather than copying
+    the stored dict, which is what keeps a hand-edited file from smuggling a
+    shape the rest of the flow does not expect. `ttl_minutes` is optional and
+    new in v0.5, so it has to be named there explicitly: without it, editing a
+    person -- a step that has nothing to do with the night -- would write the
+    whole options back without the household's expiry policy.
+    """
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _options_step(hass, entry, "ttl", {"info": 30})
+    await hass.async_block_till_done()
+    assert entry.options["ttl_minutes"] == {"info": 30, "normal": None, "high": None}
+
+    await _add_person(
+        hass, entry, outputs=["mobile_app_alice", "persistent_notification"]
+    )
+    await hass.async_block_till_done()
+
+    assert entry.options[CONF_PERSONS][0]["outputs"] == [
+        "mobile_app_alice",
+        "persistent_notification",
+    ], "the edit itself landed"
+    assert entry.options["ttl_minutes"] == {"info": 30, "normal": None, "high": None}
+
+
 async def test_summary_and_clear_done_are_written_only_when_they_differ(
     hass: HomeAssistant,
 ) -> None:
