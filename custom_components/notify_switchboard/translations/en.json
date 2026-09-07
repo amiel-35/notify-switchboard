@@ -5,6 +5,35 @@
     "snooze_minutes": "Snooze {minutes} min",
     "back_to_normal": "Back to normal"
   },
+  "entity": {
+    "binary_sensor": {
+      "silenced": {
+        "name": "Silenced"
+      }
+    },
+    "event": {
+      "delivery": {
+        "name": "Delivery"
+      }
+    },
+    "sensor": {
+      "active_snoozes": {
+        "name": "Active snoozes"
+      },
+      "deferred_today": {
+        "name": "Deferred today"
+      },
+      "dropped_today": {
+        "name": "Dropped today"
+      },
+      "last_notification": {
+        "name": "Last notification"
+      },
+      "routed_today": {
+        "name": "Routed today"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -169,6 +198,10 @@
     "invalid_service_calls_many": {
       "title": "A card or script keeps calling with values that do not exist",
       "description": "notify_switchboard services have now been refused for more than {count} different targets or persons. Rather than one warning per value, this single issue stands for all of them. Something is generating names that are not in the routing table — most often a template that renders to the wrong thing. Fix the caller; this warning goes away when the integration is reloaded."
+    },
+    "person_without_user_id": {
+      "title": "A person is not linked to a Home Assistant user",
+      "description": "{person} receives notifications with Acknowledge or Snooze buttons, but their person entity is not linked to a Home Assistant user. Notify Switchboard therefore cannot tell who pressed a button, and applies the action to everybody in the target's audience instead. Link them under Settings > People, then reload Notify Switchboard."
     }
   },
   "exceptions": {
@@ -192,6 +225,9 @@
     },
     "no_audience": {
       "message": "The target {target} has nobody in its audience."
+    },
+    "no_loaded_entry": {
+      "message": "Notify Switchboard has no loaded configuration entry, so it cannot act. Add or re-enable its entry, then try again."
     }
   },
   "services": {

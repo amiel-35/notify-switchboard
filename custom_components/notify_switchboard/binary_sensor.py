@@ -40,7 +40,7 @@ class SilencedBinarySensor(SwitchboardPersonEntity, BinarySensorEntity):
 
     def __init__(self, switchboard: Switchboard, person: PersonConfig) -> None:
         """Initialise `binary_sensor.<person>_silenced`."""
-        super().__init__(switchboard, person, "silenced", "Silenced")
+        super().__init__(switchboard, person, "silenced")
 
     @property
     def is_on(self) -> bool:

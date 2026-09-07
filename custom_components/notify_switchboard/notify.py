@@ -36,13 +36,19 @@ class SwitchboardNotifyEntity(SwitchboardGlobalEntity, NotifyEntity):
 
     platform_domain = "notify"
     _attr_supported_features = NotifyEntityFeature.TITLE
+    # The one entity of the integration that carries no name of its own: it is
+    # the router itself, so with `has_entity_name` it reads as its device's
+    # name and needs no `entity.notify.*.name` translation (ADR-0017 §2 lists
+    # seven translated entities; this is not one of them).
+    _attr_name = None
+    _attr_translation_key = None
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise the entity."""
-        super().__init__(switchboard, "entity", None)
+        super().__init__(switchboard, "entity")
         # The contract fixes the entity id; `SwitchboardGlobalEntity` would
         # have derived `notify.switchboard_entity` from the unique_id kind.
-        self.entity_id = f"{self.platform_domain}.{LEGACY_SERVICE_NAME}"
+        self._freeze_object_id(LEGACY_SERVICE_NAME)
 
     async def async_send_message(self, message: str, title: str | None = None) -> None:
         """Route to the default target with the default priority."""

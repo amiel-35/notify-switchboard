@@ -66,7 +66,7 @@ class RoutedTodaySensor(DailyCounterSensor):
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `sensor.switchboard_routed_today`."""
-        super().__init__(switchboard, "routed_today", "Routed today")
+        super().__init__(switchboard, "routed_today")
 
     @property
     def native_value(self) -> int:
@@ -79,7 +79,7 @@ class DroppedTodaySensor(DailyCounterSensor):
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `sensor.switchboard_dropped_today`."""
-        super().__init__(switchboard, "dropped_today", "Dropped today")
+        super().__init__(switchboard, "dropped_today")
 
     @property
     def native_value(self) -> int:
@@ -102,7 +102,7 @@ class DeferredTodaySensor(DailyCounterSensor):
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `sensor.switchboard_deferred_today`."""
-        super().__init__(switchboard, "deferred_today", "Deferred today")
+        super().__init__(switchboard, "deferred_today")
 
     @property
     def native_value(self) -> int:
@@ -125,7 +125,7 @@ class LastNotificationSensor(SwitchboardPersonEntity, SensorEntity):
 
     def __init__(self, switchboard: Switchboard, person: PersonConfig) -> None:
         """Initialise `sensor.<person>_last_notification`."""
-        super().__init__(switchboard, person, "last_notification", "Last notification")
+        super().__init__(switchboard, person, "last_notification")
 
     @property
     def native_value(self) -> datetime | None:
@@ -141,7 +141,7 @@ class ActiveSnoozesSensor(SwitchboardPersonEntity, SensorEntity):
 
     def __init__(self, switchboard: Switchboard, person: PersonConfig) -> None:
         """Initialise `sensor.<person>_active_snoozes`."""
-        super().__init__(switchboard, person, "active_snoozes", "Active snoozes")
+        super().__init__(switchboard, person, "active_snoozes")
 
     @property
     def native_value(self) -> int:

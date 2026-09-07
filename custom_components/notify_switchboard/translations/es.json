@@ -5,6 +5,35 @@
     "snooze_minutes": "Posponer {minutes} min",
     "back_to_normal": "Todo ha vuelto a la normalidad"
   },
+  "entity": {
+    "binary_sensor": {
+      "silenced": {
+        "name": "En silencio"
+      }
+    },
+    "event": {
+      "delivery": {
+        "name": "Entrega"
+      }
+    },
+    "sensor": {
+      "active_snoozes": {
+        "name": "Pospuestas activas"
+      },
+      "deferred_today": {
+        "name": "Aplazadas hoy"
+      },
+      "dropped_today": {
+        "name": "Descartadas hoy"
+      },
+      "last_notification": {
+        "name": "Última notificación"
+      },
+      "routed_today": {
+        "name": "Encaminadas hoy"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -169,6 +198,10 @@
     "invalid_service_calls_many": {
       "title": "Una tarjeta o un script llama sin parar con valores que no existen",
       "description": "Los servicios notify_switchboard se han rechazado ya para más de {count} destinos o personas distintos. En lugar de un aviso por valor, este único problema los representa a todos. Algo está generando nombres que no están en la tabla de enrutamiento — casi siempre una plantilla que no renderiza lo que se cree. Corrige a quien llama; este aviso desaparece al recargar la integración."
+    },
+    "person_without_user_id": {
+      "title": "Una persona no está vinculada a un usuario de Home Assistant",
+      "description": "{person} recibe notificaciones con botones Confirmar o Posponer, pero su entidad person no está vinculada a ningún usuario de Home Assistant. Por eso Notify Switchboard no puede saber quién ha pulsado, y aplica la acción a toda la audiencia del destino. Vincúlela en Ajustes > Personas y recargue Notify Switchboard."
     }
   },
   "exceptions": {
@@ -192,6 +225,9 @@
     },
     "no_audience": {
       "message": "El destino {target} no tiene a nadie en su audiencia."
+    },
+    "no_loaded_entry": {
+      "message": "Notify Switchboard no tiene ninguna entrada de configuración cargada, así que no puede actuar. Añada o reactive su entrada e inténtelo de nuevo."
     }
   },
   "services": {

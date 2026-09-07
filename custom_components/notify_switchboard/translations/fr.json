@@ -5,6 +5,35 @@
     "snooze_minutes": "Reporter {minutes} min",
     "back_to_normal": "Tout est revenu à la normale"
   },
+  "entity": {
+    "binary_sensor": {
+      "silenced": {
+        "name": "En silence"
+      }
+    },
+    "event": {
+      "delivery": {
+        "name": "Remise"
+      }
+    },
+    "sensor": {
+      "active_snoozes": {
+        "name": "Reports en cours"
+      },
+      "deferred_today": {
+        "name": "Reportées aujourd'hui"
+      },
+      "dropped_today": {
+        "name": "Écartées aujourd'hui"
+      },
+      "last_notification": {
+        "name": "Dernière notification"
+      },
+      "routed_today": {
+        "name": "Acheminées aujourd'hui"
+      }
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -169,6 +198,10 @@
     "invalid_service_calls_many": {
       "title": "Une carte ou un script appelle sans cesse avec des valeurs inexistantes",
       "description": "Des services notify_switchboard ont été refusés pour plus de {count} cibles ou personnes différentes. Plutôt qu'un avertissement par valeur, celui-ci les représente toutes. Quelque chose produit des noms absents de la table de routage — le plus souvent un modèle qui ne rend pas ce qu'on croit. Corrigez l'appelant ; cet avertissement disparaît au rechargement de l'intégration."
+    },
+    "person_without_user_id": {
+      "title": "Une personne n'est pas reliée à un utilisateur Home Assistant",
+      "description": "{person} reçoit des notifications avec des boutons J'ai vu ou Reporter, mais son entité person n'est reliée à aucun utilisateur Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à toute l'audience de la cible. Reliez-la dans Paramètres > Personnes, puis rechargez le Standard de notification."
     }
   },
   "exceptions": {
@@ -192,6 +225,9 @@
     },
     "no_audience": {
       "message": "La cible {target} n'a personne dans son audience."
+    },
+    "no_loaded_entry": {
+      "message": "Le Standard de notification n'a aucune entrée de configuration chargée, il ne peut donc rien faire. Ajoutez ou réactivez son entrée, puis réessayez."
     }
   },
   "services": {
