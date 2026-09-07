@@ -1,6 +1,6 @@
 # Accepted deviations
 
-Three places where this integration knowingly bends one of its own stated
+Four places where this integration knowingly bends one of its own stated
 principles, and what each one bought. They are **not** findings: nobody
 reported them, nothing is waiting to be fixed, and none of them is a
 compromise made under time pressure. They are design the maintainer chose,
@@ -116,6 +116,40 @@ one short.
 
 ---
 
+## 4. `escalate_when_nobody_home` is not on `target_advanced`
+
+**The deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md)'s
+Consequences say "the options flow gains one boolean on `target_advanced`".
+0.7.0 puts it on a step of its own, `target_escalation`, reached from an
+options-menu entry and its picker.
+
+**The principle it bends.** An ADR is normative, and an implementation that
+does not do what its ADR says is the failure mode ADR-0011 exists to prevent.
+
+**Why it was accepted.** The two normative documents disagree, and the older
+one is the frozen contract. `docs/contract.md` §"v0.6 addendum" →
+"Four options-flow step ids are public" **enumerates** what `target_advanced`
+holds — `default_priority`, `presence_rule`, `allow_acknowledge`,
+`snooze_minutes`, `default_data`, `message`, `done_message`, `default_title`,
+`clear_done`, nine fields — and the v0.7 addendum does not amend that list. The
+acceptance suite pins the same nine, exactly and in order
+(`tests/acceptance/test_s6_target_editor.py::test_target_advanced_holds_
+everything_else_with_unchanged_defaults`), and those tests are frozen. Adding a
+tenth field would have contradicted the contract *and* required editing a
+frozen test to ship a sentence from a non-frozen section of an ADR.
+
+The same contract section says the steps it does not list — the confirmation,
+the pickers — "are internal and may change", so a new internal step is the one
+place the field could go without amending anything. What the ADR actually asks
+for, a boolean in the options flow, is delivered; where it sits is the half
+that moved.
+
+**What would change it.** An ADR that amends contract v0.6's list of what
+`target_advanced` holds, and the acceptance test that pins it. Until then, a
+step id has been added and none has been renamed.
+
+---
+
 ## What would change any of these
 
 Each one has a shape that would make it native, and none of them is closed:
@@ -127,6 +161,9 @@ Each one has a shape that would make it native, and none of them is closed:
 3. If the dropped counter ever grows a per-reason breakdown that a dashboard
    can filter, `not_in_audience` can be counted like everything else without
    drowning the headline number.
+4. If a future ADR amends the contract's list of what `target_advanced` holds,
+   `escalate_when_nobody_home` moves onto it and `target_escalation`
+   disappears.
 
 Anything that changes one of them needs an ADR, exactly as the decision to
 accept it did.
