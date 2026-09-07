@@ -20,8 +20,9 @@ defined once, in the [Glossary](../README.md#glossary).
 
 ## The one rule that makes this safe
 
-**Rollback is one line.** A target that turns out to be wrong is deleted in
-**Configure → Remove a target**, and the alert it was attached to is untouched:
+**Rollback is one menu action.** A target that turns out to be wrong is
+deleted in **Configure → Remove a target**, and the alert it was attached to is
+untouched:
 its `notifiers:` list, its `repeat:`, its `can_acknowledge:` are yours, not the
 router's. An automation you have not edited yet still calls the phone directly
 and always will.
@@ -66,6 +67,9 @@ with this:
 - action: notify.switchboard
   data:
     message: "The washing machine is done"
+    # The nesting is not a typo: the outer `data:` is the action's own, and
+    # the inner one is the notify payload — the same `data:` an `alert:` block
+    # carries, and where the router reads `priority`, `tag` and the rest.
     data:
       priority: info
 ```
@@ -105,7 +109,10 @@ For an alert you already have, tick **Observer mode**. The router watches that
 alert's state itself: nothing in your YAML changes, no restart is needed, and
 you can turn it off again with one click. The old `notifiers:` list keeps
 working next to it, so for a day or two both paths fire and you can compare —
-then empty the `notifiers:` list when you trust the target.
+then empty the `notifiers:` list when you trust the target. That last edit is
+YAML and `alert` has no reload action of its own (core ships only `turn_on`,
+`turn_off` and `toggle`), so it takes a restart to apply. Turning observer mode
+*on* did not, which is why it is the half you do first.
 
 The other way round — leaving observer mode off and adding
 `- switchboard_<slug>` to `notifiers:` — is the one to pick when you want the

@@ -39,7 +39,7 @@ return loop.call_at(loop.time() + delay, _run_async_call_action, hass, job).canc
 so `handle._args` is `(hass, job)` and `args[0]` is the `HomeAssistant`
 object, never a `HassJob`.
 
-**`async_call_at`** (line 1532) has the same shape at line 1548:
+**`async_call_at`** (line 1533) has the same shape at line 1548:
 
 ```python
 return hass.loop.call_at(loop_time, _run_async_call_action, hass, job).cancel
@@ -119,7 +119,9 @@ Expected: `still scheduled after: 0`.
 
 ## Possible fixes
 
-Not a preference, just what the options look like from outside:
+Not a preference, just what the options look like from outside. **None of
+these has been written or tested** — they are sketches to say what shape a
+fix might take, not patches.
 
 1. **Make `_cancel_cancellable_timers` look for the job rather than assume its
    position** — scan `handle._args` for a `HassJob` with `cancel_on_shutdown`,

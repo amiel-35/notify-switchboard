@@ -8,6 +8,13 @@
 > dev en Docker, sprints = incréments fonctionnels testables, autonomie totale
 > de la session donneuse d'ordre.
 
+> **Instantané, pas référence.** Ce document a été écrit avant la 0.6.0 et
+> n'est pas remis à jour : le vocabulaire y a bougé depuis. La *classe* n'existe
+> plus (ADR-0020 §4), et ce qu'on appelle ici une *ligne de la table de
+> routage* se dit *target* (« cible ») partout ailleurs. La référence à jour
+> est [`../contract.md`](../contract.md) et le
+> [glossaire](../../README.md#glossary).
+
 ## 1. Pourquoi
 
 Dans la maison de référence : 28 alertes, 27 adresses câblées en dur vers un seul iPhone, deux

@@ -88,9 +88,23 @@ shortly after startup), because its condition is true.
 
 ## Possible fix
 
-An `async_added_to_hass` that reads the watched entity once the state machine
-is up and calls the existing `begin_alerting` when it already matches — the
-same thing `watched_entity_change` does, without waiting for an event:
+**Not written, not tested** — a sketch of the shape, not a patch.
+
+It needs two changes rather than one. `AlertEntity` does not keep the entity
+it watches: `__init__` takes `watched_entity_id` (line 43) and hands it
+straight to `async_track_state_change_event` (line 78) without storing it, so
+there is nothing to read the state of. Keeping it is the first half:
+
+```python
+        self._watched_entity_id = watched_entity_id
+        async_track_state_change_event(
+            hass, [watched_entity_id], self.watched_entity_change
+        )
+```
+
+The second is an `async_added_to_hass` that reads it once the state machine is
+up and calls the existing `begin_alerting` when it already matches — the same
+thing `watched_entity_change` does, without waiting for an event:
 
 ```python
 async def async_added_to_hass(self) -> None:

@@ -388,14 +388,6 @@ nothing ever reads the watched entity's current state. Still not filed.
 
 ## 2026-09-07 — S5 — a flushed deferral can leave the day's figures short
 
-> **Moved to [`accepted-deviations.md`](accepted-deviations.md) in 0.6.0**
-> (ADR-0020 §8). It is not a finding: it is the visible consequence of
-> `not_in_audience` deliberately not counting, which is a decision, not an
-> oversight. Kept here in full so the history stays readable.
-
-A deferral counted in `sensor.switchboard_deferred_today` whose person has left
-the target's audience overnight re-decides at the flush to `not_in_audience` — the
-one drop reason `UNCOUNTED_DROP_REASONS` deliberately does not count — and so
-leaves the queue without reappearing in `routed_today` or `dropped_today`,
-which is accepted rather than a defect because it is exactly what the live path
-already does with that decision.
+**Moved to [`accepted-deviations.md`](accepted-deviations.md) §3 in 0.6.0**
+(ADR-0020 §8): it is not a finding of its own, it is deviation 3 seen from the
+counters. The text lives there, and only there.

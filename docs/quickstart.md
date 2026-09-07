@@ -1,11 +1,12 @@
-# Quickstart: a working `notify.switchboard` in ten minutes
+# Quickstart: a working `notify.switchboard` in about ten minutes
 
-Ten minutes is the real path, measured end to end on a fresh instance:
-install, add one person, write the `alert:` block, restart Home Assistant,
-watch a notification arrive. The restart and the YAML are in the ten — they
-are most of it. The shortest part, and the only one that is not optional, has
-no YAML at all: add the integration, add one person — their phones and their
-Focus sensors are already filled in — and `notify.switchboard` works.
+About ten minutes is the real path on a fresh instance — an estimate from the
+steps below, not a stopwatch reading: install, add one person, write the
+`alert:` block, restart Home Assistant, watch a notification arrive. The
+restart and the YAML are in the ten — they are most of it. The shortest part,
+and the only one that is not optional, has no YAML at all: add the
+integration, add one person — their phones and their Focus sensors are already
+filled in — and `notify.switchboard` works.
 
 It follows the public contract in [`contract.md`](contract.md); read that file
 if you need the exact rules (which priority overrides silence, what happens

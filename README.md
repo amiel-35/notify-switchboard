@@ -32,8 +32,9 @@ Notify Switchboard exposes:
   `message` and `title`, so it routes to the default target with priority
   `normal`.
 
-Every word in bold on this page is defined once, in the [Glossary](#glossary)
-at the bottom.
+The vocabulary this page uses — target, person, output, audience, silence,
+snooze, wake time, deferral, summary, episode, observer mode — is defined once,
+in the [Glossary](#glossary) at the bottom.
 
 A call carries `message`, `title` and `data` (`priority`, `source_entity`,
 `tag`, and anything else, merged over the target's default data). For every
@@ -354,10 +355,10 @@ anything.
 | **Audience** | The people a target is for. Anybody else is not considered at all — not notified, and not counted as dropped. |
 | **Presence rule** | Whether a person's `person.*` state has to be `home`, has to be away, or does not matter. The only thing here still called a rule. |
 | **Silence** | A person is silent while one of their own silence entities is `on` (a `schedule`, an `input_boolean`, an iPhone Focus sensor) or while a temporary `notify_switchboard.silence` is running. Only `priority: critical` gets through. |
-| **Snooze** | One person stopping one target for a chosen number of minutes, from a notification button or from `notify_switchboard.snooze`. |
+| **Snooze** | One target stopped for a chosen number of minutes, from a notification button or from `notify_switchboard.snooze`. The button snoozes it for the person who pressed it; the service called without a `person` snoozes it for the target's whole audience. |
 | **Wake time** | The hour a person's night silence is treated as over. Optional: without one, a queue is flushed when the silence itself says it ends. |
 | **Quiet hours** | *Not a concept of this integration.* It is what a silence entity and a wake time add up to, and it is the phrase most people arrive with. |
-| **Deferral** | A message held back rather than dropped, because the person is silent and their night has a known end. It is re-decided in full when it is flushed, and it expires. |
+| **Deferral** | A message held back rather than dropped, because the person is silent by one of their own silence entities *and* their night has a known end — their wake time, or the end that silence publishes. A temporary `notify_switchboard.silence` alone is not a night: such a message is dropped, not deferred. It is re-decided in full when it is flushed, and it expires. |
 | **Summary** | The single notification a person receives when more than one deferral survives the flush, instead of one per message. On by default. |
 | **Episode** | What the router remembers between an alert's `idle → on` and its return to `idle`: who was actually told, on which outputs, under which tags. It is what makes a back-to-normal message reach only the people who heard the alarm. |
 | **Observer mode** | The router watching a target's alert itself rather than waiting to be called as one of its `notifiers:`. The recommended way to wire a target. |
@@ -377,7 +378,8 @@ anything.
 - [Accepted deviations](docs/accepted-deviations.md) — the three places where
   this integration knowingly bends one of its own principles, and what each one
   bought.
-- [Quickstart](docs/quickstart.md) — route your first alert in ten minutes.
+- [Quickstart](docs/quickstart.md) — route your first alert in about ten
+  minutes.
 - [Migrating an existing installation](docs/migration-guide.md) — where to
   start when you already have inline `notify.mobile_app_*` calls and a handful
   of `alert:` blocks.
