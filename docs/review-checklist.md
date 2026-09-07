@@ -33,8 +33,6 @@ everything else is a finding (blocking or accepted).
 - [ ] Snoozes persisted and restored (restart test present).
 - [ ] Time logic tested across midnight and a DST change; uses HA timezone helpers (`dt_util`).
 - [ ] Config entry migration path exists (`version`/`minor_version`, `async_migrate_entry`).
-- [ ] (voice adapters, ADR-0018) Legacy service name persisted in `entry.data`, collision suffix chosen against persisted names, recomputed only on title change; registration checks `has_service` and never steals; retract only what this entry registered — with rename-onto-existing-title, reconfigure-first-of-two and delete-first-of-two tests.
-- [ ] (voice adapters, ADR-0018) `data.priority` accepts exactly `info | normal | high | critical`; only `critical` acts; `data.volume` decides loudness, never bypasses quiet hours.
 
 ## E. Quality
 - [ ] Acceptance tests from the brief pass unmodified; new tests cover new branches; coverage threshold kept.
