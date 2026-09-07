@@ -99,14 +99,18 @@ Decisions taken in Sprint 1, where the contract left room:
 
 A deferral is a promise that a message is *late*, not that it is eternal, and
 not that the decision that queued it is still true. From 0.5.0 the queue has
-**two** entry points into a flush and four possible outcomes per message.
+**three** entry points into a flush and four possible outcomes per message.
+Two of them -- the wake-time timer and the early flush of §4 -- reach it
+through `_async_schedule_flush` and therefore share one config-entry task; the
+third, the catch-up of overdue deferrals at setup, calls the flush inline.
 
 ```
                  silenced + wake_time
 inbound message ─────────────────────► queued  (deferred_today +1)
                                          │
               wake_time timer  ──────────┤
-              last silence entity off ───┘   (early flush, §4)
+              last silence entity off ───┤   (early flush, §4)
+              overdue at setup ──────────┘   (catch-up, inline)
                                          │
                         ┌────────────────┴────────────────┐
                         │ 1. time-to-live (§1)            │

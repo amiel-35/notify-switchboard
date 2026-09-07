@@ -352,3 +352,12 @@ that `test_s5_episode.py::test_the_episode_recipients_survive_a_reload`
 performs is not affected: the `alert.*` entity survives it, so a later
 `→ idle` still arrives. Planned resolution: an upstream issue asking
 `AlertEntity` to read its watched entity's state at `async_added_to_hass`.
+
+## 2026-09-07 — S5 — a flushed deferral can leave the day's figures short
+
+A deferral counted in `sensor.switchboard_deferred_today` whose person has left
+the row's audience overnight re-decides at the flush to `not_in_audience` — the
+one drop reason `UNCOUNTED_DROP_REASONS` deliberately does not count — and so
+leaves the queue without reappearing in `routed_today` or `dropped_today`,
+which is accepted rather than a defect because it is exactly what the live path
+already does with that decision.
