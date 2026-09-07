@@ -93,26 +93,30 @@ fresh install would come up with `sensor.switchboard_<french words>` — every
 `alert:`, card and automation written against the documented names broken on
 exactly the instances the translation was added for.
 
-The mechanism that prevents it is `Entity.suggested_object_id`
-(`homeassistant/helpers/entity.py`, property at line 748). By default it
-returns the entity's name rendered through
-`self.platform_data.object_id_platform_translations` — the localized name
-above. Overridden to return the frozen English object id, it is used verbatim:
-`_async_derive_object_ids` (`homeassistant/helpers/entity_platform.py`, line
-1295) hands it to `EntityRegistry.async_get_or_create` as
-`suggested_object_id`, which "has priority over `object_id_base`" and "will
-not be prefixed with the device name"
-(`homeassistant/helpers/entity_registry.py`, lines 1357-1361). The name the
-user sees still comes from `Entity.name`, which reads
+The mechanism that prevents it is setting `self.entity_id` in `__init__`,
+which the platform records as `internal_integration_suggested_object_id`
+(`homeassistant/helpers/entity_platform.py`, lines 886-909) and which
+`_async_derive_object_ids` (lines 1297-1329) passes to
+`EntityRegistry.async_get_or_create` as `suggested_object_id` — the value that
+"has priority over `object_id_base`" and "will not be prefixed with the device
+name" (`homeassistant/helpers/entity_registry.py`, lines 1355-1361). The name
+the user sees still comes from `Entity.name`, which reads
 `platform_data.platform_translations` — the instance language.
 
-Setting `self.entity_id` in `__init__`, which 0.2.0 does, reaches the same
-result through `internal_integration_suggested_object_id`
-(`homeassistant/helpers/entity_platform.py`, lines 887-909) and stays
-acceptable; `suggested_object_id` is the documented, non-internal name for the
-same intent and is what this ADR asks for. Either way the requirement is
-behavioural and is what the acceptance test asserts: **frozen ids, translated
-names, under `fr` as under `en`**.
+Overriding the `Entity.suggested_object_id` property does **not** work for an
+entity that has `has_entity_name` and a device — which is every entity of this
+integration: `_async_derive_object_ids` leaves `is_base` True on that path, so
+the value reaches the registry as `object_id_base` and is composed with the
+device name (`sensor.switchboard_switchboard_routed_today`, observed while
+implementing 0.3.0). The first version of this ADR named that property as the
+mechanism; corrected on 2026-09-07 after the 0.3.0 review verified the core
+code paths above. The requirement is behavioural and is what the acceptance
+test asserts: **frozen ids, translated names, under `fr` as under `en`**.
+
+Deferral flushes (`_async_flush_deferrals`, `_async_catch_up_deferrals`) stay
+sequential across messages and persons and parallel only within one message's
+outputs: §3 governs one routing decision, and queue order is preserved on
+purpose.
 
 Existing installs are unaffected regardless: a registry entry keeps the
 entity id it was created with, whatever the integration suggests later. The
