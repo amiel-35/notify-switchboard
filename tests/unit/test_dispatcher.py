@@ -1325,6 +1325,48 @@ async def test_the_missing_output_repair_is_cleared_when_it_answers(
     assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
 
 
+async def test_the_missing_output_repair_is_cleared_after_a_reload(
+    hass: HomeAssistant,
+) -> None:
+    """The repair outlives the process that raised it; the fix must too.
+
+    The issue registry is persisted (`issue_registry.async_schedule_save`)
+    while `failing_outputs` is in-memory. After a restart -- a reload here --
+    the counter is empty, so a success that only deletes the issue when the
+    counter had crossed the threshold leaves the repair on screen for good,
+    for an output that works.
+    """
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    # The output is still configured, so setup does not clear the repair: only
+    # a successful call can say it is wrong.
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+    assert entry.runtime_data.switchboard.failing_outputs == {}
+
+    async_mock_service(hass, "notify", "mobile_app_ghost")
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
 async def test_the_missing_output_repair_is_cleared_when_it_is_removed(
     hass: HomeAssistant,
 ) -> None:
