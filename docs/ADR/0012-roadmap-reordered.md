@@ -34,3 +34,12 @@ cost of voice output arriving later. Because voice adapters have no
 dependency on the router's later increments (ADR-0003), they can still be
 picked up out of order if a deployment wants voice sooner — this ADR
 changes sequencing, not the architecture.
+
+**Correction (2026-09-07):** the Alexa reasoning above (core already exposes
+speak/announce entities, so no dedicated adapter is needed) turns out to
+apply to Cast and AirPlay too: core's legacy `platform: tts` notify platform
+(`homeassistant/components/tts/notify.py`) speaks on any `media_player`,
+Cast and AirPlay included. This does not change the sequencing decision
+above, but the Cast/AirPlay rows it deprioritises-not-quite-to-zero are, in
+practice, superseded rather than merely delayed — see
+`docs/ARCHITECTURE.md`'s roadmap table.

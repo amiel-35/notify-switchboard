@@ -46,6 +46,15 @@ not tagged. No public name, option, event type or drop reason changes.
   reaches.
 - `tests/acceptance/test_s5_output_keys.py` pins it: one message, three
   outputs, three different payloads — and a caller's own `tag` on all three.
+- Core already ships a `notify` that speaks: the legacy `platform: tts`
+  notify platform (`homeassistant/components/tts/notify.py`) pauses,
+  announces and resumes on a Music Assistant player, and interrupts a raw
+  Cast player. `README.md`, `docs/quickstart.md` and `docs/fr/doctrine.md`
+  now show that five-line recipe for a speaker output instead of implying
+  none exists; `docs/ARCHITECTURE.md`'s roadmap marks the sibling
+  `notify-cast` / `notify-airplay` rows superseded by it. Assist Satellite
+  Notifier is unaffected — `assist_satellite` still has no `notify` platform
+  of its own.
 
 ---
 

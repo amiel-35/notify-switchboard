@@ -23,6 +23,19 @@ Cast ou AirPlay**. Les routeurs existants (Ticker, Supernotify, Universal
 Notifier, ANS, Notifier Hub) ont chacun leur propre service et leur propre
 moteur ; aucun ne complète `alert`, tous le remplacent ou l'ignorent.
 
+> **Correction (07/09/2026).** La dernière affirmation ci-dessus est fausse :
+> core fournit déjà un `notify` qui parle, la plateforme legacy `platform:
+> tts` (`homeassistant/components/tts/notify.py`, vérifié sur le clone core
+> 2026.9.1) — `entity_id` (un moteur `tts.*`, ou l'ancien `tts_service`) plus
+> `media_player` comme cible. Visée sur un lecteur Music Assistant, l'annonce
+> met la musique en pause puis la reprend ; visée sur un lecteur Cast brut,
+> elle l'interrompt sans reprise. Conséquence : les dépôts sœurs Cast
+> Notifier et AirPlay Notifier sont largement redondants avec ce que core
+> fait déjà (leur mainteneur les archive) ; seul Assist Satellite Notifier
+> couvre un vrai trou, `assist_satellite` n'ayant aucune plateforme `notify`.
+> On ne réécrit pas le paragraphe ci-dessus pour préserver l'historique de la
+> décision — cette correction le remplace en pratique.
+
 ## 2. Principes
 
 1. **Natif d'abord.** `alert` porte l'état et le cycle de vie (répétition,

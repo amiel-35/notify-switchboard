@@ -41,6 +41,24 @@ form is already filled in for you:
   — the integration will not guess from their name.
   You can still type a service that does not exist yet: a phone that has not
   registered is tolerated and retried.
+
+  A speaker works the same way once it is a `notify.*` service. Core already
+  ships one that speaks — the legacy `platform: tts` notify platform:
+
+  ```yaml
+  notify:
+    - platform: tts
+      name: kitchen_speaker      # -> notify.kitchen_speaker
+      entity_id: tts.home_assistant_cloud
+      media_player: media_player.kitchen
+  ```
+
+  Aim it at a Music Assistant player to get pause/announce/resume; a raw
+  Cast player is interrupted. Type `notify.kitchen_speaker` into **Notify
+  services** to give it to a person, or use it as a bare target's output.
+  Assist Satellite Notifier (a sibling integration) is worth reaching for
+  only when the output is an `assist_satellite`, which has no `notify`
+  platform of its own.
 - **Silence entities** — any entity whose `on` state means "do not disturb".
   The Focus `binary_sensor` of that person's iPhones is proposed
   automatically.
