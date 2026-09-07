@@ -212,6 +212,14 @@ Neither issue has been filed against home-assistant/core yet. Planned
 resolution: file (2) and link the issue number here; (1) is now a
 nice-to-have rather than a gap.
 
+**Still open in 0.5.0, and still only those three tests.** The episode tests
+of ADR-0019 §5 drive a real `alert.*` too, but they end it by moving the
+watched entity out of the alert state, which reaches `end_alerting` and
+`self._cancel()`. Only an *acknowledgement* leaves the repeat armed, so
+`tests/conftest.py` still lists exactly the three S1/S2 tests that acknowledge
+one, and `tests/acceptance/conftest.py`'s `real_alert` fixture says so where
+somebody adding an episode test will read it.
+
 ## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
 
 `notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and
@@ -270,6 +278,29 @@ A configured silence entity that goes `off` well before the wake time does not
 trigger an early flush either: `_async_silence_changed` refreshes
 `binary_sensor.<p>_silenced` but does not re-arm the deferral timer. The message
 waits for the wake time, which is the documented promise.
+
+**Resolved in 0.5.0 (ADR-0019 §3 and §4)**, in both halves, and the entry is
+kept because the *reasoning* above is what the ADR had to answer.
+
+- The design question the first half asks is decided: a flush re-runs the whole
+  `router.decide` over a fresh `Switchboard.build_context()`, with the message's
+  **original** priority. A message that no longer routes is dropped with the
+  reason that says why — `presence`, `snoozed`, `no_outputs`,
+  `unknown_target` — and never delivered blindly. The single exception is
+  `silenced`, which still holds the message and re-arms the flush, exactly as
+  described above: that is the promise a deferral exists to keep, and it is
+  the one outcome the second decision must not treat as a drop.
+  Pinned by `tests/acceptance/test_s5_redecision.py`.
+- The early flush of the second half exists: when the last of a person's
+  configured `silence_entities` turns `off` and no temporary
+  `notify_switchboard.silence` is running, their queue goes out immediately.
+  `wake_time` stays the upper bound, so nothing waits longer than it did.
+  Pinned by `tests/acceptance/test_s5_early_flush.py`.
+
+What replaces this entry as the open question is narrower: a deferral now also
+carries a **time-to-live** (ADR-0019 §1), which is scoped per priority and per
+call but not per row. A household that wants "this row's messages are worth
+waking up for, that one's are not" has to say it through the priority.
 
 ## 2026-09-07 — S3 — two repairs that cannot clear themselves
 
