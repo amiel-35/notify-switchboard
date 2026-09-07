@@ -470,13 +470,19 @@ class Switchboard:
             return_exceptions=True,
         )
         for routed, result in zip(decision.routed, results, strict=True):
-            if isinstance(result, BaseException):  # pragma: no cover - guard
+            if isinstance(result, BaseException):
                 _LOGGER.exception(
                     "Unexpected error while delivering %s to %s",
                     routed.slug,
                     routed.person,
                     exc_info=result,
                 )
+                # `_async_deliver` accounts for every person it handles, so
+                # one that raised before doing so would leave the counters
+                # short: neither routed nor dropped. Nothing reached that
+                # person, which is the same outcome as every output failing,
+                # so it gets the same reason rather than one of its own.
+                self._async_count_drop(DROP_DELIVERY_FAILED, routed.person, routed.slug)
 
     async def _async_deliver(
         self, routed: RoutedDelivery, message: str, title: str | None
