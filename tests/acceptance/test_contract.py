@@ -16,11 +16,19 @@ authorized are `sensor.switchboard_deferred_today` entering the frozen names,
 and the frozen entity ids being frozen *in every instance language* — `fr`
 and `es` are `NATIVE_ENTITY_IDS` languages, so translating the entity names
 without care renames the ids on exactly those instances.
+
+Extended once more for the v0.4 addendum (ADR-0018): the change that sprint
+authorized is a sixth, read-only service, `notify_switchboard.explain`. Its
+name, its `SupportsResponse.ONLY` declaration and the keys of its response are
+public surface — a card and a template are written against them — so they are
+guarded here alongside the v0 names. What each key *means* is
+`test_s4_explain.py`'s business, not this file's.
 """
 
 from __future__ import annotations
 
 import pytest
+from homeassistant.core import SupportsResponse
 
 from custom_components.notify_switchboard.const import DOMAIN
 
@@ -143,3 +151,66 @@ async def test_frozen_entity_ids_do_not_depend_on_the_instance_language(
             f"{entity_id} is a frozen public name and must exist verbatim on "
             f"a '{language}' instance (docs/contract.md, ADR-0011/ADR-0017)"
         )
+
+
+# ---------------------------------------------------------------------------
+# v0.4 addendum (ADR-0018): the read-only service and its response keys
+# ---------------------------------------------------------------------------
+
+EXPLAIN_RESPONSE_KEYS = {"target", "priority", "persons"}
+EXPLAIN_PERSON_KEYS = {
+    "decision",
+    "until",
+    "reason",
+    "detail",
+    "outputs",
+    "missing_outputs",
+}
+
+
+async def test_explain_service_exists_and_only_answers(
+    hass, enable_custom_integrations, install
+):
+    """v0.4 addendum (ADR-0018): a sixth service, declared `SupportsResponse.ONLY`."""
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    assert hass.services.has_service(DOMAIN, "explain"), (
+        f"{DOMAIN}.explain must exist after setup (contract v0.4, ADR-0018)"
+    )
+    assert (
+        hass.services.supports_response(DOMAIN, "explain") is SupportsResponse.ONLY
+    ), (
+        "`explain` answers and never acts, so it is registered "
+        "`SupportsResponse.ONLY` (contract v0.4)"
+    )
+
+
+async def test_explain_response_carries_exactly_the_frozen_keys(
+    hass, enable_custom_integrations, install, mock_outputs
+):
+    """The response shape is public surface: a card is written against it."""
+    mock_outputs("mobile_app_alice")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    response = await hass.services.async_call(
+        DOMAIN, "explain", {"target": "leak"}, blocking=True, return_response=True
+    )
+
+    assert set(response) == EXPLAIN_RESPONSE_KEYS
+    assert set(response["persons"]) == {"person.alice"}, (
+        "`persons` is a mapping keyed by the `person.*` entity id (contract v0.4)"
+    )
+    assert set(response["persons"]["person.alice"]) == EXPLAIN_PERSON_KEYS

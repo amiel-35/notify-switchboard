@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.3 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.4 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -12,6 +12,11 @@
 > (`sensor.switchboard_deferred_today`), the fan-out guarantees, the callback
 > resolution order, and the availability of the five services without a loaded
 > entry. Everything above and below stays the v0 / v0.2 text, unchanged.
+>
+> v0.4 addendum (ADR-0018): one read-only service (`notify_switchboard.explain`)
+> with its response keys, one optional routing-table row key (`managed`), two
+> more `repairs` keys, and the tag carried by a test message. Everything above
+> and below stays the v0 / v0.2 / v0.3 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -25,6 +30,7 @@
 | Per-person entities | `binary_sensor.<person>_silenced`, `sensor.<person>_last_notification`, `sensor.<person>_active_snoozes` (unique_id = `<entry_id>:<person entity_id>:<kind>`) |
 | Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`, `sensor.switchboard_deferred_today` (v0.3, ADR-0017) |
 | UI services (v0.2, ADR-0016) | `notify_switchboard.acknowledge`, `notify_switchboard.snooze`, `notify_switchboard.unsnooze`, `notify_switchboard.silence`, `notify_switchboard.unsilence` |
+| Read-only service (v0.4, ADR-0018) | `notify_switchboard.explain` (`SupportsResponse.ONLY`) |
 
 ## Input (legacy service call)
 
@@ -184,6 +190,80 @@ the alert's own `done_message` attribute, then the translated
 alert's own attribute still comes first.) ADR-0017 settles a disagreement
 between this document and two non-normative ones; this document is
 authoritative.
+
+## v0.4 addendum (ADR-0018)
+
+### `notify_switchboard.explain` — a read-only service
+
+A sixth `notify_switchboard.*` service, registered like the other five as soon
+as the integration is set up (v0.3 §"Service availability" applies to it
+unchanged: with no loaded entry it raises `ServiceValidationError` with the
+translation key `no_loaded_entry`). It is declared
+`SupportsResponse.ONLY`: it must be called with `return_response: true`, and
+it answers rather than acts.
+
+| Field | Required | Meaning |
+|---|---|---|
+| `target` | yes | a routing-table slug |
+| `priority` | no | `info` / `normal` / `high` / `critical`; defaults to the row's `default_priority`, exactly as `data.priority` does on a real call |
+| `person` | no | a `person.*`; defaults to the row's whole audience |
+
+The response is a mapping with three keys — `target` (the slug evaluated),
+`priority` (the effective priority) and `persons`, itself a mapping **keyed by
+`person.*` entity id**. Each person's value has exactly these keys:
+
+| Key | Type | Meaning |
+|---|---|---|
+| `decision` | `routed` \| `deferred` \| `dropped` | what would happen to a message sent right now |
+| `until` | ISO 8601 string, or `null` | when the message would be delivered; populated for `deferred` and for nothing else |
+| `reason` | string, or `null` | one of the drop reasons already frozen above; populated for `dropped` and for nothing else. No new drop reason is introduced |
+| `detail` | string | a human-readable, translated sentence naming what decided: which silence entity is on, when a snooze lifts, the presence rule against the person's current state, the outputs a routed message would reach. Always present and non-empty |
+| `outputs` | list of `notify.*` service names | the services this message would be handed to; empty when `decision` is `dropped` |
+| `missing_outputs` | list of `notify.*` service names | outputs configured for that person that are not registered services; computed whatever the decision |
+
+Rules:
+
+- **`explain` is a pure evaluation.** It calls no `notify.*` service, changes
+  none of `sensor.switchboard_routed_today` /
+  `sensor.switchboard_dropped_today` / `sensor.switchboard_deferred_today`,
+  fires no `event.switchboard_delivery`, queues no deferral and persists
+  nothing.
+- An unknown `target`, or a `person` the router does not know, raises
+  `ServiceValidationError` exactly as the five acting services do
+  (translation keys `unknown_target` / `unknown_person`).
+- A **known** person who is simply not in the row's audience is not an error:
+  the answer is `decision: dropped`, `reason: not_in_audience`.
+
+### `managed` — one optional routing-table row key
+
+A routing-table row may carry `managed: true`. It is absent (and therefore
+false) on every row written before v0.4, and it changes nothing about routing.
+
+- The router creates one such row, slug `default`, the first time a person is
+  added while the routing table is empty, and points `default_target` at it.
+- While `managed` is true, that row's `audience` is every configured person:
+  adding a person adds them to it.
+- Editing the row through the options flow — any field — clears `managed`
+  permanently. Nothing sets it back to true.
+
+### Two more `repairs` keys
+
+Both are `is_fixable: false`, severity `warning`, translated, raised once and
+deleted when their cause disappears, exactly like `person_without_user_id`
+(v0.3):
+
+| Translation key | Raised when |
+|---|---|
+| `person_without_outputs` | a person who is in the audience of at least one row has no `outputs` at all |
+| `alert_entity_missing` | a row's `alert_entity` is still absent from the state machine 60 seconds after the config entry was set up |
+
+### The test-message tag
+
+A message sent by the options flow's "test this person" / "test this target"
+steps travels the normal routing path — it is counted, evented, deferred or
+dropped like any other message — and carries `data.tag: switchboard-test`.
+That value is public: a caller, an automation or a Companion channel may rely
+on it to tell a test from the real thing.
 
 ## Observer mode (plan B, ADR-007)
 

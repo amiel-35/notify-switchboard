@@ -74,6 +74,16 @@ real device from this project, so the device-registry lookup in
 `Switchboard._resolve_persons` is written defensively and is only the second
 choice, after `context.user_id`. See the entry below.
 
+**Load-bearing from 0.4.0** (ADR-0018 §2). What was a rule the router applied
+to outputs the user had typed is now also how the options flow *proposes*
+them: for each `mobile_app` config entry whose `user_id` matches the person's,
+`dispatcher.companion_service_name(entry.data["device_name"])` is offered
+first and labelled as that person's own device. Composing the name any other
+way — the prefix plus a separately slugified tail — would now silently propose
+nothing for a device whose name contains punctuation, instead of silently
+failing to match one. Nothing about the derivation itself changed; the entry
+is kept because the reasoning is what makes it safe to build on.
+
 ## 2026-09-06 — S1 — the options flow edits one row at a time
 
 Persons and targets are added or updated one row per step, keyed by
@@ -93,6 +103,16 @@ a validation error hands back what was typed. Before that, opening the target
 form to change one word of `message` silently reset `done_message`,
 `default_title`, `snooze_minutes` and `default_data` to their schema defaults on
 submit — a data-loss bug, not a convenience gap.
+
+**Still one row at a time in 0.4.0, and now more steps per row** (ADR-0018 §2
+and §7): the person editor is split in two (`person` picks the `person.*`,
+`person_outputs` edits it) because a form cannot react to a field it is
+showing and the discovered outputs depend on which person was chosen, and the
+row editor gains a `target_saved` confirmation step carrying the `alert:`
+snippet. What 0.4.0 does remove is the *reason* most people meet this
+limitation in their first hour: a fresh install no longer needs a hand-written
+row at all, since the first person creates the managed `default` one. Planned
+resolution unchanged: a nicer editor is a card concern.
 
 ## 2026-09-07 — S1 — the Companion `device_id` path is unverified on a real device
 
@@ -214,6 +234,13 @@ a guest account. Planned resolution: an optional per-row flag next to
 `allow_acknowledge` in a later version, never a blanket restriction on the
 domain.
 
+**One more non-admin service in 0.4.0**: `notify_switchboard.explain`
+(ADR-0018 §1). It is the least dangerous of the six — it changes nothing at
+all — but it does read the routing table back to whoever asks, including which
+`notify.*` services a person's phone maps to. That is the same information the
+options flow already shows, and the wall tablet's cards are the intended
+caller, so the decision above is unchanged rather than re-taken.
+
 ## 2026-09-07 — S2 — a deferral now re-checks silence, but only silence
 
 `Switchboard._async_flush_deferrals` used to trust its timer: whatever was
@@ -254,3 +281,12 @@ clears on the first call that succeeds, so an output that is still configured
 but never called again keeps its warning. Neither can be observed by the
 router — nothing tells it a service call it never sees would work now — so
 both are safe to dismiss in Repairs.
+
+**The two repairs added in 0.4.0 are not in that category** (ADR-0018 §5):
+`person_without_outputs` is re-evaluated on every reload, and an options change
+reloads the entry, so it disappears the moment the person is given an output;
+`alert_entity_missing` is re-evaluated at each grace check after a reload, so
+defining the missing `alert:` block and reloading clears it. This entry is kept
+as it is — the two older cases are unchanged — so that the distinction stays on
+the record: a repair this integration adds should be able to clear itself, and
+the two that cannot are the exception rather than the pattern.
