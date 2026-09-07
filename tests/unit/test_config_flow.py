@@ -740,9 +740,7 @@ async def test_the_alert_snippet_of_a_notifiers_row_still_names_the_router(
     )
 
     snippet = (result["description_placeholders"] or {})["snippet"]
-    assert yaml.safe_load(snippet)["alert"]["leak"]["notifiers"] == [
-        "switchboard_leak"
-    ]
+    assert yaml.safe_load(snippet)["alert"]["leak"]["notifiers"] == ["switchboard_leak"]
 
 
 async def test_the_test_result_is_rendered_as_a_markdown_list(

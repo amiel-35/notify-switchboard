@@ -50,9 +50,7 @@ def _dump_target(row: Any) -> Any:
         return row
     dumped = {key: value for key, value in row.items() if key != DEAD_TARGET_KEY}
     if isinstance(dumped.get(CONF_DEFAULT_DATA), dict):
-        dumped[CONF_DEFAULT_DATA] = {
-            key: REDACTED for key in dumped[CONF_DEFAULT_DATA]
-        }
+        dumped[CONF_DEFAULT_DATA] = {key: REDACTED for key in dumped[CONF_DEFAULT_DATA]}
     return dumped
 
 

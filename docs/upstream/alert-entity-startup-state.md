@@ -93,13 +93,12 @@ shortly after startup), because its condition is true.
 It needs two changes rather than one. `AlertEntity` does not keep the entity
 it watches: `__init__` takes `watched_entity_id` (line 43) and hands it
 straight to `async_track_state_change_event` (line 78) without storing it, so
-there is nothing to read the state of. Keeping it is the first half:
+there is nothing to read the state of. Keeping it is the first half — one
+line in `__init__`, just above the existing `async_track_state_change_event`
+call:
 
 ```python
-        self._watched_entity_id = watched_entity_id
-        async_track_state_change_event(
-            hass, [watched_entity_id], self.watched_entity_change
-        )
+self._watched_entity_id = watched_entity_id
 ```
 
 The second is an `async_added_to_hass` that reads it once the state machine is

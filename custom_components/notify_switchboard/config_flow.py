@@ -240,9 +240,7 @@ def _showable(errors: dict[str, str], fields: frozenset[str]) -> dict[str, str]:
     if hidden := {
         field: error for field, error in errors.items() if field not in shown
     }:
-        _LOGGER.debug(
-            "Not shown on this step, which has no field for them: %s", hidden
-        )
+        _LOGGER.debug("Not shown on this step, which has no field for them: %s", hidden)
     return shown
 
 
