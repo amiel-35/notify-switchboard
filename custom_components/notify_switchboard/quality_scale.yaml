@@ -30,11 +30,8 @@ rules:
   docs-actions:
     status: done
     comment: >-
-      services.yaml describes the five acting actions and their fields, and
-      strings.json documents explain as well; README.md "Services" and
-      docs/contract.md document what each one refuses and why. explain has no
-      services.yaml block yet, and only for the reason recorded in
-      docs/known-issues.md.
+      services.yaml describes the six actions and their fields, README.md
+      "Services" and docs/contract.md document what each one refuses and why.
   docs-conditions:
     status: exempt
     comment: This integration does not have any conditions.

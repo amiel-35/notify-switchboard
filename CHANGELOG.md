@@ -29,7 +29,9 @@ event type, no new drop reason, and one optional routing-table row key.
   row's audience is answered (`dropped` / `not_in_audience`) rather than
   refused; an unknown target or person raises `ServiceValidationError` with the
   existing translation keys, and with no loaded entry it raises
-  `no_loaded_entry` like the other five.
+  `no_loaded_entry` like the other five. Declared in `services.yaml` with
+  `en`/`fr`/`es` translations like the other five, so Developer tools > Actions
+  generates its field editor.
 - **Companion outputs are discovered, labelled and pre-selected.** The person
   editor's `outputs` field is now a multi-select of the instance's own
   `notify.*` services instead of free text. The push services of the phones
@@ -90,15 +92,6 @@ event type, no new drop reason, and one optional routing-table row key.
   now opens on "add the integration, add one person, you are done", with the
   `alert:` block, the test steps and `explain` after it; `README.md` gains My
   Home Assistant buttons for HACS and for the config flow.
-
-### Known limitation
-
-- `notify_switchboard.explain` is **not** declared in `services.yaml`, so
-  Developer tools > Actions shows it (with its translated name and description)
-  but generates no field editor for it. A frozen Sprint 2 acceptance test
-  asserts that file declares exactly the five acting services, and Sprint 4 may
-  not modify it. The block is written and commented out in `services.yaml`; see
-  `docs/known-issues.md`.
 
 ---
 
