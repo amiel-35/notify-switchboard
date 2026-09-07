@@ -155,10 +155,18 @@ class RoutingTableSensor(SwitchboardGlobalEntity, SensorEntity):
     for its custom block data). They are configuration, they change only on an
     options edit, and writing the whole routing table into the database on
     every state write would be a cost for nothing.
+
+    There is deliberately **no** `state_class`. The value is a count of
+    configuration rows: it moves only when somebody edits the options, and a
+    state class is precisely what asks the recorder to keep a long-term
+    statistical series of it (`homeassistant/components/sensor/recorder.py`
+    compiles statistics for every state-classed sensor, every hour, for ever).
+    A five-year hourly mean of "how many targets does this household have" is
+    a number nobody will ever read, in the database of everybody who installs
+    this. The unit stays, because it is what makes the state legible.
     """
 
     _unrecorded_attributes = frozenset({CONF_TARGETS, CONF_PERSONS})
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "targets"
 
     def __init__(self, switchboard: Switchboard) -> None:

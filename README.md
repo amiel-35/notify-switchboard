@@ -128,7 +128,11 @@ Anything that is not the literal `home` — a named zone, `not_home`, `unknown`,
 a person the state machine has never heard of — counts as "not home". A target
 with no person in its audience escalates nothing, and the presence rule is
 never overridden: a `home_only` target with nobody home still drops everybody
-with the reason `presence`. `notify_switchboard.explain` reports the rule under
+with the reason `presence`. That last point is the thing to check before
+turning escalation on: it only changes anything on a target whose presence
+rule lets an absent person be notified — `always` or `away_only`. Under
+`home_only` an empty house means nobody is notified at all, so there is no
+priority left to raise. `notify_switchboard.explain` reports the rule under
 its `escalated` key, and reports the raised priority.
 
 ### Observer mode, or `notifiers:`
@@ -200,12 +204,26 @@ reaches the speaker that heard the alarm and no other), and one that does not
 exist fails exactly the way a missing phone does. Until 0.7.0 it had to be
 modelled as a fake `person.*` that never moved.
 
+An episode can tell a bare output that it is over; it cannot **tidy** it. The
+clear at the end of an episode works on the identifiers the router adds — the
+`tag` a Companion app matches, the `notification_id`
+`persistent_notification` is created with — and a bare output receives none of
+them. A bare `notify.persistent_notification` therefore stays on the dashboard
+until somebody dismisses it, next to the back-to-normal message saying the
+leak is fixed. Put `persistent_notification` in a **person's** outputs instead
+whenever you want it cleared.
+
 ### Outputs that are `notify` entities
 
 Some integrations — Alexa Devices, Telegram, core's own notify groups — ship
 `notify.*` **entities** rather than legacy services. From 0.7.0 an output that
 names one is delivered through `notify.send_message`. A registered legacy
 service of the same name always wins, so nothing that works today changes.
+
+The pickers do not offer them: **Notify services** and a target's **Audience**
+both list the registered `notify.*` services, so to use an entity you type its
+entity id into the field — both fields accept a typed value — and the router
+resolves it when the message goes out.
 
 Home Assistant's entity action carries **`message` and `title` and nothing
 else**, so a target's default data, your own `data`, the default tag, the
@@ -227,8 +245,12 @@ as it always was.
 
 - **A silence can be selective.** A silence entity that is `on` and publishes a
   `min_priority` state attribute holds only the calls **below** that priority;
-  anything at or above it goes through. A core `schedule` is the documented way
-  to publish one, with no automation of your own:
+  anything at or above it goes through. `binary_sensor.<person>_silenced`
+  still reads `on` throughout: it answers "is a silence running?", not "would
+  this particular message get through?", and a floor changes only the second —
+  which is `notify_switchboard.explain`'s question, message by message. A core
+  `schedule` is the documented way to publish one, with no automation of your
+  own:
 
   ```yaml
   schedule:

@@ -274,7 +274,7 @@
       },
       "target_escalation": {
         "title": "Escalade d'une cible",
-        "description": "Ce que fait {target} quand personne de son audience n'est à la maison. Rien d'autre n'est modifié sur la cible.",
+        "description": "Ce que fait {target} quand personne de son audience n'est à la maison. Rien d'autre n'est modifié sur la cible. Ce réglage ne change quelque chose que si la règle de présence de la cible notifie les absents — always ou away_only. Avec home_only, une maison vide veut dire que personne n'est notifié : il ne reste aucune priorité à monter.",
         "data": {
           "escalate_when_nobody_home": "Monter la priorité quand la maison est vide"
         },
@@ -295,6 +295,7 @@
       "duplicate_person": "Cette personne est déjà dans la table.",
       "no_outputs": "Indiquez au moins un service notify.",
       "recursive_output": "Une sortie ne peut pas pointer sur Standard de notification.",
+      "component_service_output": "notify.notify et notify.send_message appartiennent au composant notify lui-même, pas à quelque chose qui peut être notifié. Indiquez un vrai service notify.",
       "invalid_output": "Un nom de service notify contient des caractères qu'un nom de service ne peut pas porter.",
       "invalid_entity": "Ce n'est pas un identifiant d'entité.",
       "invalid_time": "Utilisez HH:MM ou HH:MM:SS.",

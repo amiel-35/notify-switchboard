@@ -356,6 +356,20 @@ like a person. A delivered bare output is one routed delivery, reported in a
 `delivery_failed`; one resolving to `notify.switchboard*` is refused with
 `recursion`. No drop reason and no event type is added for any of it.
 
+What an episode cannot do for a bare output is **clear** it. The clear at the
+end of an observer episode is addressed by the identifiers the router adds --
+`data.tag` for a `clear_notification` push, `data.notification_id` for
+`persistent_notification.dismiss` -- and `_scope_output_data` withholds both
+from a bare output precisely because they are router keys. A bare
+`notify.persistent_notification` is therefore recorded in `episode.outputs`
+(as `persistent_notification`, the normalised name) and the dismiss does fire,
+with a `notification_id` that never labelled anything: core created the
+notification under an id of its own, and it lingers on the dashboard next to
+the back-to-normal message. Accepted, not worked around: giving a bare output
+`notification_id` would put a router key back into the payload that the whole
+of §5 exists to keep clean. `persistent_notification` in a **person's**
+outputs is the shape that gets cleared.
+
 This is the reduced form of "places" and the whole of it. The object that would
 have modelled a room is deferred (ADR-0021 §9).
 

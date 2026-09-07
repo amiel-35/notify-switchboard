@@ -274,7 +274,7 @@
       },
       "target_escalation": {
         "title": "Escalada de un destino",
-        "description": "Qué hace {target} cuando nadie de su audiencia está en casa. No se toca nada más del destino.",
+        "description": "Qué hace {target} cuando nadie de su audiencia está en casa. No se toca nada más del destino. Solo cambia algo si la regla de presencia del destino avisa a los ausentes: always o away_only. Con home_only, una casa vacía significa que no se avisa a nadie, así que no queda ninguna prioridad que subir.",
         "data": {
           "escalate_when_nobody_home": "Subir la prioridad cuando no hay nadie en casa"
         },
@@ -295,6 +295,7 @@
       "duplicate_person": "Esta persona ya está en la tabla.",
       "no_outputs": "Indica al menos un servicio notify.",
       "recursive_output": "Una salida no puede apuntar a Centralita de notificaciones.",
+      "component_service_output": "notify.notify y notify.send_message pertenecen al propio componente notify, no a algo que se pueda avisar. Indique un servicio notify real.",
       "invalid_output": "Un nombre de servicio notify contiene caracteres que un nombre de servicio no admite.",
       "invalid_entity": "Esto no es un identificador de entidad.",
       "invalid_time": "Usa HH:MM o HH:MM:SS.",

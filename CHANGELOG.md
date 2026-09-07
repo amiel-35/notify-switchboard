@@ -192,6 +192,28 @@ an advanced step without deciding what leaving it empty means would have turned
   Companion Focus sensor, a temporary `notify_switchboard.silence` — still
   drops with reason `silenced`, exactly as in 0.1 → 0.5, so no installation
   that has left the field empty since 0.1.0 changes behaviour.
+- **`sensor.switchboard_routing_table` publishes no `state_class`.** It counts
+  configuration rows: the value moves only when somebody edits the options,
+  and a state class is exactly what asks the recorder to compile hourly
+  long-term statistics for a sensor, for ever. A five-year mean of "how many
+  targets does this household have" is a number nobody will read, in the
+  database of everybody who installs this. The unit, `targets`, stays — it is
+  what makes the state legible on a card — and the two closed attributes are
+  excluded from the recorder as they already were.
+- **`notify.notify` and `notify.send_message` are refused as audience
+  entries.** A bare output is told apart from a person by its domain, and two
+  of the three services the `notify` component itself owns are in that domain.
+  `notify.notify` is the aggregate legacy service: it fans one message out to
+  every notify platform on the instance — the undifferentiated channel this
+  router exists to replace — and the episode recording the delivery cannot say
+  who was reached, so nothing it sends can be cleared or told "back to normal".
+  `notify.send_message` is the entity action, whose schema requires an
+  `entity_id`, so the call built for a bare output is invalid by construction
+  and fails every delivery. Both are already hidden from the audience picker;
+  the options flow now also refuses them when they are typed by hand, with an
+  error of their own in the three languages. **`notify.persistent_notification`
+  stays allowed**: it takes a plain `message`, it names exactly one place, and
+  it is the bare output a household uses before any phone is registered.
 
 ### Fixed
 
@@ -320,6 +342,34 @@ an advanced step without deciding what leaving it empty means would have turned
 - **`target_saved` says that ticking its checkbox defers the save** to the next
   form, which is what it does: the target is written when `target_advanced` is
   submitted.
+- **The escalation step says when escalation does nothing.** Raising the
+  priority of a message nobody is being sent changes nothing, so
+  `target_escalation` — and `README.md`'s "When the house is empty" — now say
+  that the setting only bites on a target whose presence rule notifies absent
+  people (`always` or `away_only`); with `home_only`, an empty house means
+  everybody is dropped with the reason `presence` and there is no priority
+  left to raise. Found on the development instance, where the form gave the
+  escalation table and no hint that a rule two steps away could void it.
+- **Three limits of 0.7.0 are written down where somebody will look.** The
+  option lists do not offer `notify` **entities** — both are built from the
+  service registry and both are pinned by the frozen S4 acceptance tests, so
+  an entity is reached by typing its id (`docs/known-issues.md`, and one
+  sentence in `README.md`). An episode cannot **clear** a bare output, because
+  the clear is addressed by the `tag` and `notification_id` a bare output is
+  deliberately not given, so a bare `notify.persistent_notification` lingers
+  on the dashboard next to its own back-to-normal message (`README.md`,
+  `docs/ARCHITECTURE.md`). And `binary_sensor.<person>_silenced` stays `on`
+  under a priority floor, because it answers "is a silence running?" and not
+  "would this message get through?" (`README.md`).
+- **`docs/accepted-deviations.md` gains §5**, the fifth place this integration
+  bends one of its own principles: ADR-0021 §6 says the router passes `title`
+  to a notify entity regardless and lets core decide, and the router instead
+  gates it on the entity's published `supported_features`. Core's gate lives
+  in the base `NotifyEntity.async_send_message`, which a platform overriding
+  that method never reaches, so "regardless" would hand a title to a platform
+  that published that it cannot take one — and the frozen
+  `test_s7_entity_outputs.py` asserts the opposite. The opening count and the
+  closing "what would change any of these" list are updated with it.
 
 ---
 

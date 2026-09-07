@@ -274,7 +274,7 @@
       },
       "target_escalation": {
         "title": "Escalation of a target",
-        "description": "What {target} does when nobody of its audience is home. Nothing else about the target is touched.",
+        "description": "What {target} does when nobody of its audience is home. Nothing else about the target is touched. It only changes anything when the target's presence rule notifies absent people — always or away_only. With home_only, an empty house means nobody is notified at all, so there is no priority left to raise.",
         "data": {
           "escalate_when_nobody_home": "Raise the priority when nobody is home"
         },
@@ -295,6 +295,7 @@
       "duplicate_person": "This person is already in the table.",
       "no_outputs": "Give at least one notify service.",
       "recursive_output": "An output cannot point back at Notify Switchboard.",
+      "component_service_output": "notify.notify and notify.send_message belong to the notify component itself, not to anything that can be notified. Name a real notify service.",
       "invalid_output": "A notify service name contains characters a service name cannot hold.",
       "invalid_entity": "This is not an entity id.",
       "invalid_time": "Use HH:MM or HH:MM:SS.",

@@ -14,6 +14,10 @@ from dataclasses import dataclass, field
 from datetime import datetime, time, timedelta
 from typing import Any
 
+from homeassistant.components.notify.const import (
+    SERVICE_NOTIFY,
+    SERVICE_SEND_MESSAGE,
+)
 from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_ON
 from homeassistant.util import dt as dt_util, slugify
 
@@ -79,6 +83,11 @@ from .const import (
 
 NOTIFY_PREFIX = "notify."
 PERSON_PREFIX = "person."
+
+# The `notify` component's own services that cannot be an output, whatever the
+# domain rule says -- see `is_component_service_output` for why each one is
+# here and why `persistent_notification` is not.
+NON_OUTPUT_COMPONENT_SERVICES = frozenset({SERVICE_NOTIFY, SERVICE_SEND_MESSAGE})
 
 # `switchboard:ack:<slug>` and `switchboard:snooze:<slug>:<minutes>`.
 ACTION_PARTS_ACKNOWLEDGE = 3
@@ -431,6 +440,37 @@ def is_bare_output(entry: str) -> bool:
     in any other domain is a person, known or not.
     """
     return entry.startswith(NOTIFY_PREFIX)
+
+
+def is_component_service_output(entry: str) -> bool:
+    """Return True when an entry names a `notify` service that cannot be one.
+
+    Two of the three services the `notify` component itself owns
+    (`$HA_CORE_SRC/homeassistant/components/notify/const.py`) are in the
+    `notify` domain, so `is_bare_output` says yes to them, and neither can ever
+    be a thing to notify:
+
+    - `notify.notify` is the **aggregate** legacy service: it fans one message
+      out to every notify platform on the instance. An audience holding it
+      addresses the whole house through the one undifferentiated channel this
+      router exists to replace, and the episode that records the delivery has
+      no idea who was actually reached, so nothing it sends can ever be
+      cleared or told "back to normal".
+    - `notify.send_message` is the **entity action**: its schema requires an
+      `entity_id` and it has no notion of a bare recipient
+      (`notify/__init__.py`, `async_register_entity_service`). The call the
+      router builds for a bare output is invalid by construction, so it would
+      fail every single delivery -- silently, as a `delivery_failed` drop.
+
+    `notify.persistent_notification` is deliberately **not** here. It takes a
+    plain `message`, it names exactly one destination, and it is a perfectly
+    good bare output -- the one the quickstart uses before any phone exists.
+
+    The config-flow pickers hide all three (`NOTIFY_COMPONENT_SERVICES` in
+    `config_flow.py`); this rule is the half that matters for a value typed by
+    hand, which `custom_value=True` allows on both selectors.
+    """
+    return entry.removeprefix(NOTIFY_PREFIX) in NON_OUTPUT_COMPONENT_SERVICES
 
 
 def resolve_priority(target: TargetConfig, data: dict[str, Any]) -> str:
