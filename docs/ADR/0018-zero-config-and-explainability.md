@@ -194,7 +194,9 @@ phone, a translated "Home Assistant notifications" for the bare
 `persistent_notification`, the service name humanised (underscores to spaces,
 capitalised, raw name in brackets when it differs) for anything else; the
 first version of this ADR said "the service name itself", which left raw
-identifiers on screen. The `value` stays the raw service name. The
+identifiers on screen. The `value` stays the raw service name. The bare
+`persistent_notification` service is **offered** (with the translated label);
+only `notify.notify` and `notify.send_message` are left out of the list. The
 link is exact, not a name heuristic:
 
 1. the `person.*` entity publishes the Home Assistant user it is linked to as
