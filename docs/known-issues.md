@@ -243,3 +243,14 @@ A configured silence entity that goes `off` well before the wake time does not
 trigger an early flush either: `_async_silence_changed` refreshes
 `binary_sensor.<p>_silenced` but does not re-arm the deferral timer. The message
 waits for the wake time, which is the documented promise.
+
+## 2026-09-07 — S3 — two repairs that cannot clear themselves
+
+Every repair this integration raises is deleted when its cause goes away, with
+two exceptions that are ignorable in the UI rather than defects:
+`unknown_target_<slug>` stays until the routing table is reloaded, so fixing
+the *caller* instead of adding the row leaves it up, and `missing_output_<x>`
+clears on the first call that succeeds, so an output that is still configured
+but never called again keeps its warning. Neither can be observed by the
+router — nothing tells it a service call it never sees would work now — so
+both are safe to dismiss in Repairs.

@@ -99,10 +99,11 @@ rules:
   test-coverage:
     status: done
     comment: >-
-      Above the 95% bar overall and on every module that routes (dispatcher,
-      router, validation), with an acceptance suite that is written before the
-      code and never modified to make it pass. The two modules just under it
-      are store.py (94.8%) and diagnostics.py (94.4%).
+      99% overall and at or above the 95% bar on every module, with an
+      acceptance suite that is written before the code and never modified to
+      make it pass. The routing modules (router, validation) and the two that
+      were previously under the bar (store, diagnostics) are at 100%; the
+      lowest are config_flow.py and legacy.py at 97%.
 
   # -------------------------------------------------------------------- Gold
   devices:
@@ -188,9 +189,11 @@ rules:
   repair-issues:
     status: done
     comment: >-
-      Five translated repairs (unknown_target, missing_output,
-      invalid_service_target/person, person_without_user_id), each deleted when
-      its cause is gone.
+      Six translated repairs (unknown_target, missing_output,
+      invalid_service_target/person, invalid_service_calls_many,
+      person_without_user_id), each deleted when its cause is gone -- the two
+      that cannot know their own cause is gone are listed in
+      docs/known-issues.md.
   stale-devices:
     status: todo
     comment: >-
