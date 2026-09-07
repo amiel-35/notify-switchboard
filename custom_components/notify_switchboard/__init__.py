@@ -20,12 +20,20 @@ from dataclasses import dataclass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import config_validation as cv, entity_registry as er
+from homeassistant.helpers.typing import ConfigType
 
+from .const import DOMAIN
 from .dispatcher import Switchboard
 from .legacy import SwitchboardNotificationService
-from .services import async_register_services, async_unregister_services
+from .services import async_register_services
 from .store import SwitchboardStore
+
+# There is nothing to configure in YAML: the routing table lives in the config
+# entry's options. `config_entry_only_config_schema` says exactly that and is
+# what lets `async_setup` exist purely to register the actions
+# (`homeassistant/helpers/config_validation.py`).
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -71,6 +79,19 @@ def _async_drop_pre_0_1_0_entities(
             registry.async_remove(entity.entity_id)
 
 
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register the five `notify_switchboard.*` actions, once.
+
+    Quality-scale rule `action-setup` (ADR-0017 §5): registering them here
+    rather than in `async_setup_entry` means an automation that references one
+    fails its own validation only when the action genuinely does not exist. A
+    call made while no entry is loaded is refused by the handler itself, with a
+    translated `ServiceValidationError`.
+    """
+    async_register_services(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: SwitchboardConfigEntry) -> bool:
     """Set up Notify Switchboard from a config entry."""
     _async_drop_pre_0_1_0_entities(hass, entry)
@@ -88,12 +109,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: SwitchboardConfigEntry) 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await legacy_service.async_register(hass)
 
-    # The five `notify_switchboard.*` UI services of contract v0.2 (ADR-0016).
-    # They belong to the entry, not to the integration: a single instance is
-    # enforced by `manifest.json`'s `single_config_entry`, and unloading the
-    # entry must not leave a service pointing at a dead `Switchboard`.
-    async_register_services(hass, switchboard)
-
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
     return True
 
@@ -102,8 +117,11 @@ async def async_unload_entry(
     hass: HomeAssistant, entry: SwitchboardConfigEntry
 ) -> bool:
     """Unload a config entry."""
+    # The five `notify_switchboard.*` actions stay registered: from v0.3 they
+    # belong to the integration, not to the entry (ADR-0017 §5). What unloading
+    # removes is their ability to act -- they look the loaded entry up at call
+    # time, so none of them holds on to the `Switchboard` released below.
     runtime_data = entry.runtime_data
-    async_unregister_services(hass)
     await runtime_data.legacy_service.async_unregister()
     runtime_data.switchboard.async_shutdown()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
