@@ -17,7 +17,7 @@
     "detail_no_outputs": "Aucun service notify n'est configuré pour {person} : il n'y a nulle part où envoyer ce message.",
     "detail_not_in_audience": "{person} ne fait pas partie de l'audience de la cible {target}.",
     "detail_unknown_person": "La cible {target} nomme {person}, qui n'est pas dans la table de Notify Switchboard.",
-    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui boucherait."
+    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui bouclerait."
   },
   "entity": {
     "binary_sensor": {
@@ -165,7 +165,7 @@
       },
       "person_outputs": {
         "title": "Services notify et silence",
-        "description": "Quels services notify joignent cette personne, et quand elle est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
+        "description": "Quels services notify joignent {person}, et quand cette personne est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
         "data": {
           "outputs": "Services notify",
           "silence_entities": "Entités de silence",
@@ -179,7 +179,7 @@
       },
       "target_saved": {
         "title": "Cible enregistrée",
-        "description": "Voici le bloc alert: que cette ligne attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis rechargez la configuration YAML.\n\n{snippet}"
+        "description": "Voici le bloc alert: que cette ligne attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```"
       },
       "test_target": {
         "title": "Tester une cible",

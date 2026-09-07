@@ -165,7 +165,7 @@
       },
       "person_outputs": {
         "title": "Notify services and silence",
-        "description": "Which notify services reach this person, and when they are silent. The services of the phones registered to this person's Home Assistant user are listed first and already selected.",
+        "description": "Which notify services reach {person}, and when they are silent. The services of the phones registered to this person's Home Assistant user are listed first and already selected.",
         "data": {
           "outputs": "Notify services",
           "silence_entities": "Silence entities",
@@ -179,7 +179,7 @@
       },
       "target_saved": {
         "title": "Target saved",
-        "description": "Here is the alert: block this row expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then reload the YAML configuration.\n\n{snippet}"
+        "description": "Here is the alert: block this row expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```"
       },
       "test_target": {
         "title": "Test a target",

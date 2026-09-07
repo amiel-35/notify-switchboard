@@ -39,6 +39,7 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -242,7 +243,10 @@ def _alert_snippet(row: dict[str, Any]) -> str:
         (
             "alert:",
             f"  {object_id}:",
-            f"    name: {row.get('name') or row[CONF_SLUG]}",
+            # A row name is free text: an unquoted `Fuite: eau # urgence`
+            # is a nested mapping truncated at the `#`. `json.dumps` emits a
+            # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
+            f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
             f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
             '    state: "on"',
             "    repeat: [5, 15, 60]",
@@ -254,11 +258,17 @@ def _alert_snippet(row: dict[str, Any]) -> str:
 
 
 def _explain_summary(response: dict[str, Any]) -> str:
-    """Render an `explain` response as one line per person."""
-    return "\n".join(
+    """Render an `explain` response as a markdown list, one item per person.
+
+    The step description this lands in is rendered as markdown, where a bare
+    newline is collapsed: without the list markers every person's answer runs
+    into a single paragraph.
+    """
+    lines = [
         f"{person}: {answer['decision']} - {answer['detail']}"
         for person, answer in sorted(response["persons"].items())
-    )
+    ]
+    return "\n".join(f"- {line}" for line in lines)
 
 
 class SwitchboardConfigFlow(ConfigFlow, domain=DOMAIN):

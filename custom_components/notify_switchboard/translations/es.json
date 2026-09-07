@@ -165,7 +165,7 @@
       },
       "person_outputs": {
         "title": "Servicios notify y silencio",
-        "description": "Qué servicios notify llegan a esta persona y cuándo está en silencio. Los servicios de los teléfonos vinculados a su usuario de Home Assistant se listan primero y ya están marcados.",
+        "description": "Qué servicios notify llegan a {person} y cuándo está en silencio. Los servicios de los teléfonos vinculados a su usuario de Home Assistant se listan primero y ya están marcados.",
         "data": {
           "outputs": "Servicios notify",
           "silence_entities": "Entidades de silencio",
@@ -179,7 +179,7 @@
       },
       "target_saved": {
         "title": "Destino guardado",
-        "description": "Este es el bloque alert: que espera esta fila. Cópialo en tu configuración YAML, apunta entity_id a la entidad que quieres vigilar y recarga la configuración YAML.\n\n{snippet}"
+        "description": "Este es el bloque alert: que espera esta fila. Cópialo en tu configuración YAML, apunta entity_id a la entidad que quieres vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```"
       },
       "test_target": {
         "title": "Probar un destino",

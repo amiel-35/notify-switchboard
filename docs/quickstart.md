@@ -106,7 +106,7 @@ alert:
 ```
 
 Point `entity_id` at your real sensor, paste it into your configuration (or a
-package), reload the YAML configuration, and the alert routes through the row.
+package), restart Home Assistant, and the alert routes through the row.
 The `notifiers:` entry — the slug, **without** the `notify.` prefix — is the
 only place the alert tells Notify Switchboard who it is (ADR-0008), so nothing
 about the alert has to travel through `data`.

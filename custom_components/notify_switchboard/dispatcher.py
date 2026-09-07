@@ -550,6 +550,12 @@ class Switchboard:
         somebody running it to *understand* their configuration must not change
         it.
 
+        One caveat on "pure": `build_context()` drops snoozes and temporary
+        silences whose end time has passed from `Store.snoozes` / `.silences`.
+        That is an in-memory tidy of entries that already expired -- it changes
+        no answer, and nothing is written, since `Store.async_save` is only ever
+        called by the paths that add or lift one.
+
         The refusals are the ones every other service raises (ADR-0015), with
         one deliberate difference from `_require_target` / `_require_person`:
         nothing here feeds the `invalid_service_*` counters. Asking a question
@@ -619,7 +625,12 @@ class Switchboard:
                 ATTR_UNTIL: None,
                 ATTR_REASON: None,
                 ATTR_DETAIL: await self._async_detail(
-                    DECISION_ROUTED, target, person, context, outputs=reachable
+                    DECISION_ROUTED,
+                    target,
+                    person_id,
+                    person,
+                    context,
+                    outputs=reachable,
                 ),
                 ATTR_OUTPUTS: reachable,
                 ATTR_MISSING_OUTPUTS: missing,
@@ -637,7 +648,12 @@ class Switchboard:
                 ATTR_UNTIL: until.isoformat(),
                 ATTR_REASON: None,
                 ATTR_DETAIL: await self._async_detail(
-                    DECISION_DEFERRED, target, person, context, until=until
+                    DECISION_DEFERRED,
+                    target,
+                    person_id,
+                    person,
+                    context,
+                    until=until,
                 ),
                 ATTR_OUTPUTS: reachable,
                 ATTR_MISSING_OUTPUTS: missing,
@@ -647,7 +663,9 @@ class Switchboard:
             ATTR_DECISION: DECISION_DROPPED,
             ATTR_UNTIL: None,
             ATTR_REASON: reason,
-            ATTR_DETAIL: await self._async_detail(reason, target, person, context),
+            ATTR_DETAIL: await self._async_detail(
+                reason, target, person_id, person, context
+            ),
             # Nothing would be called, so there is nothing to list (ADR-0018
             # §1). `missing_outputs` is still reported: a broken output is worth
             # knowing about even for somebody who is currently snoozed.
@@ -702,6 +720,7 @@ class Switchboard:
         self,
         key: str,
         target: TargetConfig,
+        person_id: str,
         person: PersonConfig | None,
         context: RoutingContext,
         *,
@@ -713,16 +732,19 @@ class Switchboard:
         `key` is either a decision (`routed`, `deferred`) or a drop reason, so a
         reason the contract adds cannot silently lose its sentence: it falls
         back to the generic `detail_dropped` and stays non-empty.
+
+        `person_id` is passed separately from `person` because the one reason
+        the table has no `PersonConfig` -- `unknown_person`, a hand-edited
+        audience -- is also the one whose sentence exists to name whom it is
+        about. Deriving `{person}` from `person` alone left it empty exactly
+        there.
         """
         placeholders: dict[str, str] = {
             "target": target.slug,
-            "person": person.entity_id if person is not None else "",
+            "person": person_id,
             "reason": key,
             "rule": target.presence_rule,
-            "state": context.person_states.get(
-                person.entity_id if person is not None else "", ""
-            )
-            or "unknown",
+            "state": context.person_states.get(person_id, "") or "unknown",
             "outputs": ", ".join(outputs or ()),
             "until": _local_text(until),
         }
