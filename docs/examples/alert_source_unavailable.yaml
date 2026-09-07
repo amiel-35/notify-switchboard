@@ -60,7 +60,7 @@ alert:
     notifiers:
       - switchboard_source_unavailable   # -> notify.switchboard_source_unavailable
 
-# Matching routing-table row:
+# Matching target:
 #
 # | Field             | Value                                    |
 # |--------------------|------------------------------------------|

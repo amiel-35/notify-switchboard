@@ -39,10 +39,10 @@ blueprint:
     target_slug:
       name: Switchboard target slug
       description: >-
-        The `slug` of the Notify Switchboard routing-table row to notify
+        The `slug` of the Notify Switchboard target to notify
         (Settings -> Devices & services -> Notify Switchboard -> Configure).
         The service called is `notify.switchboard_<slug>`, e.g. `doors` for
-        a row whose slug is `doors`.
+        a target whose slug is `doors`.
       selector:
         text: {}
     message:

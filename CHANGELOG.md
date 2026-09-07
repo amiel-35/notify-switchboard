@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.6.0 — **consolidation** (contract v0.6 addendum, ADR-0020), on top of
+the 0.5.1 and 0.5.0 notes below, which are in `main` but not tagged.
+
+Every release since 0.1.0 added something. This one subtracts: a newcomer now
+meets **five fields** on the first form instead of fifteen, one word per
+concept instead of four, and documents that agree with the code. It introduces
+**no routing rule, no entity, no action and no drop reason** — with one scoped
+exception, the meaning of an absent wake time, because moving that field behind
+an advanced step without deciding what leaving it empty means would have turned
+"hold this until morning" into "drop this".
+
+### Changed
+
+- **The target editor is two steps.** `target` asks exactly five things —
+  `slug`, `name`, `alert_entity`, `audience`, `observer_mode` — and a second
+  step, `target_advanced`, holds the nine that used to sit on the same form
+  (`default_priority`, `presence_rule`, `allow_acknowledge`, `snooze_minutes`,
+  `default_data`, `message`, `done_message`, `default_title`, `clear_done`)
+  with **identical selectors and identical defaults**. A target created
+  through the basic step alone is byte-for-byte the row 0.5 wrote for the same
+  five answers, and routes the same way.
+- **The person editor likewise.** `person_outputs` keeps `outputs` and
+  `silence_entities`; `wake_time` and `summary` move to `person_advanced`.
+- **Each half writes only its own fields.** Changing a priority can never
+  empty an audience, and changing a phone can never delete somebody's night —
+  the 0.2.0 data-loss bug a careless split re-creates. `managed` is cleared by
+  either half of the target editor, as submitting the editor always has.
+- **Two new options-menu entries**, "Advanced settings of a target" and
+  "Advanced settings of a person", plus one checkbox on the step that shows
+  the `alert:` snippet. A menu entry is a step id in Home Assistant, so each
+  needs a picker of its own.
+- **One word per concept.** A routing-table row is a **target**, in every
+  user-facing string, every repair, every error message and every document, in
+  English, French and Spanish. "Rule" survives only as *presence rule*. The
+  `target:` field of a `notify.switchboard` call is spelled "the notify
+  `target` list" where the two meanings meet.
+- **The `ttl_minutes` defaults are documented defaults, not frozen values.**
+  `info` 120, `normal` 720, `high` none are unchanged and stay where they are;
+  what changes is their status — a minor version may pick other numbers, and
+  no caller may rely on a particular one. The mechanism (the option, the
+  per-call override, the meaning of `null` and of `0`) stays frozen.
+- **An absent `wake_time` now means "until the silence ends", not "drop it"** —
+  narrowly. A silenced person with no wake time is **deferred** when one of
+  their configured silence entities publishes its own end; in core 2026.9.1
+  that means a `schedule.*` and its `next_event` attribute. That instant arms
+  the fallback timer, bounds the setup catch-up and is what `explain` reports
+  as `until`. A silence that publishes no end — an `input_boolean`, a
+  Companion Focus sensor, a temporary `notify_switchboard.silence` — still
+  drops with reason `silenced`, exactly as in 0.1 → 0.5, so no installation
+  that has left the field empty since 0.1.0 changes behaviour.
+
+### Removed
+
+- **The `class` key of a routing-table row.** It was asked for on every target
+  since 0.1.0 and read by nothing: `parse_target` copied it into
+  `TargetConfig.target_class` and no consumer existed. Gone from the schema,
+  the strings, the documents and the examples, along with `CONF_CLASS`,
+  `ATTR_CLASS` and `DEFAULT_TARGET_CLASS`. A value already stored is
+  **ignored** — not read, not migrated, not deleted — and is stripped from the
+  routing table a diagnostics dump exposes, so a dead key cannot be mistaken
+  in a bug report for something the router reads. There is no store migration.
+
+### Documentation
+
+- **`README.md` gains a Glossary** defining, once each: target, person,
+  output, audience, presence rule, silence, snooze, wake time, quiet hours,
+  deferral, summary, episode, observer mode. "Quiet hours" is defined as *not
+  a concept of this integration* — it is what a silence entity and a wake time
+  add up to — because it is the phrase people arrive with. The other documents
+  link to it rather than redefining anything.
+- **Observer mode is the primary documented path in `README.md`**, as it
+  already was in the quickstart; the `notifiers:` example comes second.
+- **One duration claim: ten minutes**, in the quickstart's title, in `README.md`'s
+  documentation list and in `docs/ARCHITECTURE.md`'s suite S7 line. The
+  quickstart says what the ten minutes include — the YAML and the restart.
+- **`docs/migration-guide.md`** (new): where to start when you already have N
+  inline `notify.mobile_app_*` calls and M `alert:` blocks. One target per
+  alert, the `default` target first, observer mode so nothing in the YAML has
+  to change, `explain` to check a target before trusting it, and a rollback
+  that is one line.
+- **`docs/accepted-deviations.md`** (new): the three places where this
+  integration knowingly bends one of its own principles — a temporary silence
+  the router owns, an episode it persists, `not_in_audience` it does not count
+  — each naming the principle it bends and why the maintainer accepted it. The
+  known-issues entry that records the visible consequence of the third moved
+  with it. Nothing was deleted, and `docs/known-issues.md` points here.
+- **`docs/upstream/`** (new): two ready-to-file issue drafts, with core line
+  numbers and a runnable reproduction for the first —
+  `cancel_on_shutdown` being inoperative for the handles `async_call_later`,
+  `async_call_at` and `_TrackPointUTCTime` create, and `AlertEntity` never
+  reading its watched entity at startup.
+- **`docs/ARCHITECTURE.md`'s roadmap is rewritten** to the decided sequence:
+  0.6.0 consolidation, 0.7.0 escalation and places reduced in scope, then —
+  unscheduled — labels, a per-target authentication override, intents and the
+  routing table as an entity. No line anywhere still says a feature is planned
+  for a sprint that no longer covers it.
+
+---
+
 Router 0.5.1 — a fix on top of the 0.5.0 notes below, which are in `main` but
 not tagged. No public name, option, event type or drop reason changes.
 

@@ -19,8 +19,8 @@
 #   - notifiers     : legacy `notify.*` service names, WITHOUT the `notify.`
 #                      prefix. `switchboard_leak` is a Notify Switchboard
 #                      per-target service (contract: `notify.switchboard_<target>`),
-#                      generated from the routing-table row named "leak" —
-#                      see the matching row description at the end of this file.
+#                      generated from the target named "leak" —
+#                      see the matching target description at the end of this file.
 
 alert:
   leak_kitchen:
@@ -39,7 +39,7 @@ alert:
     notifiers:
       - switchboard_leak              # -> notify.switchboard_leak
 
-# Matching routing-table row (configured in the Notify Switchboard options
+# Matching target (configured in the Notify Switchboard options
 # flow, not in YAML — see docs/quickstart.md):
 #
 # | Field             | Value                                    |
@@ -50,7 +50,7 @@ alert:
 # | snooze_minutes     | [15, 60]  (a leak should not be snoozed for long) |
 # | allow_acknowledge  | true                                      |
 #
-# A row with `allow_acknowledge: true` and an `alert_entity` set is what
+# A target with `allow_acknowledge: true` and an `alert_entity` set is what
 # makes the router add the "Acknowledge" button to Companion notifications;
 # pressing it calls `alert.turn_off` on `alert.leak_kitchen` (allow-listed
-# because it is this row's `alert_entity` — see docs/contract.md).
+# because it is this target's `alert_entity` — see docs/contract.md).

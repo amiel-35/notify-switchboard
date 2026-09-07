@@ -22,7 +22,7 @@ everything else is a finding (blocking or accepted).
 
 ## C. Security and privacy
 - [ ] Acknowledge callback only acts on `alert.*` present in the routing table; refusal logged with `context.user_id`.
-- [ ] `authenticationRequired: true` set for `high`/`critical` rows by default.
+- [ ] `authenticationRequired: true` set for `high`/`critical` targets by default.
 - [ ] Recursion to `notify.switchboard*` rejected at config time and runtime.
 - [ ] Diagnostics use `async_redact_data`; no message bodies stored beyond the documented option.
 - [ ] No secrets, tokens, or real household data in code, tests, fixtures, or docs.

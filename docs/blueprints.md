@@ -33,7 +33,7 @@ for a door left open, a delivery arriving, a threshold crossed once.
 | `trigger_entity` | yes | — | The entity to watch. |
 | `trigger_from` | no | *(any)* | Only trigger from this state. |
 | `trigger_to` | no | *(any)* | Only trigger to this state. |
-| `target_slug` | yes | — | Routing-table row slug; calls `notify.switchboard_<target_slug>`. |
+| `target_slug` | yes | — | Target slug; calls `notify.switchboard_<target_slug>`. |
 | `message` | yes | — | Template; `trigger.to_state` / `trigger.from_state` available. |
 | `title` | no | `""` | Passed through as `data.title`. |
 | `priority` | no | `info` | `info` \| `normal` \| `high` \| `critical`. |
@@ -69,7 +69,7 @@ threshold in the message.
 |---|---|---|---|
 | `watched_entities` | yes | — | One or more entities; the trigger fires per entity. |
 | `minutes` | no | `15` | How long an entity must stay unavailable/unknown first. |
-| `target_slug` | yes | — | Routing-table row slug. |
+| `target_slug` | yes | — | Target slug. |
 | `priority` | no | `high` | `info` \| `normal` \| `high` \| `critical`. |
 
 Example instance:
@@ -108,7 +108,7 @@ optional `tag` for Notify Switchboard's de-duplication.
 | Input | Required | Default | Notes |
 |---|---|---|---|
 | `cycle_entity` | yes | — | A `binary_sensor` that is `on` while the appliance runs. |
-| `target_slug` | yes | — | Routing-table row slug. |
+| `target_slug` | yes | — | Target slug. |
 | `message` | no | `"{{ trigger.to_state.name }} has finished."` | Template. |
 | `title` | no | `""` | Passed through as `data.title`. |
 | `priority` | no | `info` | `info` \| `normal` \| `high` \| `critical`. |
@@ -131,8 +131,8 @@ automation:
 
 None of the three blueprints shipped here sends one today, but an `alert:`
 block or an automation of your own often does. From 0.5.0, add
-`switchboard_done: true` to such a call's `data` and it becomes the row's
-**done** message: it reaches only the people the row's current episode
+`switchboard_done: true` to such a call's `data` and it becomes the target's
+**done** message: it reaches only the people the target's current episode
 actually reached, and everybody else in the audience is dropped with the
 reason `not_notified` rather than being told that something they never heard
 about is over.
@@ -145,7 +145,7 @@ data:
     switchboard_done: true
 ```
 
-It only changes anything on a row that names an `alert_entity`: a row without
+It only changes anything on a target that names an `alert_entity`: a target without
 one has no episodes, so such a message routes to the whole audience like any
 other. Changing the blueprints themselves to use the key is a separate,
 smaller change.
@@ -167,13 +167,13 @@ templated action name, not a static one. This is deliberate, and verified
 against Home Assistant core's own service-call schema
 (`SERVICE_SCHEMA` in `homeassistant/helpers/config_validation.py`, which
 accepts `dynamic_template` for the action/service field): it lets one
-blueprint work with any routing-table row without needing a
+blueprint work with any target without needing a
 `notify.switchboard` + `target: [...]` indirection. The trade-off: if
-`target_slug` does not match any row's slug, the per-target service simply
+`target_slug` does not match any target's slug, the per-target service simply
 does not exist yet and the call fails as an ordinary "service not found"
 error in the log — you will not get the friendlier `unknown_target`
 drop-and-repair-issue behaviour described in `contract.md`, because that
 only fires for calls to the default `notify.switchboard` service with a
-`target:` list. Double-check the slug against the routing-table row (or
+`target:` list. Double-check the slug against the target (or
 copy it from **Settings → Devices & services → Notify Switchboard →
 Configure**) before relying on a blueprint in production.
