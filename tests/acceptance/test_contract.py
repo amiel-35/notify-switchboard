@@ -32,11 +32,21 @@ automation filters on a reason, a Companion channel filters on a tag. The four
 `event.switchboard_delivery` event types are asserted, unchanged, by
 `test_services_and_entities_exist_after_setup` above — v0.5 adds reasons, not
 types. What each rule *does* is `test_s5_*.py`'s business.
+
+Extended a fifth time for the v0.6 addendum (ADR-0020), which is the first one
+that *removes* something. `class` leaves the routing-table row keys, so this
+file pins its absence from what the router writes; the `ttl_minutes` defaults
+are reclassified as defaults a minor version may change, so what is pinned is
+the mechanism that makes them changeable and not the three numbers; and four
+options-flow step ids become public names, because documents and cards link to
+a step by its id. What each step *holds* is `test_s6_*_editor.py`'s business.
 """
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import homeassistant.util.dt as dt_util
 import pytest
@@ -413,3 +423,112 @@ async def test_the_summary_tag_is_a_frozen_value(
 
     assert len(calls["mobile_app_alice"]) == 1
     assert calls["mobile_app_alice"][0].data["data"]["tag"] == "switchboard-summary"
+
+
+# ---------------------------------------------------------------------------
+# v0.6 addendum (ADR-0020): one key removed, one classification, four step ids
+# ---------------------------------------------------------------------------
+
+# The four step ids `docs/contract.md` §v0.6 freezes. The pickers that lead to
+# the advanced ones are internal and deliberately not listed.
+PUBLIC_STEP_IDS = ("target", "target_advanced", "person_outputs", "person_advanced")
+
+
+async def test_class_is_not_a_routing_table_row_key(
+    hass, enable_custom_integrations, install, options_flow, mock_outputs, set_person
+):
+    """v0.6 addendum (ADR-0020): the router never writes `class` again."""
+    mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    entry = make_entry(hass, persons=[], targets=[], default_target=None)
+    await install(entry)
+
+    # The bootstrapped target (ADR-0018 §4) and a hand-made one: the two ways
+    # a target can come into being, neither of which may produce the key.
+    await options_flow(
+        entry,
+        "person",
+        {"entity_id": "person.alice"},
+        {"outputs": ["mobile_app_alice"]},
+    )
+    await options_flow(
+        entry,
+        "target",
+        {"slug": "leak", "name": "Leak", "audience": ["person.alice"]},
+        {},
+    )
+
+    for row in entry.options["targets"]:
+        assert "class" not in row, (
+            "`class` left the routing-table row keys in v0.6 (ADR-0020 §4); "
+            f"{row['slug']!r} still carries one"
+        )
+
+
+async def test_the_public_options_step_ids_exist(hass):
+    """v0.6 addendum: four step ids documents and cards link to."""
+    component = (
+        Path(__file__).resolve().parents[2] / "custom_components" / "notify_switchboard"
+    )
+    steps = json.loads((component / "strings.json").read_text(encoding="utf-8"))[
+        "options"
+    ]["step"]
+
+    for step_id in PUBLIC_STEP_IDS:
+        assert step_id in steps, (
+            f"{step_id!r} is a public step id (contract v0.6, ADR-0020 §1 and "
+            "§2) and must exist, translated, with a title of its own"
+        )
+        assert steps[step_id].get("title"), f"{step_id!r} has no title"
+
+
+async def test_the_ttl_defaults_are_defaults_a_household_can_change(
+    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer
+):
+    """v0.6 addendum: 120 / 720 / none are documented defaults, not frozen values.
+
+    What is frozen is the mechanism: `entry.options["ttl_minutes"]` overrides
+    them, priority by priority. A test that asserted the three numbers would be
+    asserting exactly what ADR-0020 §5 says nobody may rely on, so this one
+    asserts that stating a different number works.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    calls = mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    hass.states.async_set("input_boolean.alice_night", "on")
+
+    entry = make_entry(
+        hass,
+        persons=[
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.alice_night"],
+                wake_time="07:00:00",
+            )
+        ],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+        # A `normal` message is worth 720 minutes by default; this household
+        # says five.
+        ttl_minutes={"normal": 5},
+    )
+    freezer.move_to(NIGHT)
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "stale by morning"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    freezer.move_to(MORNING)
+    hass.states.async_set("input_boolean.alice_night", "off")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert len(calls["mobile_app_alice"]) == 0, (
+        "the household's own `ttl_minutes` decides, not the documented "
+        "default (contract v0.6, ADR-0020 §5)"
+    )
+    reasons = hass.states.get("sensor.switchboard_dropped_today").attributes["reasons"]
+    assert "expired" in reasons
