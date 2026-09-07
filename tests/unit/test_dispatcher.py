@@ -670,6 +670,36 @@ async def test_daily_counters_reset_at_local_midnight(
         assert dt_util.parse_datetime(state.attributes["last_reset"]) == midnight
 
 
+async def test_the_routing_table_sensor_carries_no_state_class(
+    hass: HomeAssistant,
+) -> None:
+    """A count of configuration rows is not a long-term statistic.
+
+    A `state_class` is what asks the recorder to compile hourly statistics for
+    a sensor, for ever (`homeassistant/components/sensor/recorder.py`). "How
+    many targets does this household have" moves only when somebody edits the
+    options, so the series would be a flat line kept for years in the database
+    of everybody who installs this. The unit stays: it is what makes the state
+    legible on a card.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    state = hass.states.get("sensor.switchboard_routing_table")
+    assert state is not None
+    assert "state_class" not in state.attributes, (
+        "`sensor.switchboard_routing_table` counts configuration rows; a state "
+        "class would put it in long-term statistics for nothing"
+    )
+    assert state.attributes["unit_of_measurement"] == "targets"
+
+
 async def test_the_pre_0_1_0_notify_entity_orphan_is_removed(
     hass: HomeAssistant,
 ) -> None:

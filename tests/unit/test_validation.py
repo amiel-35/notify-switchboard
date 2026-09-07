@@ -174,3 +174,40 @@ def test_an_audience_of_bare_outputs_only_is_valid() -> None:
         )
         == {}
     )
+
+
+@pytest.mark.parametrize("entry", ["notify.notify", "notify.send_message"])
+def test_a_notify_component_service_is_refused_as_an_audience_entry(entry) -> None:
+    """The domain rule lets these in; neither can ever be a recipient.
+
+    `notify.notify` is the aggregate legacy service — it fans the message out
+    to every notify platform on the instance, which is the undifferentiated
+    channel this router replaces, and no episode can say who it reached.
+    `notify.send_message` is the entity action: its schema requires an
+    `entity_id`, so the call built for a bare output fails every time. The
+    pickers hide both, but `custom_value=True` makes both typable.
+    """
+    errors = validate_target(
+        a_target(audience=["person.alice", entry]),
+        [],
+        ["person.alice"],
+        is_new=True,
+    )
+    assert errors["audience"] == "component_service_output"
+
+
+def test_persistent_notification_stays_a_valid_bare_output() -> None:
+    """The third component service is the one that *is* a destination.
+
+    It takes a plain `message`, it names exactly one place, and it is what a
+    household uses before any phone is registered.
+    """
+    assert (
+        validate_target(
+            a_target(audience=["notify.persistent_notification"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )
