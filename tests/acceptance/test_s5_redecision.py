@@ -57,7 +57,12 @@ async def _wake(hass, freezer) -> None:
 
 
 async def test_a_deferral_is_dropped_with_presence_when_the_person_left_home(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """The scenario the known-issues entry describes, now decided rather than sent.
@@ -96,7 +101,12 @@ async def test_a_deferral_is_dropped_with_presence_when_the_person_left_home(
 
 
 async def test_a_deferral_is_dropped_with_snoozed_when_the_row_was_snoozed_overnight(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """Snoozing a row at 02:00 must silence its queued message too."""
@@ -109,7 +119,9 @@ async def test_a_deferral_is_dropped_with_snoozed_when_the_row_was_snoozed_overn
     await install(_entry(hass, snooze_minutes=[600]))
 
     await hass.services.async_call(
-        "notify", "switchboard_leak", {"message": "queued before the snooze"},
+        "notify",
+        "switchboard_leak",
+        {"message": "queued before the snooze"},
         blocking=True,
     )
     await hass.async_block_till_done()
@@ -130,7 +142,12 @@ async def test_a_deferral_is_dropped_with_snoozed_when_the_row_was_snoozed_overn
 
 
 async def test_a_deferral_still_silenced_at_the_flush_is_kept_not_dropped(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """`silenced` is the one re-decision outcome that holds instead of dropping.

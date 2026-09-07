@@ -143,7 +143,7 @@ async def test_no_early_flush_while_a_temporary_silence_is_still_running(
 async def test_no_early_flush_while_another_silence_entity_is_still_on(
     hass, enable_custom_integrations, install, mock_outputs, set_person, freezer
 ):
-    """"The **last** active one": a person with two sources needs both off.
+    """ "The **last** active one": a person with two sources needs both off.
 
     The first half is the line an over-eager implementation of §4 crosses
     first — one of two silences lifting is not the end of a night. The second

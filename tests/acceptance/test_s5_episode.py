@@ -69,7 +69,12 @@ async def _arrange(hass, set_person, mock_outputs):
 
 
 async def test_the_done_message_reaches_only_the_persons_the_episode_reached(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
     drop_reasons,
 ):
     """Observer mode: Alice was told about the leak, Bob was not."""
@@ -98,8 +103,14 @@ async def test_the_done_message_reaches_only_the_persons_the_episode_reached(
 
 
 async def test_the_episode_recipients_survive_a_reload(
-    hass, hass_storage, enable_custom_integrations, install, mock_outputs, set_person,
-    real_alert, drop_reasons,
+    hass,
+    hass_storage,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
+    drop_reasons,
 ):
     """A restart in the middle of a leak must not widen the done message.
 
@@ -133,7 +144,12 @@ async def test_the_episode_recipients_survive_a_reload(
 
 
 async def test_switchboard_done_marks_a_done_message_on_a_non_observer_row(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
     drop_reasons,
 ):
     """The documented key a blueprint sets on the call it makes itself.

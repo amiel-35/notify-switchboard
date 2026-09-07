@@ -43,7 +43,8 @@ def _entry(hass, *, clear_done: bool = False, outputs=None):
         hass,
         persons=[
             make_person(
-                "person.alice", outputs or ["mobile_app_alice", "persistent_notification"]
+                "person.alice",
+                outputs or ["mobile_app_alice", "persistent_notification"],
             )
         ],
         targets=[
@@ -85,8 +86,7 @@ async def test_a_message_carries_the_default_tag_and_notification_id(
 
     phone = calls["mobile_app_alice"][0].data["data"]
     assert phone["tag"] == "switchboard-leak", (
-        "a caller that supplies no tag still gets a deterministic one "
-        "(ADR-0019 §6)"
+        "a caller that supplies no tag still gets a deterministic one (ADR-0019 §6)"
     )
     assert "notification_id" not in phone
 
@@ -122,7 +122,12 @@ async def test_a_caller_supplied_tag_and_notification_id_win(
 
 
 async def test_ending_an_episode_clears_the_phone_and_dismisses_the_ui(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
     dismissals,
 ):
     """The whole point: nothing stale is left behind on either channel."""
@@ -168,8 +173,7 @@ async def test_the_done_message_has_a_tag_of_its_own_and_is_kept_by_default(
         call for call in calls["mobile_app_alice"] if call.data["message"] == "All good"
     )
     assert done.data["data"]["tag"] == "switchboard-leak-done", (
-        "the done message's default tag is the row's, suffixed `-done` "
-        "(ADR-0019 §6)"
+        "the done message's default tag is the row's, suffixed `-done` (ADR-0019 §6)"
     )
     cleared_tags = [
         call.data["data"]["tag"]
@@ -208,8 +212,14 @@ async def test_clear_done_also_clears_the_done_message(
 
 
 async def test_a_clear_is_not_a_message(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert,
-    routed_sensor, dropped_sensor,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
+    routed_sensor,
+    dropped_sensor,
 ):
     """Housekeeping on a channel is not a notification: it is not counted.
 
@@ -228,11 +238,18 @@ async def test_a_clear_is_not_a_message(
         "a clear is not routed (ADR-0019 §6); only 'Leak!' and 'All good' are"
     )
     assert dropped_sensor().state == "0"
-    assert len([c for c in calls["mobile_app_alice"] if c.data["message"] == CLEAR]) == 2
+    assert (
+        len([c for c in calls["mobile_app_alice"] if c.data["message"] == CLEAR]) == 2
+    )
 
 
 async def test_nothing_is_cleared_on_an_output_the_episode_never_reached(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    real_alert,
     dismissals,
 ):
     """The clear follows the episode's own record, not the current configuration.

@@ -45,8 +45,7 @@ def _entry(hass, *, ttl_minutes=None, targets=None):
                 wake_time="07:00:00",
             )
         ],
-        targets=targets
-        or [make_target("leak", "Leak", audience=["person.alice"])],
+        targets=targets or [make_target("leak", "Leak", audience=["person.alice"])],
         default_target="leak",
         ttl_minutes=ttl_minutes,
     )
@@ -61,7 +60,12 @@ async def _wake(hass, freezer, when) -> None:
 
 
 async def test_an_info_deferral_expires_while_a_high_one_survives(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """The per-priority defaults: `info` 120 min, `high` never.
@@ -111,8 +115,14 @@ async def test_an_info_deferral_expires_while_a_high_one_survives(
 
 
 async def test_a_normal_deferral_expires_after_its_twelve_hour_default(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
-    drop_reasons, dropped_sensor,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
+    drop_reasons,
+    dropped_sensor,
 ):
     """`normal` defaults to 720 min; this one waits 1385 and must not arrive."""
     await hass.config.async_set_time_zone("Europe/Paris")
@@ -141,7 +151,12 @@ async def test_a_normal_deferral_expires_after_its_twelve_hour_default(
 
 
 async def test_the_global_option_overrides_the_default_for_a_priority(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """`ttl_minutes` in the options is what the household chose, not a hint."""
@@ -170,7 +185,12 @@ async def test_the_global_option_overrides_the_default_for_a_priority(
 
 
 async def test_a_per_call_ttl_overrides_the_option_and_the_default(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     drop_reasons,
 ):
     """`data.ttl_minutes` wins over both the mapping and the priority default."""
@@ -201,7 +221,12 @@ async def test_a_per_call_ttl_overrides_the_option_and_the_default(
 
 
 async def test_a_per_call_ttl_of_zero_means_this_message_never_expires(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
 ):
     """`ttl_minutes: 0` is the caller's opt-out, in the other direction.
 
@@ -238,7 +263,12 @@ async def test_a_per_call_ttl_of_zero_means_this_message_never_expires(
 
 
 async def test_an_expired_deferral_leaves_the_queue(
-    hass, enable_custom_integrations, install, mock_outputs, set_person, freezer,
+    hass,
+    enable_custom_integrations,
+    install,
+    mock_outputs,
+    set_person,
+    freezer,
     deferred_sensor,
 ):
     """An expired message is removed, not held for the following night.

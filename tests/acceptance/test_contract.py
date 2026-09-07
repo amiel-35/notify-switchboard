@@ -343,9 +343,7 @@ async def test_the_default_tag_and_notification_id_are_the_documented_values(
     entry = make_entry(
         hass,
         persons=[
-            make_person(
-                "person.alice", ["mobile_app_alice", "persistent_notification"]
-            )
+            make_person("person.alice", ["mobile_app_alice", "persistent_notification"])
         ],
         targets=[make_target("leak", "Leak", audience=["person.alice"])],
         default_target="leak",
