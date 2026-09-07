@@ -198,7 +198,7 @@ rules:
   # ---------------------------------------------------------------- Platinum
   async-dependency:
     status: exempt
-    comment: There is no dependency: requirements is empty and everything is core helpers.
+    comment: "There is no dependency: requirements is empty and everything is core helpers."
   inject-websession:
     status: exempt
     comment: The integration makes no HTTP request of its own.
