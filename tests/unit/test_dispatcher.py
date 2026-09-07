@@ -2792,3 +2792,53 @@ async def test_a_temporary_silence_outliving_the_schedule_does_not_strand_the_qu
 
     assert [call.data["message"] for call in calls] == ["water"]
     assert entry.runtime_data.switchboard.store.deferrals == {}
+
+
+async def test_the_re_arm_never_targets_an_instant_that_has_already_passed(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A timer firing at the end a schedule published can beat the schedule.
+
+    `async_track_point_in_time` does not refuse a point in the past: it fires
+    on the next pass of the loop
+    (`$HA_CORE_SRC/homeassistant/helpers/event.py`, `_TrackPointUTCTime`). So a
+    flush that runs at 07:00 while `schedule.night` still reads `on` with a
+    `next_event` of 07:00 -- its own state write has not landed yet -- would
+    hold the message, re-arm on 07:00, fire again at once, hold again, and
+    spin until the state finally changed.
+
+    The re-arm is asserted directly rather than by letting the loop run,
+    because the bug this pins is an unbounded loop: a test that drove it would
+    not fail, it would never finish.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    switchboard = entry.runtime_data.switchboard
+    assert len(switchboard.store.deferrals) == 1
+
+    # 07:00 sharp, and the schedule has not caught up: it still publishes the
+    # end that is now behind us.
+    freezer.move_to(SEVEN_UTC)
+    armed: list[datetime] = []
+
+    def _record(_hass: HomeAssistant, _action: Any, when: datetime) -> Any:
+        armed.append(when)
+        return lambda: None
+
+    with patch(
+        "custom_components.notify_switchboard.dispatcher.async_track_point_in_time",
+        side_effect=_record,
+    ):
+        switchboard._async_schedule_deferral("person.alice")
+
+    assert all(when > dt_util.now() for when in armed), (
+        f"re-armed on {armed}, which is not ahead of {dt_util.now()}"
+    )
