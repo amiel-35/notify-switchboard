@@ -588,8 +588,17 @@ class Switchboard:
         try:
             # `blocking=True` is a direct `await` of the handler's coroutine
             # (`homeassistant/core.py`, `ServiceRegistry.async_call`: "response_data
-            # = await coro"), so cancelling here really does abandon the call
-            # instead of leaving a detached task running behind it.
+            # = await coro"), so cancelling here abandons the call instead of
+            # leaving a detached task running behind it. For a coroutine handler
+            # that really is a cancellation. For a *legacy* notify platform
+            # whose `send_message` is synchronous it is not: core wraps it in
+            # `hass.async_add_executor_job`
+            # (`homeassistant/components/notify/legacy.py`,
+            # `BaseNotificationService.async_send_message`), and an executor
+            # thread cannot be cancelled -- the await is abandoned, the thread
+            # runs to completion on its own. Either way this coroutine stops
+            # waiting after `OUTPUT_TIMEOUT_SECONDS`, which is what the fan-out
+            # guarantee is about.
             async with asyncio.timeout(OUTPUT_TIMEOUT_SECONDS):
                 await self.hass.services.async_call(
                     domain, service, service_data, blocking=True

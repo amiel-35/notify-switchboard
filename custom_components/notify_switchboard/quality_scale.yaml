@@ -99,8 +99,10 @@ rules:
   test-coverage:
     status: done
     comment: >-
-      Above the 95% bar on every module of the integration, with an acceptance
-      suite that is written before the code and never modified to make it pass.
+      Above the 95% bar overall and on every module that routes (dispatcher,
+      router, validation), with an acceptance suite that is written before the
+      code and never modified to make it pass. The two modules just under it
+      are store.py (94.8%) and diagnostics.py (94.4%).
 
   # -------------------------------------------------------------------- Gold
   devices:

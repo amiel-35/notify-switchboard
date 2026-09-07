@@ -46,8 +46,8 @@ for an entity that has both `has_entity_name` and a device:
 So the second route is the one used, exactly as 0.1.0/0.2.0 already did;
 ADR-0017 §2 explicitly allows it ("Either way the requirement is behavioural")
 and `tests/acceptance/test_s3_entities.py` asserts the behaviour, not the
-mechanism. `_frozen_object_id` names the value in one place so the intent is
-readable rather than hidden in an f-string.
+mechanism. `_freeze_object_id` puts that one assignment in one place so the
+intent is readable rather than hidden in an f-string at each call site.
 """
 
 from __future__ import annotations
@@ -107,9 +107,10 @@ def person_device_info(
 class SwitchboardEntity(Entity):
     """Base entity: no polling, refreshed by the switchboard's signal.
 
-    `_frozen_object_id` is the object id the contract froze for this entity.
-    It is returned by `suggested_object_id` so the id never follows the
-    instance language; see the module docstring.
+    Subclasses call `_freeze_object_id` with the object id the contract froze
+    for them, which pins `self.entity_id` so the id never follows the instance
+    language; see the module docstring for why that route and not
+    `suggested_object_id`.
     """
 
     _attr_has_entity_name = True
@@ -124,7 +125,6 @@ class SwitchboardEntity(Entity):
 
     def _freeze_object_id(self, object_id: str) -> None:
         """Pin the entity id to the English form the contract froze."""
-        self._frozen_object_id = object_id
         self.entity_id = f"{self.platform_domain}.{object_id}"
 
     async def async_added_to_hass(self) -> None:
