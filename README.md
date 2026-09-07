@@ -539,6 +539,32 @@ anything.
 | **Episode** | What the router remembers between an alert's `idle → on` and its return to `idle`: who was actually told, on which outputs, under which tags. It is what makes a back-to-normal message reach only the people who heard the alarm. |
 | **Observer mode** | The router watching a target's alert itself rather than waiting to be called as one of its `notifiers:`. The recommended way to wire a target. |
 
+### Words used in the interface
+
+From 0.7.1 the screens are written for somebody who does not read code, so the
+words on them are not always the contract's. This is the mapping; the right
+column is what the rest of this documentation, the contract and the stored
+options call the same thing.
+
+| On screen | In this documentation |
+|---|---|
+| Where to tell them / their devices | `outputs` |
+| When not to disturb them | `silence_entities` |
+| Who to tell | `audience` |
+| Short identifier | `slug` |
+| Alert watched | `alert_entity` |
+| Watch the alert directly | `observer_mode` |
+| Importance (not very important / normal / important / critical) | `priority` (`info` / `normal` / `high` / `critical`) |
+| Tell people depending on presence | `presence_rule` |
+| Put on hold / "later" buttons | snooze |
+| Kept back | deferred |
+| How long a message kept back is still worth sending | `ttl_minutes` |
+| Raise the importance when the house is empty | `escalate_when_nobody_home` |
+| Who gets what (the sensor) | `sensor.switchboard_routing_table` |
+
+Entity ids, service names and option keys are unchanged: only what is written
+on the screens is.
+
 ## Documentation
 
 - [Contract](docs/contract.md) — the frozen public names and behaviour

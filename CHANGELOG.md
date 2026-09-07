@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.7.1 — **plain-language interface**, on top of the 0.7.0 notes below.
+
+The maintainer opened the person step of a real instance and said: *« cet
+écran est incompréhensible pour un humain »*. He was right. The interface
+spoke like the code — `person.dev_bob` in a description, "services notify",
+"entités de silence", "toléré et réessayé", option chips carrying raw service
+names, a field called "Slug" — and everything on those screens was true and
+almost none of it was usable.
+
+**Nothing about the router's behaviour changes.** No new option, no new step,
+no storage migration, no contract change: every translation key, step id,
+field name, menu id, entity id, service name and stored option key is exactly
+what 0.7.0 had.
+
+### Changed
+
+- **Interface wording.** Every user-facing string — the config flow, the
+  options menu and its steps, field labels, `data_description`, errors,
+  aborts, exceptions, repairs, entity names and the service descriptions —
+  is rewritten to say what will happen rather than how the router works, in
+  French first, then English and Spanish (machine-translated, as the rest of
+  `es` is). The reference is the person step: "Services notify et silence"
+  over `person.dev_bob` became "Prévenir Bob" — *« Sur quels appareils Bob
+  reçoit les notifications, et quand faut-il ne pas le déranger ? »* — with
+  "Services notify" and "Entités de silence" becoming "Où prévenir" and
+  "Quand ne pas déranger".
+- **People, devices and targets are named the way the household names them.**
+  A step description interpolates the friendly name, never the entity id; the
+  person and target pickers list names instead of ids; the audience selector
+  offers people by name and speakers in words; a person's own phone is offered
+  as its device name. `explain` details, the options-menu test result and the
+  three consistency repairs say "Bob (person.dev_bob)" where the reader has to
+  go and change something, and "Bob" where they do not.
+- **The priority and presence choices are translated chips** rather than
+  `info` / `normal` / `high` / `critical` and `always` / `home_only` /
+  `away_only`, through a `selector` translation key. The stored values are
+  unchanged.
+- **`README.md` gains "Words used in the interface"** in the Glossary: the
+  mapping from the word on the screen to the contract term, so the
+  documentation and the interface stay linked.
+
+### Known limitation
+
+In the `outputs` selector, only the person's *own* phones carry a readable
+label. `tests/acceptance/test_s4_discovery.py` pins `label == value` for every
+other option — a deliberate 0.4.0 decision that 0.7.1 does not have the
+standing to overturn on its own — so a speaker offered there still reads as
+its bare service name. The audience selector, which nothing pins, is readable
+from end to end.
+
 Router 0.7.0 — **escalation and places, reduced** (contract v0.7 addendum,
 ADR-0021), on top of the 0.6.0, 0.5.1 and 0.5.0 notes below, which are in
 `main` but not tagged.
