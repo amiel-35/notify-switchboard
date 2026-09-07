@@ -1,212 +1,116 @@
 # Accepted deviations
 
 Five places where this integration knowingly bends one of its own stated
-principles, and what each one bought. They are **not** findings: nobody
-reported them, nothing is waiting to be fixed, and none of them is a
-compromise made under time pressure. They are design the maintainer chose,
-recorded here so that the principle stays honest — a doctrine that is never
-seen to bend is a doctrine nobody is reading.
-
-[`known-issues.md`](known-issues.md) is the other file, and it is for findings
-accepted *instead of being fixed*. The two were mixed until 0.6.0
-(ADR-0020 §8). Vocabulary is the [Glossary](../README.md#glossary)'s.
-
----
+principles, and what each one bought. They are design choices, not findings —
+[`known-issues.md`](known-issues.md) is for findings accepted instead of being
+fixed. Vocabulary is the [Glossary](../README.md#glossary)'s.
 
 ## 1. A temporary silence is state the router owns
 
-**The deviation.** `notify_switchboard.silence` sets a per-person silence that
-lives in this integration's own `Store`, with an expiry the router schedules
-and purges itself. Everything else the router reads about the world — presence,
-a night schedule, a Focus sensor — is somebody else's entity.
+**Deviation.** `notify_switchboard.silence` sets a per-person silence in this
+integration's own storage, with an expiry the router schedules and purges
+itself — unlike presence, a night schedule or a Focus sensor, which are all
+somebody else's entity.
 
-**The principles it bends.** "Native first" ([ADR-0001](ADR/0001-native-first.md))
-says a thing Home Assistant already models should be modelled with Home
-Assistant's own object; "the router is a pure proxy"
-([ADR-0002](ADR/0002-pure-proxy.md)) says it should hold no state of its own
-beyond what it must. An `input_boolean` the household owns would satisfy both.
+**Bends.** Native first ([ADR-0001](ADR/0001-native-first.md)) and pure proxy
+([ADR-0002](ADR/0002-pure-proxy.md)): an `input_boolean` the household owns
+would satisfy both.
 
-**Why it was accepted.** An `input_boolean` cannot expire. "Quiet for the next
-hour", tapped from a notification while the phone is in a pocket, is the
-gesture the service exists for, and it has no native equivalent: the user would
-have to create one helper per person, add an automation to turn it off again,
-and remember to do it twice for a household of two. The router already owns
-snoozes, which are the same shape (an instant, per person, persisted, expiring)
-and which nobody has ever proposed making native. The silence is therefore held
-to the same standard as a snooze instead: it is persisted, it survives a
-restart, it lifts on its own, it is visible in
+**Why.** An `input_boolean` cannot expire. "Quiet for the next hour" has no
+native equivalent without a helper and an automation per person. The router
+already owns snoozes, the same shape (an instant, per person, persisted,
+expiring); the silence is held to the same standard: persisted, visible in
 `binary_sensor.<person>_silenced` with an `until` attribute, and it never
-touches the entities the household owns.
+touches entities the household owns.
 
-**What it costs.** One more piece of state to migrate, and one place where the
-answer to "why am I silent?" is inside this integration rather than in an
-entity the user can see on a dashboard. `explain` names it explicitly for
-exactly that reason.
-
----
+**Costs.** One more piece of state to migrate, and an answer to "why am I
+silent?" that lives inside this integration rather than a dashboard entity —
+`explain` names it explicitly for that reason.
 
 ## 2. An episode is a small persisted record of who was told
 
-**The deviation.** For every target tied to an `alert.*`, the router remembers
-one **episode** between the alert's `idle → on` and its return to `idle`: who
-was actually notified, which notify services answered, and under which tags. It
-is written to the `Store` and survives a restart.
+**Deviation.** For every target tied to an `alert.*`, the router remembers one
+**episode** between `idle → on` and the return to `idle`: who was notified,
+which outputs answered, under which tags. Persisted, survives a restart.
 
-**The principle it bends.** [ADR-0002](ADR/0002-pure-proxy.md) again, and more
-directly than the silence does: a proxy that remembers is not only a proxy. A
-strict reading of "pure" would have the router forward a message and forget it.
+**Bends.** Pure proxy ([ADR-0002](ADR/0002-pure-proxy.md)): a proxy that
+remembers is not only a proxy.
 
-**Why it was accepted.** Without the memory, two things are wrong and neither
-can be fixed anywhere else. A "back to normal" message goes to the whole
-audience, including the people who slept through the alarm and are now being
-told an incident they never heard about is over — which is the single most
-common complaint about naive notification setups. And notifications the router
-sent cannot be cleared when they stop being true, because nothing knows which
-phones received them or under which tag. `alert` itself does not keep this: its
-own `notifiers:` list is static, and it has no idea which of them actually
-delivered. The episode is deliberately the smallest record that answers both
-questions — recipients, outputs, tags — and it holds no message bodies.
+**Why.** Without it, a back-to-normal message reaches people who slept
+through the alarm, and notifications cannot be cleared because nothing knows
+which phones received them. `alert` itself keeps none of this. The episode is
+the smallest record that answers both questions, and holds no message bodies.
 
-**What it costs.** A store migration (minor version 4), one open episode that
-can linger when Home Assistant restarts in the middle of an alert — see
-[`known-issues.md`](known-issues.md), "an episode left open across a real Home
-Assistant restart" — and a persisted object whose lifetime is decided by an
-entity this integration does not own.
-
----
+**Costs.** A store migration, an open episode that can linger across a real
+restart (see [`known-issues.md`](known-issues.md)), and a persisted object
+whose lifetime this integration does not fully control.
 
 ## 3. `not_in_audience` is not counted
 
-**The deviation.** `sensor.switchboard_dropped_today` does not count a person
-dropped with the reason `not_in_audience`, and neither does its `reasons`
-attribute. The decision still records it, and `explain` still reports it.
+**Deviation.** `sensor.switchboard_dropped_today` does not count a person
+dropped with the reason `not_in_audience`. The decision still records it, and
+`explain` still reports it.
 
-**The principle it bends.** "Nothing is silently lost"
-([`contract.md`](contract.md) §Routing decision): every dropped call is counted
-and exposed with its reason. `not_in_audience` is a drop that is not counted.
+**Bends.** "Nothing is silently lost" ([`contract.md`](contract.md), Routing
+decision): every dropped call is normally counted with its reason.
 
-**Why it was accepted.** A person outside a target's audience was never a
-recipient of that message, so counting them would make the dropped counter a
-function of the size of the household rather than of anything going wrong. On
-an installation with six people and a target for two, every single message
-would add four to "dropped today" — a number whose job is to be zero when the
-router is working. The contract says such a person is "not considered", and
-this is what not considering somebody looks like in a counter. Nothing is lost,
-because nothing was ever addressed to them; the *decision* still holds the
-reason, so diagnostics and `explain` can both show why somebody was left out.
+**Why.** A person outside a target's audience was never a recipient, so
+counting them would make "dropped today" a function of household size rather
+than of anything going wrong — a household of six with a target for two would
+add four to the counter on every single message.
 
-**What it costs.** One case where the counters do not add up, recorded below,
-and a reader who compares `deferred_today` with `routed_today + dropped_today`
-and finds a gap.
-
-### The visible consequence: a flushed deferral can leave the day's figures short
-
-> Moved here from [`known-issues.md`](known-issues.md) in 0.6.0 (ADR-0020 §8).
-> It is not a finding of its own — it is deviation 3 seen from the counters.
-
-A deferral counted in `sensor.switchboard_deferred_today` whose person has left
-the target's audience overnight re-decides at the flush to `not_in_audience` —
-the one drop reason `UNCOUNTED_DROP_REASONS` deliberately does not count — and
-so leaves the queue without reappearing in `routed_today` or `dropped_today`.
-That is accepted rather than a defect because it is exactly what the live path
-already does with the same decision: making the flush count it would mean the
-same message is treated one way when it arrives and another way when it is
-released, which is a worse inconsistency than a counter that is occasionally
-one short.
-
----
+**Costs.** One case where the daily figures do not add up: a deferral whose
+person left the target's audience overnight re-decides at flush time to
+`not_in_audience`, and so leaves the queue without reappearing in
+`routed_today` or `dropped_today`. Accepted rather than a defect, because it
+is exactly what the live path already does with the same decision.
 
 ## 4. `escalate_when_nobody_home` is not on `target_advanced`
 
-**The deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md)'s
-Consequences say "the options flow gains one boolean on `target_advanced`".
-0.7.0 puts it on a step of its own, `target_escalation`, reached from an
-options-menu entry and its picker.
+**Deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md) says the
+options flow gains one boolean on `target_advanced`. It ships on a step of
+its own, `target_escalation`, instead.
 
-**The principle it bends.** An ADR is normative, and an implementation that
-does not do what its ADR says is the failure mode ADR-0011 exists to prevent.
+**Bends.** An ADR is normative; an implementation that does not do what its
+ADR says is what [ADR-0011](ADR/0011-frozen-contract-and-contract-test.md)
+exists to prevent.
 
-**Why it was accepted.** The two normative documents disagree, and the older
-one is the frozen contract. `docs/contract.md` §"v0.6 addendum" →
-"Four options-flow step ids are public" **enumerates** what `target_advanced`
-holds — `default_priority`, `presence_rule`, `allow_acknowledge`,
-`snooze_minutes`, `default_data`, `message`, `done_message`, `default_title`,
-`clear_done`, nine fields — and the v0.7 addendum does not amend that list. The
-acceptance suite pins the same nine, exactly and in order
-(`tests/acceptance/test_s6_target_editor.py::test_target_advanced_holds_
-everything_else_with_unchanged_defaults`), and those tests are frozen. Adding a
-tenth field would have contradicted the contract *and* required editing a
-frozen test to ship a sentence from a non-frozen section of an ADR.
+**Why.** [`contract.md`](contract.md)'s frozen list of what
+`target_advanced` holds does not include this field, and the acceptance suite
+pins that list exactly, frozen. The same contract section says undocumented
+steps "are internal and may change" — so a new internal step is where the
+field could go without amending the frozen list. What the ADR asks for (a
+boolean in the options flow) is delivered; where it sits is what moved.
 
-The same contract section says the steps it does not list — the confirmation,
-the pickers — "are internal and may change", so a new internal step is the one
-place the field could go without amending anything. What the ADR actually asks
-for, a boolean in the options flow, is delivered; where it sits is the half
-that moved.
-
-**What would change it.** An ADR that amends contract v0.6's list of what
-`target_advanced` holds, and the acceptance test that pins it. Until then, a
-step id has been added and none has been renamed.
-
----
+**Costs.** Nothing user-visible; the field works, and the two normative
+documents (ADR and contract) technically disagree until one is amended.
 
 ## 5. A title is gated on the entity's `supported_features`
 
-**The deviation.** [ADR-0021](ADR/0021-escalation-and-places-reduced.md) §6
-leaves the title to core: the router passes `title` to `notify.send_message`
-regardless, and core drops it for an entity that cannot take one. 0.7.0 reads
-the entity's published `supported_features` first and sends the key only to an
-entity that declares `NotifyEntityFeature.TITLE`. An entity that publishes no
-`supported_features` at all is still sent the title, and core still decides.
+**Deviation.** ADR-0021 §6 says the router passes `title` to
+`notify.send_message` regardless, and lets core drop it when unsupported. The
+router instead reads the entity's `supported_features` first and sends the
+title only when the entity declares it (or publishes no features at all).
 
-**The principle it bends.** An ADR is normative
-([ADR-0011](ADR/0011-frozen-contract-and-contract-test.md)), and this one
-names the behaviour it wants in one sentence. "The router is a pure proxy"
-([ADR-0002](ADR/0002-pure-proxy.md)) leans the same way: a proxy that inspects
-the far end before deciding which key to pass is doing more than proxying.
+**Bends.** Pure proxy again: a router that inspects the far end before
+deciding what to send is doing more than proxying.
 
-**Why it was accepted.** The gate the ADR relies on does not always run.
-`NotifyEntity.async_send_message`
-(`$HA_CORE_SRC/homeassistant/components/notify/__init__.py` line 185, the gate
-at lines 188-193) drops the title for an entity that does not declare the
-feature -- but a platform is free to override `async_send_message`, and one
-that does never reaches the base implementation that would have dropped it.
-For such an entity, "pass it regardless" means handing a title to a platform
-that published, in its own `supported_features`, that it cannot take one. The
-frozen acceptance suite states the expected outcome in the other direction:
-`tests/acceptance/test_s7_entity_outputs.py` line 108,
-`test_an_entity_that_does_not_support_a_title_still_gets_the_message`, asserts
-`title is None` (line 121) for an entity without the feature, and those tests
-may not be edited. Reading the published attribute is therefore the *same*
-outcome as core's for an entity that inherits the base behaviour, and the
-*documented* outcome for one that does not.
+**Why.** Core's own gate for dropping an unsupported title does not always
+run — a platform can override `async_send_message` and never reach it. For
+such an entity, "pass it regardless" hands a title to a platform that
+declared it cannot take one. The frozen acceptance suite pins the opposite
+outcome, so reading the attribute is the only way to match both the ADR's
+intent and the frozen tests.
 
-**What it costs.** One state-machine read per entity delivery, and one place
-where the behaviour is described by neither the ADR alone nor core alone. An
-entity that starts declaring `TITLE` only after it is first seen loses the
-title of anything sent in between, and one that lies about its
-`supported_features` is believed.
-
----
+**Costs.** One state read per entity delivery; an entity that starts
+declaring the feature late loses titles sent before that point, and one that
+misreports its features is believed.
 
 ## What would change any of these
 
-Each one has a shape that would make it native, and none of them is closed:
-
-1. If core ever ships an expiring boolean helper, the temporary silence becomes
-   one and this deviation disappears.
-2. If `alert` ever records its own delivery outcome, the episode shrinks to a
-   pointer into it.
-3. If the dropped counter ever grows a per-reason breakdown that a dashboard
-   can filter, `not_in_audience` can be counted like everything else without
-   drowning the headline number.
-4. If a future ADR amends the contract's list of what `target_advanced` holds,
-   `escalate_when_nobody_home` moves onto it and `target_escalation`
-   disappears.
-5. If core ever runs its `NotifyEntityFeature.TITLE` gate where a platform
-   cannot bypass it -- in the entity service rather than in the base
-   `async_send_message` -- the router stops reading `supported_features` and
-   passes the title regardless, exactly as ADR-0021 §6 asks.
-
-Anything that changes one of them needs an ADR, exactly as the decision to
-accept it did.
+None is closed: an expiring native helper would retire (1); `alert` recording
+its own delivery outcome would shrink (2) to a pointer; a per-reason
+breakdown on the dropped counter would let (3) be counted without drowning the
+headline number; a contract amendment would move (4) onto `target_advanced`;
+and core running its title gate somewhere a platform cannot bypass would
+retire (5). Any change needs an ADR, exactly as accepting the deviation did.

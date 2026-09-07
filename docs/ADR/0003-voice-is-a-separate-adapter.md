@@ -28,3 +28,8 @@ explicitly, target by target, through its own routing configuration —
 Notify Switchboard itself never assumes it. This keeps the safety property
 easy to audit: grep the deployment's configuration for which classes route
 to a voice `notify.*`, instead of having to trust router internals.
+
+> **Correction (2026-09-07):** `notify-cast` and `notify-airplay` were
+> archived, superseded by core's own `notify: platform: tts` aimed at a
+> Music Assistant player. Only the Assist Satellite Notifier adapter
+> remains, in maintenance mode. The principle above is unchanged.

@@ -2,7 +2,7 @@
 
 Dépôt : https://github.com/cy-bertrand/Email-Notify-Manager
 Analyse factuelle uniquement, sans copie de code. Comparé au contrat
-[`docs/notify-switchboard-contract-v0.md`](../notify-switchboard-contract-v0.md).
+[`docs/contract.md`](../contract.md).
 
 ## 1. Fiche d'identité
 
