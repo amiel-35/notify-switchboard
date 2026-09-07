@@ -116,7 +116,15 @@ from .const import (
     VALID_PRESENCE_RULES,
     VALID_PRIORITIES,
 )
-from .dispatcher import companion_service_name, friendly_name, named_entity
+from .dispatcher import (
+    MOBILE_APP_DEVICE_NAME,
+    OUTPUT_LABEL_FALLBACKS,
+    companion_device_names as _companion_device_names,
+    companion_service_name,
+    friendly_name,
+    named_entity,
+    output_label as _output_label,
+)
 from .router import is_recursive_output
 from .validation import parse_snooze_minutes, validate_person, validate_target
 
@@ -136,7 +144,6 @@ BINARY_SENSOR_DOMAIN = "binary_sensor"
 # exactly as `ATTR_USER_ID` already is for `person` (see `const.py`); the paths
 # in the module docstring are what makes them auditable.
 MOBILE_APP_USER_ID = "user_id"
-MOBILE_APP_DEVICE_NAME = "device_name"
 
 # iOS registers its Focus sensor per device; ADR-0018 §3 matches it on the
 # entity id **or** on the entity-registry translation key, because the
@@ -162,13 +169,12 @@ FALLBACK_DEFAULT_TARGET_NAME = "Everybody"
 # `airplay_bedroom` or `mobile_app_dev_bob` is the maintainer's own example of
 # the interface speaking like the code, so every option the two selectors offer
 # is labelled -- and the words that go in a label are translated, like the
-# marker above, rather than being English in a French UI.
-LABEL_HOME_ASSISTANT_APP = "home_assistant_app"
-LABEL_PERSISTENT_NOTIFICATION = "persistent_notification"
+# marker above, rather than being English in a French UI. The two label words
+# themselves live in `dispatcher.py`, which builds the same labels for the
+# sentences `explain` and the test result show.
 OPTION_LABEL_FALLBACKS: dict[str, str] = {
     "this_persons_device": FALLBACK_THIS_PERSONS_DEVICE,
-    LABEL_HOME_ASSISTANT_APP: "Home Assistant app",
-    LABEL_PERSISTENT_NOTIFICATION: "Home Assistant notifications",
+    **OUTPUT_LABEL_FALLBACKS,
 }
 
 # The `SelectSelector` translation keys of the two coded choices
@@ -386,58 +392,6 @@ def _target_label(row: Mapping[str, Any]) -> str:
     without a name falls back to it, exactly as `_alert_snippet` does.
     """
     return str(row.get("name") or row[CONF_SLUG])
-
-
-@callback
-def _companion_device_names(hass: HomeAssistant) -> dict[str, str]:
-    """Map every Companion push service name to the device it belongs to.
-
-    Built from the `mobile_app` config entries rather than from a name
-    heuristic, exactly as `_discovered_outputs` is, and for every registration
-    of the instance rather than one person's: the audience selector offers a
-    phone as a bare output without knowing whose it is.
-    """
-    return {
-        companion_service_name(str(device_name)): str(device_name)
-        for entry in hass.config_entries.async_entries(MOBILE_APP_DOMAIN)
-        if (device_name := entry.data.get(MOBILE_APP_DEVICE_NAME))
-    }
-
-
-def _output_label(
-    service: str,
-    devices: Mapping[str, str],
-    texts: Mapping[str, str],
-    *,
-    identifier: str | None = None,
-) -> str:
-    """Return the label of one `notify` service option, brackets included.
-
-    Three kinds, in order, and each one decides for itself whether the raw
-    identifier is worth showing:
-
-    - a Companion registration **is** its device, spelled the way its owner
-      spelled it in the app; the `mobile_app_…` slug core derives from that
-      name is noise nobody has to read, so it is dropped;
-    - `persistent_notification` is the one core service worth a name of its
-      own, and that name says the whole thing;
-    - anything else has no friendlier name to hide behind, so it is at least
-      turned back into words and keeps its own name in brackets -- somebody
-      who has to go and change a configuration needs it.
-
-    `identifier` is what those brackets say, the service name by default. The
-    audience selector stores `notify.<service>` rather than the bare service
-    and has to show what it stores, which is the only reason this is an
-    argument rather than `service` itself.
-    """
-    device = devices.get(service)
-    if device is not None:
-        return f"{device} ({texts[LABEL_HOME_ASSISTANT_APP]})"
-    if service == SERVICE_PERSISTENT_NOTIFICATION:
-        return texts[LABEL_PERSISTENT_NOTIFICATION]
-    name = service if identifier is None else identifier
-    readable = service.replace("_", " ").capitalize()
-    return readable if readable == name else f"{readable} ({name})"
 
 
 @callback

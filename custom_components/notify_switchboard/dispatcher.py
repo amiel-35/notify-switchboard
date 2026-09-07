@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
@@ -189,6 +189,10 @@ NOTIFY_DOMAIN = "notify"
 ALERT_DOMAIN = "alert"
 SERVICE_TURN_OFF = "turn_off"
 MOBILE_APP_DOMAIN = "mobile_app"
+# The `mobile_app` config-entry data key holding the name its owner gave the
+# device. Spelled out rather than imported, exactly as `MOBILE_APP_DOMAIN` is:
+# the integration keeps no dependency on `mobile_app`.
+MOBILE_APP_DEVICE_NAME = "device_name"
 # The UI half of an episode is closed through core's own service
 # (`homeassistant/components/persistent_notification/__init__.py`: the `dismiss`
 # service, `SCHEMA_SERVICE_NOTIFICATION`, `async_dismiss`).
@@ -218,6 +222,18 @@ DETAIL_SILENCED_TEMPORARY = "silenced_temporary"
 # The floored variant of `detail_silenced` (ADR-0021 §2): same drop reason,
 # same switch to look at, plus the floor that decided which calls it catches.
 DETAIL_SILENCED_FLOOR = "silenced_floor"
+
+# v0.7.1: the two `common` words an output label is built from. They live
+# here, next to `friendly_name` and `companion_service_name`, because both
+# halves of the interface have to name the same phone the same way -- the
+# `outputs` picker of the options flow, and the `detail` sentence `explain`
+# and the test result show.
+LABEL_HOME_ASSISTANT_APP = "home_assistant_app"
+LABEL_PERSISTENT_NOTIFICATION = "persistent_notification"
+OUTPUT_LABEL_FALLBACKS: dict[str, str] = {
+    LABEL_HOME_ASSISTANT_APP: "Home Assistant app",
+    LABEL_PERSISTENT_NOTIFICATION: "Home Assistant notifications",
+}
 
 FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
@@ -995,6 +1011,7 @@ class Switchboard:
         about. Deriving `{person}` from `person` alone left it empty exactly
         there.
         """
+        translations = await self._async_translations()
         placeholders: dict[str, str] = {
             "target": target.name or target.slug,
             # v0.7.1: a sentence a household reads names people the way the
@@ -1004,7 +1021,11 @@ class Switchboard:
             "reason": key,
             "rule": target.presence_rule,
             "state": context.person_states.get(person_id, "") or "unknown",
-            "outputs": ", ".join(outputs or ()),
+            # ... and names devices the way the outputs picker does, from the
+            # same builder. The `outputs` key of the answer keeps the full
+            # `notify.*` service names a script pastes into Developer tools
+            # (ADR-0018 §1); only this sentence is rewritten.
+            "outputs": self._output_names(outputs or (), translations),
             "until": _local_text(until),
         }
 
@@ -1052,12 +1073,36 @@ class Switchboard:
             # what the user has to correct.
             placeholders["person"] = named_entity(self.hass, person_id)
 
-        translations = await self._async_translations()
         template = translations.get(
             f"{KEY_DETAIL_PREFIX}{key}",
             translations.get(f"{KEY_DETAIL_PREFIX}dropped", FALLBACK_DETAIL),
         )
         return _fill(template, placeholders)
+
+    def _output_names(
+        self, outputs: Iterable[str], translations: Mapping[str, str]
+    ) -> str:
+        """Name a list of `notify.*` services the way a household would.
+
+        The labels are the ones the `outputs` picker offers, so the phone
+        somebody ticked as "Bob's iPhone" is still "Bob's iPhone" in the
+        sentence that says where a message went. The words those labels are
+        built from come out of `common`, which `_async_translations` fetches in
+        **the instance language** (`hass.config.language`) -- a user whose own
+        interface is in another language reads this sentence in the
+        instance's, which is why the test-result step says so.
+        """
+        texts = {
+            name: translations.get(
+                f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.{name}", fallback
+            )
+            for name, fallback in OUTPUT_LABEL_FALLBACKS.items()
+        }
+        devices = companion_device_names(self.hass)
+        return ", ".join(
+            output_label(service.rpartition(".")[2], devices, texts)
+            for service in outputs
+        )
 
     def _silence_entities_on(
         self, person: PersonConfig | None, context: RoutingContext
@@ -3486,6 +3531,60 @@ def named_entity(hass: HomeAssistant, entity_id: str) -> str:
     """
     name = friendly_name(hass, entity_id)
     return entity_id if name == entity_id else f"{name} ({entity_id})"
+
+
+@callback
+def companion_device_names(hass: HomeAssistant) -> dict[str, str]:
+    """Map every Companion push service name to the device it belongs to.
+
+    Built from the `mobile_app` config entries rather than from a name
+    heuristic, and for every registration of the instance rather than one
+    person's: an output is offered, and explained, without knowing whose it is.
+    """
+    return {
+        companion_service_name(str(device_name)): str(device_name)
+        for entry in hass.config_entries.async_entries(MOBILE_APP_DOMAIN)
+        if (device_name := entry.data.get(MOBILE_APP_DEVICE_NAME))
+    }
+
+
+def output_label(
+    service: str,
+    devices: Mapping[str, str],
+    texts: Mapping[str, str],
+    *,
+    identifier: str | None = None,
+) -> str:
+    """Return the label of one `notify` service option, brackets included.
+
+    Three kinds, in order, and each one decides for itself whether the raw
+    identifier is worth showing:
+
+    - a Companion registration **is** its device, spelled the way its owner
+      spelled it in the app; the `mobile_app_…` slug core derives from that
+      name is noise nobody has to read, so it is dropped;
+    - `persistent_notification` is the one core service worth a name of its
+      own, and that name says the whole thing;
+    - anything else has no friendlier name to hide behind, so it is at least
+      turned back into words and keeps its own name in brackets -- somebody
+      who has to go and change a configuration needs it.
+
+    `identifier` is what those brackets say, the service name by default. The
+    audience selector stores `notify.<service>` rather than the bare service
+    and has to show what it stores, which is the only reason this is an
+    argument rather than `service` itself. A `detail` sentence takes the
+    default: it names the same thing the picker does, brackets included, for
+    the same reason `named_entity` keeps an entity id -- somebody sent to go
+    and change something needs the name the configuration uses.
+    """
+    device = devices.get(service)
+    if device is not None:
+        return f"{device} ({texts[LABEL_HOME_ASSISTANT_APP]})"
+    if service == PERSISTENT_NOTIFICATION_OUTPUT:
+        return texts[LABEL_PERSISTENT_NOTIFICATION]
+    name = service if identifier is None else identifier
+    readable = service.replace("_", " ").capitalize()
+    return readable if readable == name else f"{readable} ({name})"
 
 
 def companion_service_name(device_name: str) -> str:
