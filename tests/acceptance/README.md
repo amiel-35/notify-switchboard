@@ -24,8 +24,8 @@ Sprint 2 only ever *adds* optional, default-`None` fields.
 
 Verified against: Home Assistant 2026.9.1,
 `pytest-homeassistant-custom-component` 0.13.364, Python 3.14, using the venv
-at `/Users/amiellavon/Projets/_ref/venv-ha-2026.9` and the core clone at
-`/Users/amiellavon/Projets/_ref/home-assistant-core`. Every helper used
+in a dedicated virtualenv (`$HA_VENV`) and a clone of the core repository
+(`$HA_CORE`). Every helper used
 below was confirmed to exist there (paths given inline).
 
 ## Constant names relied upon
@@ -240,7 +240,7 @@ From the repository root (containing `custom_components/notify_switchboard/`
 and this `tests/` tree):
 
 ```bash
-/Users/amiellavon/Projets/_ref/venv-ha-2026.9/bin/python -m pytest tests/acceptance -v
+"$HA_VENV/bin/python" -m pytest tests/acceptance -v
 ```
 
 The target repository's own `pytest.ini`/`pyproject.toml` must set
@@ -252,5 +252,5 @@ staging directory does not ship one since it has no importable
 Lint the test files themselves with:
 
 ```bash
-/Users/amiellavon/Projets/_ref/venv-ha-2026.9/bin/python -m ruff check tests/acceptance
+"$HA_VENV/bin/python" -m ruff check tests/acceptance
 ```

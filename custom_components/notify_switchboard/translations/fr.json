@@ -42,7 +42,7 @@
         },
         "data_description": {
           "entity_id": "L'entité person.* dont la présence décide si cette personne est notifiée.",
-          "outputs": "Noms de services notify sans le préfixe notify., par exemple mobile_app_amiel. Un service qui n'existe pas encore est toléré et réessayé.",
+          "outputs": "Noms de services notify sans le préfixe notify., par exemple mobile_app_alice. Un service qui n'existe pas encore est toléré et réessayé.",
           "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire.",
           "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
         }

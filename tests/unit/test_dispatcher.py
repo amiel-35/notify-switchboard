@@ -870,7 +870,7 @@ async def test_migration_is_a_no_op_at_version_1(hass: HomeAssistant) -> None:
         # separator does not survive as `mobile_app_` + "".
         ("Alice's iPhone", "mobile_app_alice_s_iphone"),
         ("-", "mobile_app"),
-        ("Téléphone d'Amiel", "mobile_app_telephone_d_amiel"),
+        ("Téléphone d'Alice", "mobile_app_telephone_d_alice"),
     ],
 )
 def test_companion_service_name_matches_core(device_name: str, expected: str) -> None:
