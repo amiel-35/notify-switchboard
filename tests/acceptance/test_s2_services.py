@@ -673,7 +673,10 @@ def test_services_yaml_declares_all_five_services_with_their_fields():
     )
 
     declared = yaml.safe_load(services_yaml.read_text(encoding="utf-8")) or {}
-    assert set(declared) == set(EXPECTED_SERVICES)
+    # v0.2 froze these five; later addenda add services (v0.4: `explain`,
+    # ADR-0018) that must also be declared here, so the five are a floor,
+    # not an exact set. Nothing frozen may be missing.
+    assert set(EXPECTED_SERVICES) <= set(declared)
 
     for service, expected_fields in EXPECTED_SERVICES.items():
         fields = set((declared[service] or {}).get("fields") or {})
