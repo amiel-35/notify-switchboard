@@ -68,7 +68,7 @@ def make_target(
     slug: str,
     name: str,
     *,
-    klass: str = "test",
+    klass: str | None = None,
     default_priority: str = "normal",
     alert_entity: str | None = None,
     audience: list[str] | None = None,
@@ -91,11 +91,15 @@ def make_target(
     row it always has. `managed` is the v0.4 addendum (ADR-0018) and is only
     written when true, for the same reason; so is `clear_done`, the v0.5
     addendum (ADR-0019 §6), whose default is off.
+
+    `klass` writes the `class` key the v0.6 addendum (ADR-0020 §4) removes
+    from the row. It defaults to *absent*, which is what a 0.6 row looks
+    like, and stays settable so `test_s6_class_removed.py` can build the one
+    thing that still has to work: a row stored by an older version.
     """
     row: dict[str, Any] = {
         "slug": slug,
         "name": name,
-        "class": klass,
         "default_priority": default_priority,
         "alert_entity": alert_entity,
         "audience": list(audience or []),
@@ -108,6 +112,11 @@ def make_target(
         "done_message": done_message,
         "default_title": default_title,
     }
+    if klass is not None:
+        # v0.6 (ADR-0020 §4): `class` is gone from the schema and ignored when
+        # a stored row still has it. Only a test about that legacy row asks
+        # for it.
+        row["class"] = klass
     if managed:
         # v0.4 addendum (ADR-0018): an optional row key, *absent* on every row
         # written before 0.4.0 -- which is why it is only added when asked for.

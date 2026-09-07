@@ -94,7 +94,8 @@ async def test_the_first_person_creates_the_default_row_and_the_default_target(
     assert row["managed"] is True
     assert row["audience"] == ["person.alice"]
     assert row["name"], "the row is named, in the instance language (ADR-0018 §4)"
-    assert row["class"] == "general"
+    # What the bootstrapped row must *not* carry any more (`class`, ADR-0020 §4)
+    # is pinned by `test_s6_class_removed.py`, next to the rest of that removal.
     assert row["default_priority"] == "normal"
     assert row["presence_rule"] == "always"
     assert row["alert_entity"] is None

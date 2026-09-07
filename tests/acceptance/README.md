@@ -68,7 +68,9 @@ entry.options = {
         {
             "slug": "leak",  # -> notify.switchboard_leak
             "name": "Fuite d'eau",  # display name; also the observer-mode fallback message
-            "class": "building",  # free text, grouping only, never a code constant
+            # v0.6 (ADR-0020 §4): `class` is gone. A stored one is ignored,
+            # never migrated and never shown; `make_target(klass=...)` still
+            # writes one, for the one test about a target stored by 0.5.
             "default_priority": "normal",  # info|normal|high|critical
             "alert_entity": "alert.test_leak",  # optional alert.* this row is tied to, or None
             "audience": ["person.alice", "person.bob"],  # list of person.* entity ids
@@ -608,3 +610,81 @@ half of a rule is worth pinning even when today's code already satisfies it.
 - `test_s5_clear.py::test_a_caller_supplied_tag_and_notification_id_win` — a
   default that overrode a caller would be worse than no default; 0.4.0 already
   passes both keys through untouched, and §6 must not change that.
+
+## Sprint 6 (`test_s6_*.py`, and the v0.6 additions to `test_contract.py`)
+
+Sprint 6 is a **consolidation** release: no new routing rule, no entity, no
+service, no drop reason. The acceptance tests are therefore about *shape* —
+which step asks for what, which key is gone, which word is used — plus the one
+behaviour ADR-0020 §3 decides, because making `wake_time` optional is
+meaningless if leaving it empty turns "hold this until morning" into "drop
+this".
+
+Written against `docs/contract.md` §"v0.6 addendum (ADR-0020)",
+`docs/ADR/0020-consolidation.md` and `docs/sprints/sprint-6-brief.md`.
+
+| File | What it pins |
+|---|---|
+| `test_s6_target_editor.py` | The `target` step asks exactly `slug`, `name`, `alert_entity`, `audience`, `observer_mode`; `target_advanced` holds the other nine with unchanged defaults and opens on the stored target; a target created through the basic step alone is byte-for-byte the row 0.5 wrote for the same answers and routes the same way; the advanced step writes its own nine fields and touches none of the five. |
+| `test_s6_person_editor.py` | `person_outputs` keeps `outputs` and `silence_entities`; `wake_time` and `summary` move to `person_advanced` with their 0.5 defaults; editing the outputs keeps a stored wake time; a person **without** a wake time, silenced by a `schedule.*`, is deferred and flushed when that schedule ends (no timer fired); a silence that publishes no end still drops with `silenced`. |
+| `test_s6_class_removed.py` | A target stored with `class` loads and routes; the key is absent from both target steps, from the routing table a diagnostics dump exposes, and from the target the router bootstraps itself. |
+| `test_s6_vocabulary.py` | No user-facing English string calls a target a *row*; *rule* survives only as **presence rule** or as the `{rule}` placeholder; every `issues.*` / `exceptions.*` message that names a target uses the word "target"; `fr` and `es` get the same treatment through *ligne* / *règle* and *fila* / *regla*. |
+| `test_contract.py` | `class` is absent from every target the router writes; the four public step ids exist and are titled; the `ttl_minutes` defaults are defaults a household can change, asserted through the override rather than through the three numbers. |
+
+### Fixtures and helpers touched in `conftest.py`
+
+- **`make_target(klass=...)`** now defaults to *absent* rather than
+  `"test"` — that is what a 0.6 target looks like — and stays settable so
+  `test_s6_class_removed.py` can build a target stored by 0.5. Nothing else in
+  the builder changed, and no existing test asserted the key.
+- No new fixture. The S6 flow tests walk menu → step → submit through the S4
+  `options_flow` fixture, and read a schema through `schema_field` /
+  `suggested_value`; each file adds a two-line `_field_names` / `_default`
+  helper of its own rather than growing the shared conftest for a shape that
+  only S6 asserts.
+
+### Assumptions added by Sprint 6
+
+20. **A step's schema is read as an ordered list of field names.** The editor
+    tests assert `[str(marker) for marker in result["data_schema"].schema]`
+    against an exact list, order included, because "five fields, that is all"
+    is the promise of the release and a sixth one added later would otherwise
+    pass unnoticed. Selectors themselves are not asserted beyond their
+    declared defaults: which widget renders a priority is not a contract.
+21. **A silence entity that publishes its own end means a `schedule.*`**, and
+    the end is its `next_event` state attribute
+    (`$HA_CORE_SRC/homeassistant/components/schedule/const.py`,
+    `ScheduleEntityStateAttribute.NEXT_EVENT`). The person-editor test sets
+    that state directly, exactly as every other test sets an
+    `input_boolean.*` silence without setting up `input_boolean`: what is
+    pinned is the router reading a published end, not core's schedule
+    machinery.
+22. **`test_s6_class_removed.py` may import the integration's diagnostics
+    entry point.** It is the only acceptance file that imports anything beyond
+    the three frozen names of the Sprint 1 rule. `async_get_config_entry_diagnostics`
+    is public API — Home Assistant calls it — and `docs/contract.md` §v0.6
+    speaks about what a dump exposes, so the assertion belongs at this level.
+23. **The vocabulary is asserted on the shipped translation files**, not on a
+    rendered form: `strings.json` and `translations/{en,fr,es}.json` are what
+    a user reads. The rules are deliberately narrow (one forbidden word for a
+    target, one allowed use of "rule") so the test guards the vocabulary and
+    never the prose.
+
+### Tests that are green from the start, on purpose
+
+- `test_s6_target_editor.py::test_a_basic_target_routes_exactly_as_a_0_5_target_with_defaults`
+  — 0.5 already routes this way, and that is the point: the release may
+  shorten the form and must not touch the decision.
+- `test_s6_person_editor.py::test_a_person_saved_without_the_advanced_step_has_no_wake_time`
+  — the stored shape a two-field form must keep producing.
+- `test_s6_person_editor.py::test_without_a_wake_time_a_silence_that_never_ends_still_drops`
+  — the boundary of ADR-0020 §3, and the line an over-eager implementation
+  crosses first.
+- `test_s6_class_removed.py::test_a_target_stored_with_class_still_loads_and_routes`
+  — there is no migration to lean on, so "ignored" has to mean ignored.
+- `test_s6_vocabulary.py::test_rule_is_only_ever_the_presence_rule` — already
+  true today; it exists so the strings the two advanced steps add cannot
+  reintroduce "rule" for a target.
+- `test_contract.py::test_the_ttl_defaults_are_defaults_a_household_can_change`
+  — 0.5 already lets a household override them; v0.6 only says out loud that
+  the three numbers are not frozen.

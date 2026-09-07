@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.5 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.6 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -27,6 +27,13 @@
 > caller's data only. The four
 > `event.switchboard_delivery` event types are unchanged. Everything above and
 > below stays the v0 / v0.2 / v0.3 / v0.4 text, unchanged.
+>
+> v0.6 addendum (ADR-0020): `class` leaves the routing-table row keys (a
+> stored one is ignored), `wake_time` becomes optional with a documented
+> meaning when it is absent, the `ttl_minutes` defaults are reclassified as
+> defaults a minor version may change, and four options-flow step ids become
+> public names. Nothing is added and no routing rule changes. Everything
+> above and below stays the v0 / v0.2 / v0.3 / v0.4 / v0.5 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -426,6 +433,85 @@ been routed:
 
 A clear is **not a message**: it is not counted, it fires no
 `event.switchboard_delivery`, and it is subject to no routing rule.
+
+## v0.6 addendum (ADR-0020)
+
+This addendum **removes** one thing, **relaxes** one thing, **reclassifies**
+one thing and **freezes** four names. It adds no service, no entity, no `data`
+key, no drop reason and no `event.switchboard_delivery` type.
+
+### `class` is no longer a routing-table row key
+
+A routing-table row has no `class`. The key was never part of this document,
+was never read by the router and was never exposed anywhere; from 0.6.0 it is
+not written, not offered in the options flow, and **ignored** when a stored
+row still carries one — never migrated, never shown, never deleted. It is also
+stripped from the routing table a diagnostics dump exposes, so it cannot be
+mistaken for something the router reads.
+
+Removing it is not a breaking change: nothing may have depended on it, because
+nothing ever read it back.
+
+### `wake_time` is optional, and its absence has a meaning
+
+`wake_time` is an optional key of a person row, as it always was. What v0.6
+adds is the documented behaviour when it is **absent**:
+
+| The person is silenced by | With a `wake_time` | Without a `wake_time` |
+|---|---|---|
+| a configured silence entity that publishes its own end (`schedule.*`, whose `next_event` attribute holds the end of the current block) | deferred until the wake time, flushed early when the last silence lifts (v0.5 §4) | **deferred until that end**, flushed by the same early flush |
+| a configured silence entity that publishes no end (`input_boolean.*`, a Companion Focus `binary_sensor.*`) | deferred until the wake time | dropped with reason `silenced`, as in v0.1 → v0.5 |
+| a temporary `notify_switchboard.silence` only | dropped with reason `silenced` | dropped with reason `silenced` |
+
+A deferral made this way is a deferral like any other: it counts towards
+`sensor.switchboard_deferred_today`, it is subject to `ttl_minutes`, it is
+re-decided in full at its flush (v0.5 §3), it can be summarised (v0.5 §2), and
+it is caught up after a restart. `explain` reports it as `decision: deferred`
+with `until` set to that end — `until` keeps its frozen meaning of a real
+instant, which is why the rule is scoped to silences that have one.
+
+`priority: critical` still bypasses silence everywhere, so a critical message
+is never deferred and never expires.
+
+### The `ttl_minutes` defaults are defaults, not frozen values
+
+The three values of v0.5 — `info` 120, `normal` 720, `high` `null` — are
+**documented defaults that a minor version may change**. They are not part of
+the frozen surface and no caller may rely on a particular number.
+
+What *is* frozen is the mechanism, unchanged from v0.5: the option
+`entry.options["ttl_minutes"]`, the per-call `data.ttl_minutes` override, the
+meaning of `null`/absent ("never expires"), the meaning of `0` on a call
+("this message never expires"), the absence of a `critical` entry, and the
+`expired` drop reason. A household that needs a specific number states it;
+the options flow always shows the values in force.
+
+### Four options-flow step ids are public
+
+Documentation, cards and support answers link to a Home Assistant options step
+by its id. These four may not be renamed without an ADR:
+
+| Step id | What it holds |
+|---|---|
+| `target` | the five fields that create a target: `slug`, `name`, `alert_entity`, `audience`, `observer_mode` |
+| `target_advanced` | everything else on a target: `default_priority`, `presence_rule`, `allow_acknowledge`, `snooze_minutes`, `default_data`, `message`, `done_message`, `default_title`, `clear_done` |
+| `person_outputs` | a person's `outputs` and `silence_entities` |
+| `person_advanced` | a person's `wake_time` and `summary` |
+
+Defaults are unchanged by the split, and the step a field lives in is the only
+thing that moved: a target created through `target` alone is exactly the row
+v0.5 wrote for the same five answers, minus `class`.
+
+Steps not listed here — including the `target_saved` confirmation and the
+pickers that lead to the advanced steps — are internal and may change.
+
+### One word per concept
+
+In every user-facing string, error message and document, a row of the routing
+table is a **target**. The `target:` list of the legacy `notify.switchboard`
+call is spelled "the notify `target` list" wherever it has to be distinguished
+from it. A `person.*` is a **person**. `README.md` carries the glossary the
+other documents link to.
 
 ## Observer mode (plan B, ADR-007)
 
