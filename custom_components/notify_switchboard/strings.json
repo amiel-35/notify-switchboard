@@ -161,12 +161,12 @@
       },
       "target_saved": {
         "title": "Target saved",
-        "description": "Here is the alert: block this target expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nEverything else — priority, presence, buttons, templates — already has a default. Tick the box below to set them now, or come back later through Advanced settings of a target in this menu.",
+        "description": "Here is the alert: block this target expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nThe block follows the observer mode you chose: in observer mode the router watches the alert itself and no notifiers: is needed, and with observer mode off the notifiers: entry is what lets the alert drive the router.\n\nEverything else — priority, presence, buttons, templates — already has a default. Tick the box below to set them now, or come back later through Advanced settings of a target in this menu.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
         "data_description": {
-          "advanced": "Leave it unticked to save this target as it is."
+          "advanced": "Leave it unticked to save this target as it is. Ticked, the target is saved when the next form is submitted."
         }
       },
       "target_advanced": {

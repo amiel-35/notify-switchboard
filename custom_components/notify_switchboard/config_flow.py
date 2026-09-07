@@ -60,6 +60,7 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
@@ -118,6 +119,8 @@ from .validation import parse_snooze_minutes, validate_person, validate_target
 
 if TYPE_CHECKING:
     from .dispatcher import Switchboard
+
+_LOGGER = logging.getLogger(__name__)
 
 TITLE = "Notify Switchboard"
 
@@ -223,8 +226,24 @@ def _showable(errors: dict[str, str], fields: frozenset[str]) -> dict[str, str]:
     saying why is a flow the user cannot leave. The values that could carry
     such an error came from the store, where they were validated when they were
     written.
+
+    That reasoning holds for values the store wrote; it stops holding the day
+    the store holds something the current validation rejects -- a row written
+    by an older version, or hand-edited in `.storage`. The submission then goes
+    through and the complaint is dropped on the floor, which is the right
+    behaviour and an awful thing to debug in silence. What is dropped is
+    logged, at debug: nothing is wrong for the user, so nothing should be said
+    to them, but a bug report should be able to say what the flow decided not
+    to show.
     """
-    return {field: error for field, error in errors.items() if field in fields}
+    shown = {field: error for field, error in errors.items() if field in fields}
+    if hidden := {
+        field: error for field, error in errors.items() if field not in shown
+    }:
+        _LOGGER.debug(
+            "Not shown on this step, which has no field for them: %s", hidden
+        )
+    return shown
 
 
 def _ttl_value(raw: Any) -> int | None:
@@ -334,28 +353,39 @@ def _output_options(
 
 
 def _alert_snippet(row: dict[str, Any]) -> str:
-    """Return the ready-to-paste `alert:` block for one routing-table row."""
+    """Return the ready-to-paste `alert:` block for one routing-table row.
+
+    A row in **observer mode** gets no `notifiers:`. That is not a shortening
+    of the block, it is what observer mode *is*: the router watches the alert
+    entity itself, and the README says the block "needs no `notifiers:` at
+    all". Emitting one anyway wires the row both ways at once -- the alert
+    calls the router on every `repeat`, and the router routes the same
+    transition on its own -- so the first thing the user would see after
+    pasting the block they were handed is a duplicated notification.
+    """
     alert_entity = row.get(CONF_ALERT_ENTITY)
     object_id = (
         str(alert_entity).partition(".")[2] if alert_entity else str(row[CONF_SLUG])
     )
     acknowledge = "true" if row.get(CONF_ALLOW_ACKNOWLEDGE) else "false"
-    return "\n".join(
-        (
-            "alert:",
-            f"  {object_id}:",
-            # A row name is free text: an unquoted `Fuite: eau # urgence`
-            # is a nested mapping truncated at the `#`. `json.dumps` emits a
-            # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
-            f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
-            f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
-            '    state: "on"',
-            "    repeat: [5, 15, 60]",
-            f"    can_acknowledge: {acknowledge}",
+    lines = [
+        "alert:",
+        f"  {object_id}:",
+        # A row name is free text: an unquoted `Fuite: eau # urgence`
+        # is a nested mapping truncated at the `#`. `json.dumps` emits a
+        # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
+        f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
+        f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
+        '    state: "on"',
+        "    repeat: [5, 15, 60]",
+        f"    can_acknowledge: {acknowledge}",
+    ]
+    if not row.get(CONF_OBSERVER_MODE):
+        lines += [
             "    notifiers:",
             f"      - {LEGACY_SERVICE_NAME}_{row[CONF_SLUG]}",
-        )
-    )
+        ]
+    return "\n".join(lines)
 
 
 def _explain_summary(response: dict[str, Any]) -> str:

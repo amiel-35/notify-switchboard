@@ -161,12 +161,12 @@
       },
       "target_saved": {
         "title": "Destino guardado",
-        "description": "Este es el bloque alert: que espera este destino. Cópialo en tu configuración YAML, apunta entity_id a la entidad que quieres vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTodo lo demás — prioridad, presencia, botones, plantillas — ya tiene un valor por defecto. Marca la casilla de abajo para ajustarlo ahora, o vuelve más tarde por «Ajustes avanzados de un destino» en este menú.",
+        "description": "Este es el bloque alert: que espera este destino. Cópialo en tu configuración YAML, apunta entity_id a la entidad que quieres vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nEl bloque sigue el modo observador que hayas elegido: en modo observador el enrutador vigila la propia alerta y no hace falta ningún notifiers:, y con el modo observador desactivado es la entrada notifiers: la que permite que la alerta gobierne el enrutador.\n\nTodo lo demás — prioridad, presencia, botones, plantillas — ya tiene un valor por defecto. Marca la casilla de abajo para ajustarlo ahora, o vuelve más tarde por «Ajustes avanzados de un destino» en este menú.",
         "data": {
           "advanced": "Abrir ahora los ajustes avanzados"
         },
         "data_description": {
-          "advanced": "Déjalo sin marcar para guardar este destino tal cual."
+          "advanced": "Déjalo sin marcar para guardar este destino tal cual. Si lo marcas, el destino se guarda al enviar el siguiente formulario."
         }
       },
       "target_advanced": {

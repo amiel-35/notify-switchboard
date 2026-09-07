@@ -161,12 +161,12 @@
       },
       "target_saved": {
         "title": "Cible enregistrée",
-        "description": "Voici le bloc alert: que cette cible attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTout le reste — priorité, présence, boutons, modèles — a déjà une valeur par défaut. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
+        "description": "Voici le bloc alert: que cette cible attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nLe bloc suit le mode observateur que vous avez choisi : en mode observateur le routeur surveille l'alerte lui-même et aucun notifiers: n'est nécessaire, et si le mode observateur est désactivé c'est l'entrée notifiers: qui permet à l'alerte de piloter le routeur.\n\nTout le reste — priorité, présence, boutons, modèles — a déjà une valeur par défaut. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer cette cible telle quelle."
+          "advanced": "Laissez décoché pour enregistrer cette cible telle quelle. Si vous cochez, la cible est enregistrée à la validation du formulaire suivant."
         }
       },
       "target_advanced": {
