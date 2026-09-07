@@ -1,26 +1,36 @@
-# Quality scale self-assessment for Notify Switchboard.
-# Bronze is the target for Sprint 1 (the router). Silver/gold are not assessed
-# yet; they will be added once the cards and voice adapters land.
+# Quality scale self-assessment for Notify Switchboard (router 0.3.0).
+#
+# Every rule of every tier is assessed: `done`, `todo` with a one-line reason,
+# or `exempt` with a one-line reason. Nothing is left "not assessed yet"
+# (ADR-0017, sprint-3 brief item 7). The `docs-*` rules are read against this
+# repository's own documentation -- README.md, docs/quickstart.md,
+# docs/contract.md, docs/ARCHITECTURE.md -- since a custom integration has no
+# page on home-assistant.io.
 rules:
-  # Bronze
+  # ------------------------------------------------------------------ Bronze
   action-setup:
-    status: exempt
-    comment: This integration does not register any custom actions/services.
+    status: done
+    comment: >-
+      The five notify_switchboard.* actions are registered in async_setup
+      (__init__.async_setup); a call made while no config entry is loaded
+      raises a translated ServiceValidationError (no_loaded_entry).
   appropriate-polling:
     status: exempt
     comment: iot_class is calculated; every entity is push-updated.
   brands:
-    status: todo
-    comment: Brand assets not yet submitted to home-assistant/brands.
+    status: done
+    comment: Bundled in-repo icon (HA 2026.3+), custom_components/notify_switchboard/brand/.
   common-modules: done
   config-flow: done
   config-flow-test-coverage: done
-  dependency-transparency: done
+  dependency-transparency:
+    status: done
+    comment: No requirements at all; the only dependencies are core integrations.
   docs-actions:
-    status: exempt
+    status: done
     comment: >-
-      No custom services.yaml is shipped: the public surface is the legacy
-      notify.switchboard[_<slug>] services, described by notify's own schema.
+      services.yaml describes the five actions and their fields; README.md
+      "Services" and docs/contract.md document what each one refuses and why.
   docs-conditions:
     status: exempt
     comment: This integration does not have any conditions.
@@ -34,7 +44,7 @@ rules:
     status: done
     comment: >-
       Entities subscribe in async_added_to_hass and unsubscribe through
-      async_on_remove; the switchboard's own listeners are cancelled on unload
+      async_on_remove; the switchboard's own listeners are detached on unload
       and on EVENT_HOMEASSISTANT_STOP.
   entity-unique-id: done
   has-entity-name: done
@@ -48,16 +58,150 @@ rules:
     status: exempt
     comment: Same reasoning as test-before-configure.
   unique-config-entry: done
-  # Bronze, added in Sprint 1
-  diagnostics: done
-  entity-translations:
+
+  # ------------------------------------------------------------------ Silver
+  action-exceptions:
+    status: done
+    comment: >-
+      ADR-0015: every refused or invalid action raises ServiceValidationError
+      with a translated message; unexpected failures raise HomeAssistantError.
+  config-entry-unloading:
+    status: done
+    comment: >-
+      async_unload_entry unloads every platform, removes the legacy notify
+      services and detaches every listener and timer of the switchboard.
+  docs-configuration-parameters:
+    status: done
+    comment: >-
+      Every options-flow field carries a data_description in strings.json;
+      README.md "Configuration" and docs/quickstart.md walk through them.
+  docs-installation-parameters:
+    status: done
+    comment: Setup takes no input; README.md "Install" says so and links the quickstart.
+  entity-unavailable:
     status: exempt
     comment: >-
-      Entity names are fixed by docs/contract.md; only the router-added
-      Companion labels are translated, through the common.* section.
-  reauthentication-flow:
+      Nothing external can go away: every entity reports the router's own
+      in-process state, so it is never unavailable. A notify output that
+      disappears raises a repair instead (missing_output).
+  integration-owner: done
+  log-when-unavailable:
     status: exempt
-    comment: There is nothing to authenticate against.
+    comment: >-
+      Same reasoning as entity-unavailable: there is no connection to lose. An
+      output that fails several times in a row is logged once and repaired.
   parallel-updates:
     status: exempt
     comment: No entity polls or writes to a device.
+  reauthentication-flow:
+    status: exempt
+    comment: There is nothing to authenticate against.
+  test-coverage:
+    status: done
+    comment: >-
+      Above the 95% bar on every module of the integration, with an acceptance
+      suite that is written before the code and never modified to make it pass.
+
+  # -------------------------------------------------------------------- Gold
+  devices:
+    status: done
+    comment: >-
+      One service device for the router and one virtual device per person, so
+      each person's entities are grouped and named after them.
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: A helper integration with nothing on the network to discover.
+  discovery-update-info:
+    status: exempt
+    comment: Same reasoning as discovery.
+  docs-data-update:
+    status: exempt
+    comment: >-
+      No data is fetched or polled: every entity is computed from the router's
+      own state and pushed when a routing decision changes it.
+  docs-examples:
+    status: done
+    comment: >-
+      docs/examples/ carries three complete alert: examples and
+      blueprints/automation/notify_switchboard/ three ready-made blueprints.
+  docs-known-limitations:
+    status: done
+    comment: >-
+      docs/known-issues.md, plus docs/contract.md "What this contract does not
+      promise".
+  docs-supported-devices:
+    status: exempt
+    comment: The integration talks to no device; its outputs are whatever notify.* services exist.
+  docs-supported-functions:
+    status: done
+    comment: docs/contract.md is the frozen, exhaustive description of the public surface.
+  docs-troubleshooting:
+    status: todo
+    comment: >-
+      README.md and docs/quickstart.md explain the happy path but there is no
+      section yet on reading the drop reasons and repairs when nothing arrives.
+  docs-use-cases:
+    status: done
+    comment: README.md "Why" and docs/quickstart.md open on the cases this exists for.
+  dynamic-devices:
+    status: exempt
+    comment: >-
+      Devices are routing-table rows, not discovered hardware: a person added
+      in the options gets their device on the reload that options change
+      already triggers.
+  entity-category:
+    status: todo
+    comment: >-
+      The three daily counters are arguably EntityCategory.DIAGNOSTIC; moving
+      them changes where every existing dashboard finds them, so the decision
+      waits for the sprint that builds the cards.
+  entity-device-class:
+    status: done
+    comment: >-
+      sensor.<person>_last_notification is a TIMESTAMP; no core device class
+      describes a per-day notification counter or a router-owned silence.
+  entity-disabled-by-default:
+    status: exempt
+    comment: >-
+      Three global entities and two per person, all cheap to compute and all
+      part of what the contract promises a card can read.
+  entity-translations:
+    status: done
+    comment: >-
+      Every entity is named through entity.<platform>.<key>.name in
+      strings.json and translations/{en,fr,es}.json (ADR-0017 §2); the entity
+      ids stay the frozen English ones in every instance language.
+  exception-translations:
+    status: done
+    comment: Every ServiceValidationError carries a translation_key under exceptions.
+  icon-translations:
+    status: todo
+    comment: No icons.json yet; the entities fall back to their device-class or default icons.
+  reconfiguration-flow:
+    status: exempt
+    comment: >-
+      The config entry itself holds nothing to reconfigure -- the whole routing
+      table lives in the options flow, which can edit every row.
+  repair-issues:
+    status: done
+    comment: >-
+      Five translated repairs (unknown_target, missing_output,
+      invalid_service_target/person, person_without_user_id), each deleted when
+      its cause is gone.
+  stale-devices:
+    status: todo
+    comment: >-
+      Removing a person from the routing table leaves their virtual device in
+      the registry; the cleanup belongs with the zero-config sprint (S4).
+
+  # ---------------------------------------------------------------- Platinum
+  async-dependency:
+    status: exempt
+    comment: There is no dependency: requirements is empty and everything is core helpers.
+  inject-websession:
+    status: exempt
+    comment: The integration makes no HTTP request of its own.
+  strict-typing:
+    status: done
+    comment: mypy strict runs over custom_components/notify_switchboard in CI.

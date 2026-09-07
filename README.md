@@ -112,7 +112,13 @@ Three optional fields per row, all empty by default:
 
 ## Translations
 
-The interface ships in English, French and Spanish. English and French are
+The interface ships in English, French and Spanish — including the entity
+names: `sensor.switchboard_routed_today` reads as "Routed today", "Acheminées
+aujourd'hui" or "Encaminadas hoy" depending on the instance language, while
+the **entity id itself never changes**, so an `alert:`, an automation or a card
+written against the documented names keeps working in any language.
+
+English and French are
 written by the maintainer; **the Spanish translation
 (`custom_components/notify_switchboard/translations/es.json`) is machine
 translated and has not been reviewed by a native speaker** — corrections and
@@ -126,11 +132,17 @@ the `notify.switchboard` service and the entity; it does not touch the
 
 ## Roadmap
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table
-(S0 → S8). This release covers S0 to S2: the routing table, the per-person
-decision, acknowledge and snooze, night deferral, observer mode, the
-diagnostic entities, and — since 0.2.0 — the five services above, a temporary
-per-person silence and the per-row message texts.
+See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the sprint table and
+the router's own roadmap. This release covers everything up to router S3: the
+routing table, the per-person decision, acknowledge and snooze, night
+deferral, observer mode, the diagnostic entities, the five services above, a
+temporary per-person silence, the per-row message texts, and — since 0.3.0 —
+translated entity names, a parallel fan-out bounded by a per-output timeout,
+`person.user_id` as the canonical link for Companion callbacks, and actions
+that exist whether or not the config entry is loaded.
+
+Next: zero-config (S4), a real quiet-hours model (S5), escalation (S6) and
+places (S7).
 
 ## Documentation
 
@@ -144,9 +156,19 @@ per-person silence and the per-row message texts.
   sprint roadmap.
 - [Known issues](docs/known-issues.md) — what was consciously left out, and
   why.
-
-A quickstart and importable blueprints are planned for S7.
+- [Quickstart](docs/quickstart.md) — route your first alert in ten minutes.
+- [Blueprints](docs/blueprints.md) — the three importable automation
+  blueprints shipped in `blueprints/automation/notify_switchboard/`.
 
 ## License
 
 [MIT](LICENSE) © 2026 the maintainer
+
+## How this project is built
+
+This integration is written almost entirely by AI models, under the direction
+and the responsibility of a single human maintainer, who owns every product
+decision and tests each release on real hardware.
+[`docs/how-this-is-built.md`](docs/how-this-is-built.md) sets out who does
+what, what the specification-before-code discipline is meant to catch, and
+what it does not catch — read it before deciding how much to trust this code.

@@ -337,8 +337,25 @@ per sprint.
 | S7 | Blueprints + docs site | An external user routes an alert in 10 minutes |
 | S8 | HACS default submission, quality scale silver | HACS acceptance |
 
-This repository (`notify-switchboard`) covers S0/S1/S2 of the router; the
-other rows live in sibling repositories per the umbrella doctrine.
+This repository (`notify-switchboard`) covers the router rows; the others live
+in sibling repositories per the umbrella doctrine. The quickstart
+(`docs/quickstart.md`) and the three importable blueprints
+(`blueprints/automation/notify_switchboard/`) landed early, ahead of the S7
+row that planned them.
+
+### Router roadmap
+
+The router has its own sprint sequence inside those rows. **S3 is done** and is
+what 0.3.0 ships.
+
+| # | Router increment | State |
+|---|---|---|
+| S0-S2 | Foundations, the router itself, the UI services and the per-row texts | Shipped (0.1.0, 0.2.0) |
+| S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | **Done — 0.3.0** |
+| S4 | Zero-config: propose a routing table from the `person.*` entities and the `alert:` blocks that already exist, so a fresh install is useful before anything is typed | Next |
+| S5 | Night: turn `wake_time` into a real quiet-hours model (per-person windows, a digest of what was deferred) rather than a single instant | Planned |
+| S6 | Escalation: what happens when nobody acknowledges — a second person, a louder output, a delay per row | Planned |
+| S7 | Places: route on where somebody is, not only on whether they are home | Planned |
 
 ## Engineering rules learned
 
