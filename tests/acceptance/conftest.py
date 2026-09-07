@@ -69,15 +69,17 @@ def make_target(
     message: str | None = None,
     done_message: str | None = None,
     default_title: str | None = None,
+    managed: bool = False,
 ) -> dict[str, Any]:
     """Build one row of `entry.options["targets"]` (the routing table).
 
     `message`, `done_message` and `default_title` are the v0.2 addendum
     (ADR-0016, `docs/contract.md` "Per-row texts"): optional per-row texts,
     `None` by default so every Sprint 1 target keeps building the exact same
-    row it always has.
+    row it always has. `managed` is the v0.4 addendum (ADR-0018) and is only
+    written when true, for the same reason.
     """
-    return {
+    row: dict[str, Any] = {
         "slug": slug,
         "name": name,
         "class": klass,
@@ -93,6 +95,12 @@ def make_target(
         "done_message": done_message,
         "default_title": default_title,
     }
+    if managed:
+        # v0.4 addendum (ADR-0018): an optional row key, *absent* on every row
+        # written before 0.4.0 -- which is why it is only added when asked for.
+        # Absent means false, so every S1-S3 row keeps the exact dict it had.
+        row["managed"] = True
+    return row
 
 
 def make_options(
@@ -196,3 +204,166 @@ def routed_sensor(hass):
         return hass.states.get("sensor.switchboard_routed_today")
 
     return _get
+
+
+# ---------------------------------------------------------------------------
+# Sprint 4 fixtures: Companion registrations (ADR-0018 §2 and §3)
+# ---------------------------------------------------------------------------
+#
+# The router discovers a person's phones by matching the `user_id` state
+# attribute of their `person.*` against the `user_id` stored in each
+# `mobile_app` config entry's data, and derives the legacy push service name
+# from that entry's `device_name`. Both keys are core's
+# (`homeassistant/components/mobile_app/const.py`: `CONF_USER_ID`,
+# `ATTR_DEVICE_NAME`), and the entry is what the Companion app's registration
+# creates (`mobile_app/config_flow.py`).
+#
+# The registrations built here are real config entries in the entry registry,
+# with the real registration payload shape core's own tests use
+# (`tests/components/mobile_app/test_notify.py`), but the `mobile_app`
+# component itself is never set up: the router reads config entries, not
+# `hass.data`, and setting up `mobile_app` would drag in http, webhooks and a
+# push relay for nothing.
+
+MOBILE_APP_DOMAIN = "mobile_app"
+
+
+def make_mobile_app_entry(
+    hass,
+    *,
+    device_name: str,
+    user_id: str,
+    webhook_id: str | None = None,
+) -> MockConfigEntry:
+    """Register one Companion registration as a `mobile_app` config entry."""
+    slug = device_name.lower().replace(" ", "_")
+    entry = MockConfigEntry(
+        domain=MOBILE_APP_DOMAIN,
+        source="registration",
+        title=device_name,
+        data={
+            "app_data": {
+                "push_token": "PUSH_TOKEN",
+                "push_url": "https://example/push",
+            },
+            "app_id": "io.example.mobile_app",
+            "app_name": "mobile app",
+            "app_version": "1.0",
+            "device_id": f"device-{slug}",
+            "device_name": device_name,
+            "manufacturer": "Home Assistant",
+            "model": "mobile_app",
+            "os_name": "iOS",
+            "os_version": "18.0",
+            "secret": "123abc",
+            "supports_encryption": False,
+            "user_id": user_id,
+            "webhook_id": webhook_id or f"webhook-{slug}",
+        },
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+@pytest.fixture
+def mobile_app_registration(hass, device_registry, entity_registry):
+    """Return a helper creating one Companion registration and its entities.
+
+    Usage:
+        phone = mobile_app_registration("Phone One", user_id=..., \
+            binary_sensors={"phone_one_focus": None, "phone_one_mode": "focus"})
+
+    `binary_sensors` maps the object_id of a `binary_sensor` the Companion app
+    registered on that device to its entity-registry `translation_key` (or
+    `None`). It is how a real iOS Focus sensor reaches the state machine, and
+    both halves matter: ADR-0018 §3 proposes an entity whose **entity id or
+    translation key** contains `focus`.
+    """
+
+    def _make(
+        device_name: str,
+        *,
+        user_id: str,
+        binary_sensors: dict[str, str | None] | None = None,
+    ) -> MockConfigEntry:
+        entry = make_mobile_app_entry(hass, device_name=device_name, user_id=user_id)
+        device = device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(MOBILE_APP_DOMAIN, entry.data["device_id"])},
+            name=device_name,
+            manufacturer="Home Assistant",
+            model="mobile_app",
+        )
+        for object_id, translation_key in (binary_sensors or {}).items():
+            kwargs: dict[str, Any] = {}
+            if translation_key is not None:
+                kwargs["translation_key"] = translation_key
+            entity_registry.async_get_or_create(
+                "binary_sensor",
+                MOBILE_APP_DOMAIN,
+                f"{entry.data['device_id']}-{object_id}",
+                config_entry=entry,
+                device_id=device.id,
+                suggested_object_id=object_id,
+                **kwargs,
+            )
+            hass.states.async_set(f"binary_sensor.{object_id}", "off")
+        return entry
+
+    return _make
+
+
+@pytest.fixture
+def options_flow(hass):
+    """Drive the options flow: open the menu, pick a step, submit inputs.
+
+    `await options_flow(entry, "person", {"entity_id": "person.alice"}, {...})`
+    opens the menu, selects `person`, then submits each following dict to
+    whatever step the flow is on, and returns the last result. Every S4 flow
+    test needs the same three lines, and a multi-step editor (ADR-0018 §2 and
+    §7) makes them four or five.
+    """
+
+    async def _drive(entry: MockConfigEntry, step: str, *inputs: dict[str, Any] | None):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": step}
+        )
+        for user_input in inputs:
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], user_input
+            )
+        await hass.async_block_till_done()
+        return result
+
+    return _drive
+
+
+def schema_field(result, key: str):
+    """Return (marker, validator) for one field of a flow result's schema.
+
+    The marker carries what `add_suggested_values_to_schema` put there
+    (`marker.description["suggested_value"]`); the validator is the selector,
+    whose `.config` is the dict the frontend receives
+    (`homeassistant/helpers/selector.py`, `Selector.config`).
+    """
+    for marker, validator in result["data_schema"].schema.items():
+        if str(marker) == key:
+            return marker, validator
+    raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
+
+
+def suggested_value(result, key: str):
+    """Return the pre-selected value of one field, or None when there is none."""
+    marker, _validator = schema_field(result, key)
+    return (marker.description or {}).get("suggested_value")
+
+
+def selector_options(result, key: str) -> list[dict[str, str]]:
+    """Return a `SelectSelector`'s options, always as `{value, label}` dicts."""
+    _marker, validator = schema_field(result, key)
+    options = validator.config["options"]
+    return [
+        option if isinstance(option, dict) else {"value": option, "label": option}
+        for option in options
+    ]

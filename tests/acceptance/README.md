@@ -355,3 +355,104 @@ the "v0.2 addendum" section of this very README and
 2026-09-07). ADR-0017 §6 settles it in favour of `docs/contract.md` and
 ADR-0016; the coding agent corrects the two prose documents, and this test
 exists so that nobody later "fixes" the code to match them.
+
+---
+
+## Sprint 4 (`test_s4_*.py`, and the v0.4 additions to `test_contract.py`)
+
+Executable specification for the v0.4 addendum, against `docs/contract.md`
+§"v0.4 addendum (ADR-0018)", `docs/ADR/0018-zero-config-and-explainability.md`
+and `docs/sprints/sprint-4-brief.md`. Same discipline as S1-S3: written before
+the implementation, and the coding agent must make them pass without modifying
+them. Every S1, S2 and S3 file keeps passing unmodified — Sprint 4 adds one
+optional routing-table row key (`managed`) and changes no routing rule.
+
+| File | What it pins |
+|---|---|
+| `test_s4_explain.py` | Every decision `notify_switchboard.explain` can return (`routed`, `deferred`, `dropped`) with its `reason`, its `until`, its `outputs`/`missing_outputs` and a `detail` that names the deciding object; `not_in_audience` answered rather than refused; unknown target/person refused; `SupportsResponse.ONLY`; the `detail` translated; and — the property the whole feature rests on — that asking changes nothing. |
+| `test_s4_discovery.py` | The person editor's second step offers every legacy `notify.*` except `switchboard*`, puts this person's own Companion services first with a translated label, pre-selects them and their Focus `binary_sensor`s for a new person, suggests the *stored* values when editing an existing one, and still accepts a service that does not exist yet. |
+| `test_s4_default_target.py` | The first person added to an empty table creates the `managed` `default` row and the default target, `notify.switchboard` reaches them straight away, a second person joins that audience, submitting the row editor clears `managed` for good — and the row editor's confirmation step carries the `alert:` snippet (brief item 7, pinned here because this is the file that drives that editor). |
+| `test_s4_repairs.py` | `person_without_outputs` raised for a person in an audience with no outputs and cleared when they get one; `alert_entity_missing` raised only after the grace period and cleared once the alert exists; both translated in en/fr/es. |
+| `test_s4_test_message.py` | The two options-menu test steps route one real, counted message carrying `data.tag: switchboard-test`, pick a row that actually reaches the chosen person, abort when none does, show the `explain` answer in the step description, and never rewrite `entry.options`. |
+| `test_contract.py` | `notify_switchboard.explain` exists, is declared `SupportsResponse.ONLY`, and its response carries exactly the frozen keys. |
+
+### Fixtures and helpers added in `conftest.py`
+
+- **`make_target(..., managed=True)`** writes the v0.4 row key. It is only
+  written when true, so every S1-S3 row keeps the exact dict it had — `managed`
+  absent means false (contract v0.4).
+- **`make_mobile_app_entry` / the `mobile_app_registration` fixture** build one
+  Companion registration as a real `mobile_app` config entry, with the
+  registration payload shape core's own tests use
+  (`$HA_CORE_SRC/tests/components/mobile_app/test_notify.py`), plus its device
+  and whichever `binary_sensor` entities the test wants on it. The `mobile_app`
+  component itself is never set up: the router reads config entries, and
+  setting the component up would drag in http, webhooks and a push relay for
+  nothing.
+- **`options_flow`** opens the options menu, picks a step and submits a
+  sequence of inputs. S4 turns two one-shot forms into multi-step editors (the
+  person editor of ADR-0018 §2, the row editor's confirmation step of §7), so
+  every flow test needs four or five lines of the same boilerplate.
+- **`schema_field` / `suggested_value` / `selector_options`** read a flow
+  result's own `data_schema`: the selector's `.config` (what the frontend
+  receives) and the marker's `description["suggested_value"]` (what
+  `add_suggested_values_to_schema` pre-selected). Every discovery assertion
+  goes through these, so what is pinned is the form a user sees, never how the
+  implementation builds it.
+
+### Assumptions added by Sprint 4
+
+10. **Options-flow step ids are part of the specification.** `person` (pick
+    the `person.*`), `person_outputs` (outputs / silence entities / wake
+    time), `target_saved` (the row editor's confirmation), `test_person`,
+    `test_target`, `test_result`. A form cannot react to a field it is
+    showing, so pre-selecting a person's phones *requires* the person to be
+    chosen in an earlier step; the ids are pinned so the tests can drive it.
+    `edit_person` keeps picking an existing row and now opens
+    `person_outputs`.
+11. **`user_id` values are plain strings.** The link the router follows is an
+    equality between the `user_id` state attribute of a `person.*` and the
+    `user_id` stored in a `mobile_app` config entry's data. Nothing reads the
+    auth provider, so the tests use literal ids — the same choice S1 made for
+    presence and S3 for `person.user_id`.
+12. **The alert grace period is reached by time travel, not by patching.**
+    ADR-0018 §5 fixes it at 60 s in `dispatcher.ALERT_ENTITY_GRACE_SECONDS`,
+    but `test_s4_repairs.py` advances the clock past it with
+    `async_fire_time_changed` instead of importing the constant, so a red in
+    that file is always a behavioural red and never an `ImportError` that
+    hides the rest of the module. The constant still has to exist and has to
+    be cancellable on unload, or the suite's lingering-timer check fails.
+13. **The `issue_id` of the two new repairs is not pinned**, exactly as in
+    assumption 7 for `person_without_user_id`. What is asserted is the
+    `translation_key`, the severity, `is_fixable`, how many issues exist, and
+    that each one names its subject in its `issue_id` or its
+    `translation_placeholders`.
+14. **The response of `explain` is a mapping, `persons` included.** Core
+    answers per-entity questions that way (`weather.get_forecasts`,
+    `calendar.get_events`). `outputs` and `missing_outputs` carry **full**
+    `notify.*` service names, unlike the bare form stored in `entry.options`:
+    `explain` is read by a human or a card, and the useful answer to "where
+    would this go" is something you can paste into Developer tools.
+
+### Two S4 tests are green from the start, on purpose
+
+`test_s4_repairs.py::test_a_person_with_no_outputs_and_no_audience_raises_nothing`
+and `::test_a_row_whose_alert_exists_raises_nothing` pass against 0.3.0,
+because 0.3.0 raises neither repair in any circumstance. They exist for the
+same reason `test_s3_done_message.py` did: to pin the *negative* half of a
+rule that is easy to over-implement. A repair that fires for a person nobody
+routes to, or for an alert that is perfectly fine, is worse than no repair.
+
+### What Sprint 4 deliberately does not pin
+
+- The wording of anything: the row name of the `default` row, the test
+  message, the `detail` sentences, the "this person's device" marker. The
+  tests read the translation files back or assert only that a string exists,
+  differs between languages, and names the object it is about.
+- The `recursion` case of `explain`. A person whose outputs include a
+  `switchboard*` service produces both a routed delivery and a `recursion`
+  drop in `router.decide`; ADR-0018 §1 says the routed answer wins and the
+  recursive outputs are excluded from `outputs`, but no acceptance test drives
+  it — the options flow refuses such an output at config time, so it can only
+  be reached through a hand-edited `.storage` file.
+- Which step the `test_result` form returns to when it is submitted.
