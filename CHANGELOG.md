@@ -7,6 +7,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.7.1 — **plain-language interface**, on top of the 0.7.0 notes below.
+
+The maintainer opened the person step of a real instance and said: *« cet
+écran est incompréhensible pour un humain »*. He was right. The interface
+spoke like the code — `person.dev_bob` in a description, "services notify",
+"entités de silence", "toléré et réessayé", option chips carrying raw service
+names, a field called "Slug" — and everything on those screens was true and
+almost none of it was usable.
+
+**Nothing about the router's behaviour changes.** No new option, no new step,
+no storage migration, no contract change: every translation key, step id,
+field name, menu id, entity id, service name and stored option key is exactly
+what 0.7.0 had.
+
+### Changed
+
+- **Interface wording.** Every user-facing string — the config flow, the
+  options menu and its steps, field labels, `data_description`, errors,
+  aborts, exceptions, repairs, entity names and the service descriptions —
+  is rewritten to say what will happen rather than how the router works, in
+  French first, then English and Spanish (machine-translated, as the rest of
+  `es` is). The reference is the person step: "Services notify et silence"
+  over `person.dev_bob` became "Changer les appareils de Bob" — *« Sur quels
+  appareils Bob reçoit les notifications, et quand faut-il ne pas déranger
+  Bob ? »* — with "Services notify" and "Entités de silence" becoming "Où
+  prévenir" and "Quand ne pas déranger".
+- **People, devices and targets are named the way the household names them.**
+  A step description interpolates the friendly name, never the entity id; the
+  person and target pickers list names instead of ids; the audience selector
+  offers people by name and speakers in words; a person's own phone is offered
+  as its device name. `explain` details, the options-menu test result and the
+  three consistency repairs say "Bob (person.dev_bob)" where the reader has to
+  go and change something, and "Bob" where they do not.
+- **Every option of the `outputs` selector carries a readable label**, not only
+  the person's own phones (ADR-0018 §2, amendment 2026-09-07). Another person's
+  phone reads as the device its owner named it — "Alice's phone (application
+  Home Assistant)"; `persistent_notification` reads as "Notifications de Home
+  Assistant"; anything else is turned back into words and keeps its own name in
+  brackets, "Airplay bedroom (airplay_bedroom)", because there is no friendlier
+  name to hide it behind and somebody changing a configuration needs it. The
+  translated "this person's device" marker stays reserved for their own phones,
+  which is the question the ordering and the marker exist to answer. Stored
+  values are unchanged: an option's `value` is still the raw service name.
+- **An explanation names devices, not `notify` services.** The `{outputs}` of
+  a `detail` sentence — what `explain` answers and what the options-menu test
+  result shows — is built from the same labels the `outputs` picker offers, so
+  the phone somebody ticked as "Bob's iPhone" is still "Bob's iPhone" one
+  screen later. The `outputs` key of the `explain` answer is untouched: it
+  still carries the full `notify.*` names a script pastes into Developer tools
+  (ADR-0018 §1). Those sentences are rendered in the **instance** language
+  (`hass.config.language`), which a user whose own account is set to another
+  language would not otherwise expect; the test-result screen now says so.
+- **An explanation names a rule, a floor and a whereabouts in words too.**
+  The `detail` sentences were written in plain language and then filled with
+  the router's own vocabulary: "sa règle de présence est `home_only`", "seuls
+  les messages de niveau `high`", "Alice est actuellement `not_home`". A
+  presence rule and a priority floor are now resolved through the very
+  `selector` labels the pickers offer — one place the wording lives — with the
+  stored value kept in brackets after the words, exactly as an output label
+  keeps its service name, because both are configuration somebody may be sent
+  to go and change. Where somebody is gets no brackets: `home`, `not_home`,
+  `unknown` and `unavailable` become words, and a zone name is passed through
+  untouched because the household chose it. Finally, `delivery_failed` and
+  `unknown_target` had no sentence of their own and fell through to the
+  generic one, which prints the reason verbatim; both now have one, so every
+  drop reason the contract defines is a sentence.
+- **The built-in dashboard notification is offered as an output**
+  (ADR-0018 §2, amendment 2026-09-07). `notify.persistent_notification` was
+  hidden from the `outputs` and `audience` pickers alongside the two services
+  that really cannot be outputs; it is Home Assistant's own notification
+  drawer, the most common output of somebody with no phone and the one the
+  quickstart uses before any phone exists, and it is offered with its
+  translated label. Only `notify.notify` and `notify.send_message` stay out of
+  the lists — the router's own refusal is unchanged.
+- **A household read the whole interface and it was rewritten again.** A
+  non-technical French reviewer went through every screen; the pass that
+  followed quotes names in a repair, drops the developer notes a user cannot
+  act on (`return_response`, "120 par défaut, et une version future pourra
+  choisir un autre nombre", the `alert` template variable), stops making
+  `{person}` agree in gender, capitalises "le Standard de notification"
+  everywhere, aligns each menu entry with the title of the screen it opens,
+  says "mis de côté" rather than "retenu" throughout, and gives the two
+  deletion pickers a sentence saying what confirming will do.
+- **The priority and presence choices are translated chips** rather than
+  `info` / `normal` / `high` / `critical` and `always` / `home_only` /
+  `away_only`, through a `selector` translation key. The stored values are
+  unchanged.
+- **`README.md` gains "Words used in the interface"** in the Glossary: the
+  mapping from the word on the screen to the contract term, so the
+  documentation and the interface stay linked.
+
 Router 0.7.0 — **escalation and places, reduced** (contract v0.7 addendum,
 ADR-0021), on top of the 0.6.0, 0.5.1 and 0.5.0 notes below, which are in
 `main` but not tagged.

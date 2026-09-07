@@ -1,6 +1,6 @@
 [project]
 name = "notify-switchboard"
-version = "0.7.0"
+version = "0.7.1"
 description = "A pure notify proxy for Home Assistant."
 readme = "README.md"
 license = { file = "LICENSE" }
