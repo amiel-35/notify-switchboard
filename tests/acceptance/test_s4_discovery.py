@@ -138,11 +138,17 @@ async def test_outputs_is_a_multi_select_of_the_existing_notify_services(
     assert validator.config.get("sort") is False, (
         "the frontend must not re-sort the list: the order below is the point"
     )
+    # 0.7.1 (ADR-0018 §2 amendment): the bare `persistent_notification` output
+    # -- Home Assistant's own notification drawer, the most common output of a
+    # person without a phone -- is offered with a translated label. The two
+    # other services of the `notify` component (`notify`, `send_message`) stay
+    # excluded: neither is an output.
     assert set(values) == {
         "mobile_app_phone_one",
         "mobile_app_phone_two",
         "mobile_app_alice",
         "telegram_family",
+        "persistent_notification",
     }, f"unexpected option list {values}"
     assert not any(value.startswith("switchboard") for value in values), (
         "offering `notify.switchboard*` as an output configures a recursion "
