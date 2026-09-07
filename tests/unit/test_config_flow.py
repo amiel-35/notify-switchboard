@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import yaml
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
@@ -573,3 +574,58 @@ async def test_discovery_ignores_what_is_not_a_phone_with_a_focus_sensor(
     assert suggested["silence_entities"] == [], (
         "only binary_sensor entities can mean `on` == silent"
     )
+
+
+async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
+    hass: HomeAssistant,
+) -> None:
+    """A row name is free text, so the snippet must stay parseable YAML.
+
+    `Fuite: eau # urgence` is the worst realistic case in one string: a colon
+    followed by a space turns the scalar into a nested mapping, and an
+    unquoted `#` truncates the value at the comment. Emitted raw, the block
+    Home Assistant is told to paste into `configuration.yaml` either fails to
+    load or silently loses half the name.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(name="Fuite: eau # urgence")
+    )
+
+    assert result["step_id"] == "target_saved"
+    snippet = (result["description_placeholders"] or {})["snippet"]
+    parsed = yaml.safe_load(snippet)
+    assert parsed["alert"]["leak"]["name"] == "Fuite: eau # urgence", (
+        f"the snippet must round-trip the row name through YAML; got {snippet!r}"
+    )
+
+
+async def test_the_test_result_is_rendered_as_a_markdown_list(
+    hass: HomeAssistant,
+) -> None:
+    """`{result}` lands in a markdown description, so one person is one bullet.
+
+    Bare newlines are collapsed by the markdown renderer of the frontend, which
+    would run every person's answer into a single paragraph.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("person.bob", "home")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_person(hass, entry, "person.bob", outputs=["mobile_app_bob"])
+
+    result = await _options_step(hass, entry, "test_target", {"slug": "default"})
+
+    assert result["step_id"] == "test_result"
+    text = (result["description_placeholders"] or {})["result"]
+    lines = text.splitlines()
+    assert len(lines) == 2, f"one bullet per person, got {text!r}"
+    assert all(line.startswith("- ") for line in lines), (
+        f"every line must be a markdown list item; got {text!r}"
+    )
+    assert "person.alice" in text and "person.bob" in text
