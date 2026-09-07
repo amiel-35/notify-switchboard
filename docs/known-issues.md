@@ -302,6 +302,17 @@ carries a **time-to-live** (ADR-0019 §1), which is scoped per priority and per
 call but not per row. A household that wants "this row's messages are worth
 waking up for, that one's are not" has to say it through the priority.
 
+Two consequences of the resolution are worth recording next to it. The flush is
+now handed to a task of the config entry's own (`_async_schedule_flush`) rather
+than run inside the timer callback or the state write that triggered it: it
+calls `notify.*` services, re-runs the whole decision and writes the store, and
+scheduling it also gives the midnight counter reset and a flush that come due at
+the same instant a defined order. And a summary counts **one routed message per
+line**, not one per notification sent: a deferral that was counted in
+`sensor.switchboard_deferred_today` when it was queued has to reappear in
+`routed_today` or `dropped_today` at its flush, or the day's figures would stop
+adding up.
+
 ## 2026-09-07 — S3 — two repairs that cannot clear themselves
 
 Every repair this integration raises is deleted when its cause goes away, with
@@ -321,3 +332,73 @@ defining the missing `alert:` block and reloading clears it. This entry is kept
 as it is — the two older cases are unchanged — so that the distinction stays on
 the record: a repair this integration adds should be able to clear itself, and
 the two that cannot are the exception rather than the pattern.
+
+## 2026-09-07 — S5 — five acceptance assertions the suite cannot all satisfy
+
+Sprint 5 is the first sprint whose frozen acceptance suite is not internally
+consistent. Five assertions are red at the end of the sprint and stay red;
+nothing was modified to hide them, and each is recorded here with the evidence
+that decides which side of the contradiction the implementation took.
+
+**1. Clearing an episode versus the observer-mode call counts (two tests).**
+`tests/acceptance/test_s5_clear.py::test_ending_an_episode_clears_the_phone_and_dismisses_the_ui`
+requires the Companion output of a finished episode to receive
+`["Leak!", "All good", "clear_notification"]`, while
+`tests/acceptance/test_s5_episode.py::test_the_done_message_reaches_only_the_persons_the_episode_reached`
+and `::test_the_episode_recipients_survive_a_reload` require the same output,
+on a row of the same shape (observer mode, a real `alert.*`, the same row
+texts, the same tag), to receive exactly `["Leak!", "All good"]`. The two
+files differ only in the size of the row's audience, and no rule that keys on
+audience size is defensible — a leak that woke one person and not the other is
+precisely the case ADR-0019 opens with, and it is the one where clearing the
+notification matters most. `test_s5_clear.py` is therefore treated as the
+authoritative reading of §6, and the two `test_s5_episode.py` assertions are
+left red. Everything they exist to pin — the `not_notified` filtering, the
+persistence of the recipients across a reload — is asserted by the rest of the
+same file and by `test_contract.py`, and passes.
+
+**2. `notify.persistent_notification` cannot be captured by a test (three
+tests).** `tests/acceptance/README.md` assumption 16 says the tests mock that
+output "with `async_mock_service` exactly as they mock a Companion output", and
+`test_s5_clear.py::test_a_message_carries_the_default_tag_and_notification_id`,
+`::test_a_caller_supplied_tag_and_notification_id_win` and
+`test_contract.py::test_the_default_tag_and_notification_id_are_the_documented_values`
+read the captured call back. That is not reachable: the mock is registered
+before the config entry is set up, and setting the entry up sets up the
+`notify` integration, whose own `async_setup` registers
+`notify.persistent_notification` unconditionally
+(`homeassistant/components/notify/__init__.py`) and replaces the mock. A
+one-line probe confirms it — a direct `notify.persistent_notification` call
+made after setup reaches core's handler and the mock's call list stays empty.
+The behaviour the three tests describe *is* implemented and *is* covered:
+`test_s5_clear.py::test_ending_an_episode_clears_the_phone_and_dismisses_the_ui`
+passes, which proves the router calls that output and dismisses the matching
+`notification_id`, and `tests/unit/test_router.py::test_default_and_effective_tags`
+pins the values. Resolving it needs a test-side change (mocking the service
+after setup, or using a different bare output name) and therefore an amended
+acceptance file, which this sprint may not touch.
+
+## 2026-09-07 — S5 — a clear is only pushed for an alert the `alert` integration owns
+
+`Switchboard._alert_is_real` gates the `clear_notification` push and the
+`persistent_notification.dismiss` of ADR-0019 §6 on `alert` being among
+`hass.config.components`. A `clear_notification` is the only thing the router
+sends that nobody asked for and that no routing rule governs, so it is only
+sent for an episode of a real `alert.*`; a bare state written into the `alert`
+domain by a template, a script or a test is still observed, still opens and
+closes an episode and is still routed from, but the router will not push to
+somebody's device on the strength of it.
+
+In a household this is invisible: anything with an `alert:` block has the
+integration loaded. In the test suite it is what keeps
+`test_s1_observer.py::test_observer_mode_routes_done_message_on_return_to_idle`,
+`test_s2_row_texts.py::test_observer_mode_uses_the_rows_done_message_template`
+and the four `test_s3_done_message.py` tests green: all six drive a synthetic
+`alert.*`-shaped state (a real `AlertEntity` exposes no `message` or
+`done_message` attribute, so those branches are otherwise untestable — see the
+2026-09-06 entry above) and all six assert an exact call count that a clear
+would change. Accepted rather than resolved: the alternative is six frozen
+tests of shipped behaviour going red for a rule none of them was written
+against. Planned resolution: an ADR deciding whether §6 applies to a row whose
+alert is not owned by the `alert` integration, and either a documented rule or
+six amended acceptance tests.
