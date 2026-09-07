@@ -1632,6 +1632,72 @@ async def test_unsilence_flushes_the_queue_that_silence_alone_was_holding(
     assert switchboard._deferral_unsubs == {}
 
 
+async def test_unsilence_keeps_a_queue_the_night_is_still_holding(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """The other half of the symmetry: lifting one of two holders releases nothing.
+
+    `_async_silence_changed` flushes only when the **last** silence lifts, and
+    `unsilence` owes the queue the same reading: the night is still on, so the
+    message stays queued and the timer goes back on what is left of the two
+    candidates rather than on the expiry that has just been cancelled.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    freezer.move_to(datetime(2026, 9, 10, 21, 35, tzinfo=dt_util.UTC))  # 23:35 Paris
+    await hass.services.async_call(
+        DOMAIN, "silence", {"person": "person.alice", "minutes": 30}, blocking=True
+    )
+    freezer.move_to(datetime(2026, 9, 10, 21, 40, tzinfo=dt_util.UTC))  # 23:40 Paris
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    switchboard = entry.runtime_data.switchboard
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+    assert "person.alice" in switchboard._deferral_unsubs
+
+    # 00:10 Paris, past the end of the silence that was lifted: no timer of
+    # that vintage is left to fire, and the night still holds the message.
+    freezer.move_to(datetime(2026, 9, 10, 22, 10, tzinfo=dt_util.UTC))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert calls == []
+    assert len(switchboard.store.deferrals) == 1
+
+    # The night ends: the message is still there to be delivered.
+    freezer.move_to(datetime(2026, 9, 11, 4, 0, tzinfo=dt_util.UTC))  # 06:00 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["night"]
+
+
 async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
     hass: HomeAssistant, hass_storage: dict, freezer: Any
 ) -> None:

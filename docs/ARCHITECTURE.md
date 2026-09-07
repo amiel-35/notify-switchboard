@@ -102,10 +102,12 @@ Decisions taken in Sprint 1, where the contract left room:
 
 A deferral is a promise that a message is *late*, not that it is eternal, and
 not that the decision that queued it is still true. From 0.5.0 the queue has
-**three** entry points into a flush and four possible outcomes per message.
-Two of them -- the wake-time timer and the early flush of §4 -- reach it
-through `_async_schedule_flush` and therefore share one config-entry task; the
-third, the catch-up of overdue deferrals at setup, calls the flush inline.
+**four** entry points into a flush and four possible outcomes per message.
+Three of them -- the wake-time timer and the two early flushes of §4, the last
+configured silence going `off` and a `notify_switchboard.unsilence` that lifts
+the last silence there was -- reach it through `_async_schedule_flush` and
+therefore share one config-entry task; the fourth, the catch-up of overdue
+deferrals at setup, calls the flush inline.
 
 ```
                  silenced + wake_time
@@ -113,6 +115,7 @@ inbound message ─────────────────────�
                                          │
               wake_time timer  ──────────┤
               last silence entity off ───┤   (early flush, §4)
+              unsilence, last silence ───┤   (early flush, §4)
               overdue at setup ──────────┘   (catch-up, inline)
                                          │
                         ┌────────────────┴────────────────┐
@@ -145,7 +148,7 @@ inbound message ─────────────────────�
                         └───────────────┘   └──────────────────────┘
 ```
 
-- **Both entry points go through one task.** `_async_schedule_flush` hands the
+- **The scheduled entry points go through one task.** `_async_schedule_flush` hands the
   flush to a task of the config entry's own, so it never runs inside the timer
   sweep or the state write that triggered it. Unloading the entry **waits** for
   that task rather than cancelling it — `_async_process_on_unload`
@@ -314,7 +317,10 @@ message silenced only by a `notify_switchboard.silence` is dropped, because
 quiet. When a configured night silence is also active, the message is deferred
 as before — nothing is lost. A temporary silence still running when that
 deferral comes due holds it back (both sources are read at flush time), and the
-flush is then re-armed for the end of the silence.
+flush is then re-armed for the end of the silence. `notify_switchboard.unsilence`
+moves that end: it flushes on the spot when nothing else is holding the queue,
+and otherwise re-arms on what is left, so a queue is never waiting on an expiry
+that has been cancelled.
 
 ### Episodes, and closing the loop (v0.5, ADR-0019 §5 and §6)
 

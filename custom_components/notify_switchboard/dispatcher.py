@@ -2195,8 +2195,19 @@ class Switchboard:
 
         Idempotent by contract: a person who is not temporarily silenced has
         nothing to undo, and that is not an error.
+
+        "Immediately" has to cover the queue as well as the sensor. A deferral
+        is armed on the earliest of the wake time and this silence's end
+        (`_async_schedule_deferral`), so lifting the silence by hand without
+        touching that timer would leave a message waiting for an expiry that no
+        longer holds anything -- the same wait ADR-0019 §4 removed for a
+        configured silence going `off` early, reached through the one silence
+        source the router owns. The answer is the same as
+        `_async_silence_changed`'s: with nothing left to hold the queue, flush
+        now; with a configured silence still on, re-arm on what remains, which
+        is the end that silence publishes or the wake time.
         """
-        self._require_person(person)
+        known = self._require_person(person)
         self._async_clear_invalid_service_call(ATTR_PERSON, person)
         if self.store.silences.pop(person, None) is None:
             return
@@ -2204,6 +2215,16 @@ class Switchboard:
         self._async_cancel_silence_expiry(person)
         await self.store.async_save()
         self._async_notify_entities()
+
+        if not any(key[0] == person for key in self.store.deferrals):
+            return
+        if self.has_configured_silence(known):
+            self._async_schedule_deferral(person)
+            return
+        _LOGGER.debug(
+            "The temporary silence of %s was lifted by hand: flushing", person
+        )
+        self._async_schedule_flush(person)
 
     # ------------------------------------------------------------------
     # Service-call validation

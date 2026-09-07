@@ -70,6 +70,14 @@ an advanced step without deciding what leaving it empty means would have turned
   waited for the next night to end, which for a message with a time to live
   usually means it never arrived. Both instants are now weighed together, the
   way the wake-time branch already weighed them.
+- **`notify_switchboard.unsilence` releases the queue it frees.** The service
+  lifted the silence, cancelled its expiry timer and stopped there, while the
+  deferral timer stayed armed on that same, now meaningless, expiry: a message
+  the silence alone was holding went out at the end of the quiet that had just
+  been cancelled by hand — or, when the wake time was the earlier candidate,
+  not until the next morning. `unsilence` now reads the queue the way ADR-0019
+  §4 reads a configured silence going `off`: nothing else holding it, flush on
+  the spot; a night still on, re-arm on the end that is left.
 - **A re-arm never targets an instant that has already passed.** A timer
   firing exactly at a schedule's `next_event` can run before that schedule's
   own state write lands, and `async_track_point_in_time` does not refuse a
