@@ -84,6 +84,22 @@ async def _drive_to_idle(hass, *, attributes: dict | None = None) -> None:
     await hass.async_block_till_done()
 
 
+def _messages(calls) -> list[str]:
+    """The messages of one output, without the clears.
+
+    From 0.5.0 the `→ idle` transition of an observer row also pushes a
+    `clear_notification` to the Companion outputs the episode reached
+    (ADR-0019 §6). A clear is not a message: it is not counted, it carries no
+    text of its own, and it must not be mistaken for the `done` message that
+    precedes it — which is exactly what `[-1]` would do here.
+    """
+    return [
+        call.data["message"]
+        for call in calls
+        if call.data["message"] != "clear_notification"
+    ]
+
+
 async def test_the_rows_done_message_template_wins_over_the_alerts_attribute(
     hass, enable_custom_integrations, install, mock_outputs, set_person
 ):
@@ -95,8 +111,8 @@ async def test_the_rows_done_message_template_wins_over_the_alerts_attribute(
     await _drive_to_idle(hass, attributes={"done_message": "From the alert"})
 
     # idle -> on, then on -> idle: the second message is the done one.
-    assert len(calls["mobile_app_alice"]) == 2
-    assert calls["mobile_app_alice"][-1].data["message"] == "From the row", (
+    assert len(_messages(calls["mobile_app_alice"])) == 2
+    assert _messages(calls["mobile_app_alice"])[-1] == "From the row", (
         "docs/contract.md orders the row's `done_message` template ahead of "
         "the alert's own attribute; ADR-0017 §6 settles it"
     )
@@ -112,7 +128,7 @@ async def test_the_alerts_done_message_attribute_is_used_when_the_row_has_none(
 
     await _drive_to_idle(hass, attributes={"done_message": "From the alert"})
 
-    assert calls["mobile_app_alice"][-1].data["message"] == "From the alert"
+    assert _messages(calls["mobile_app_alice"])[-1] == "From the alert"
 
 
 @pytest.mark.parametrize("language", ["en", "fr"])
@@ -131,7 +147,7 @@ async def test_the_translated_back_to_normal_is_the_last_resort(
         hass, language, "common", {DOMAIN}
     )
     expected = strings[f"component.{DOMAIN}.common.back_to_normal"]
-    assert calls["mobile_app_alice"][-1].data["message"] == expected
+    assert _messages(calls["mobile_app_alice"])[-1] == expected
 
 
 async def test_the_row_template_is_rendered_with_the_alert_state(
@@ -148,7 +164,7 @@ async def test_the_row_template_is_rendered_with_the_alert_state(
         hass, attributes={"level": "high", "done_message": "From the alert"}
     )
 
-    assert calls["mobile_app_alice"][-1].data["message"] == "Cleared, was high"
+    assert _messages(calls["mobile_app_alice"])[-1] == "Cleared, was high"
 
 
 async def test_message_keeps_the_opposite_order(

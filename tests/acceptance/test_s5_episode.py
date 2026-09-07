@@ -88,10 +88,14 @@ async def test_the_done_message_reaches_only_the_persons_the_episode_reached(
 
     await alert.end()
 
-    assert [call.data["message"] for call in calls["mobile_app_alice"]] == [
-        "Leak!",
-        "All good",
-    ]
+    assert [
+        call.data["message"]
+        for call in calls["mobile_app_alice"]
+        if call.data["message"] != "clear_notification"
+    ] == ["Leak!", "All good"], (
+        "the episode's clear follows the done message on every Companion "
+        "output the episode reached (ADR-0019 §6); a clear is not a message"
+    )
     assert len(calls["mobile_app_bob"]) == 0, (
         "Bob never heard about the leak, so 'back to normal' means nothing to "
         "him (ADR-0019 §5)"
@@ -132,10 +136,14 @@ async def test_the_episode_recipients_survive_a_reload(
 
     await alert.end()
 
-    assert [call.data["message"] for call in calls["mobile_app_alice"]] == [
-        "Leak!",
-        "All good",
-    ]
+    assert [
+        call.data["message"]
+        for call in calls["mobile_app_alice"]
+        if call.data["message"] != "clear_notification"
+    ] == ["Leak!", "All good"], (
+        "the episode's clear follows the done message on every Companion "
+        "output the episode reached (ADR-0019 §6); a clear is not a message"
+    )
     assert len(calls["mobile_app_bob"]) == 0, (
         "the episode's recipients are persisted with the snoozes and the "
         "deferrals (ADR-0019 §5), so a reload does not forget who was told"

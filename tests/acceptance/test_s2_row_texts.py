@@ -124,8 +124,16 @@ async def test_observer_mode_uses_the_rows_done_message_template(
     hass.states.async_set("alert.observer_test", "idle", {"level": "high"})
     await hass.async_block_till_done()
 
-    assert len(calls["mobile_app_alice"]) == 2
-    assert calls["mobile_app_alice"][1].data["message"] == "Cleared, was: high"
+    # From 0.5.0 the `→ idle` transition of an observer row also pushes a
+    # `clear_notification` to the Companion outputs the episode reached
+    # (ADR-0019 §6). A clear is not a message, so it is filtered out here.
+    messages = [
+        call.data["message"]
+        for call in calls["mobile_app_alice"]
+        if call.data["message"] != "clear_notification"
+    ]
+    assert len(messages) == 2
+    assert messages[1] == "Cleared, was: high"
 
 
 async def test_observer_mode_falls_back_to_row_name_when_no_message_and_no_template(

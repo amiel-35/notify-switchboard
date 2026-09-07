@@ -334,6 +334,10 @@ output instead of one per message:
 With `summary: false`, or with exactly one surviving message, the message is
 delivered exactly as before: its own text, title, merged `data` and buttons.
 
+A summary counts **one routed delivery per line**, not one per notification
+and not one per queued message: what `sensor.switchboard_routed_today` reports
+is what a person reads.
+
 ### A deferred message is re-decided in full at its flush
 
 A flush re-runs the whole routing decision — audience, presence rule, snooze,
@@ -382,6 +386,13 @@ for the `persistent_notification` output only. A caller-supplied `tag` or
 `notification_id` always wins.
 
 ### Closing an episode on the channels it used
+
+This tidying-up applies to a row in **observer mode** only — the case where
+the router is itself what announces the end; a row driven by its alert's own
+`notifiers:` list sends its "back to normal" before the state reaches `idle`
+(core's `end_alerting`), so clearing there would wipe the message that just
+arrived. Episodes themselves, and the `not_notified` filter above, exist for
+every row with an `alert_entity` either way.
 
 When a row's `alert_entity` returns to `idle`, after the `done` message has
 been routed:

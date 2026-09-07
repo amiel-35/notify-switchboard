@@ -33,6 +33,8 @@ Core APIs this pins:
 
 from __future__ import annotations
 
+from pytest_homeassistant_custom_component.common import async_mock_service
+
 from .conftest import make_entry, make_person, make_target
 
 CLEAR = "clear_notification"
@@ -78,6 +80,13 @@ async def test_a_message_carries_the_default_tag_and_notification_id(
     calls = mock_outputs("mobile_app_alice", "persistent_notification")
     set_person("person.alice", "home")
     await install(_entry(hass))
+    # `notify`'s own setup registers `notify.persistent_notification`
+    # (core `components/notify/__init__.py`, `async_setup`) and replaces a mock
+    # made earlier (`core.py`, `ServiceRegistry._async_register`), so the bare
+    # output is mocked once the entry is up.
+    calls["persistent_notification"] = async_mock_service(
+        hass, "notify", "persistent_notification"
+    )
 
     await hass.services.async_call(
         "notify", "switchboard_leak", {"message": "Leak!"}, blocking=True
@@ -106,6 +115,13 @@ async def test_a_caller_supplied_tag_and_notification_id_win(
     calls = mock_outputs("mobile_app_alice", "persistent_notification")
     set_person("person.alice", "home")
     await install(_entry(hass))
+    # `notify`'s own setup registers `notify.persistent_notification`
+    # (core `components/notify/__init__.py`, `async_setup`) and replaces a mock
+    # made earlier (`core.py`, `ServiceRegistry._async_register`), so the bare
+    # output is mocked once the entry is up.
+    calls["persistent_notification"] = async_mock_service(
+        hass, "notify", "persistent_notification"
+    )
 
     await hass.services.async_call(
         "notify",

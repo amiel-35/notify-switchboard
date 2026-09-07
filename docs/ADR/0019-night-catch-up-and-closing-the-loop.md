@@ -401,6 +401,64 @@ still there); using `notify.mobile_app_*`'s `data.tag` for the
 different lifetimes and core gives them different key names, so conflating
 them would make one of the two undismissable).
 
+#### Amendment 2026-09-07
+
+Four points §6 left implicit, settled here after the acceptance suite was read
+against the implementation. None of them changes a public name, a reason, an
+event type or an option; all four are the reading a reviewer of §6 has to
+arrive at anyway.
+
+**(a) The closing sequence applies to observer-mode rows only.** Steps 1-4
+above run when the router itself is the thing that announces the end of an
+episode — that is, on a row in observer mode. A row driven by its alert's own
+`notifiers:` list is different, and core is why: `end_alerting`
+(`homeassistant/components/alert/entity.py:115-126`) *awaits* the done message
+before it calls `async_write_ha_state()`, so the "back to normal" leaves
+through `notify.switchboard_<slug>` **before** the state the router watches
+becomes `idle`. That message has no `switchboard_done: true` on it and so
+carries the row's ordinary default tag, `switchboard-<slug>` — the episode's
+own tag. A clear fired at `→ idle` would therefore wipe the done message a
+fraction of a second after it arrived, which is the exact opposite of what
+`clear_done: false` promises. §5's episode *record* is unchanged: it is kept
+for every row that names an `alert_entity`, in observer mode or not, and the
+`not_notified` filter of §5 applies to both. It is the housekeeping of §6 that
+is observer-only.
+
+This is the whole of the narrowing §6 needs. In particular the clear does
+**not** depend on what backs the `alert.*` state: any row with an
+`alert_entity` in observer mode gets the closing sequence, whether that state
+is written by the `alert` integration, by a template, or by a test. The router
+observes and routes from such a state already; refusing to tidy up after
+itself on the same evidence it was willing to notify on would be incoherent.
+
+**(b) A summary is a delivery, so its tag is cleared with the episode.** A
+wake-time summary (§2) that reaches a person is a `routed` delivery like any
+other, so §5 records its person, its outputs and its **`switchboard-summary`**
+tag into whatever episodes contributed a line to it. When such an episode
+closes, `switchboard-summary` is among the tags of step 2 and is cleared. That
+follows from §5's "actually delivered" and is spelled out because the summary
+is the one message whose tag is not derived from a row slug.
+
+**(c) One routed count per summary line.** A summary that collapses three
+surviving messages into two lines counts **two** routed deliveries per output,
+not one and not three: the count a household reads must match what §2 says a
+line is. Recorded here; `docs/contract.md` gains the sentence at its next
+addendum rather than in the middle of the v0.5 block.
+
+**(d) Known limitation: an episode open across a real restart.** §5 persists
+an open episode so that a restart mid-leak does not widen the done message.
+What it cannot do is re-open the alert. Core's `AlertEntity.__init__`
+(`homeassistant/components/alert/entity.py`) only subscribes to *future*
+changes of its watched entity — it starts with `_firing = False` and never
+reads that entity's current state — so after a real Home Assistant restart the
+`alert.*` is `idle` even though the leak is still running. The router sees no
+`→ idle` transition, and the persisted open episode therefore lingers until
+that row's next `idle → on` resets it. The stale record is harmless (it can
+only narrow a `done` message that will not be sent) and the fix belongs to
+core, not here; the config-entry reload that
+`test_s5_episode.py::test_the_episode_recipients_survive_a_reload` performs is
+not affected, because the `alert.*` entity survives it.
+
 ## What does not change
 
 - Every v0 / v0.2 / v0.3 / v0.4 frozen name; the **four**

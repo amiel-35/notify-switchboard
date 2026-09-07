@@ -466,9 +466,32 @@ Executable specification for the v0.5 addendum, against `docs/contract.md`
 `docs/ADR/0019-night-catch-up-and-closing-the-loop.md` and
 `docs/sprints/sprint-5-brief.md`. Same discipline as S1-S4: written before the
 implementation, and the coding agent must make them pass without modifying
-them. Every S1-S4 file keeps passing unmodified — Sprint 5 adds three optional
-options keys (`ttl_minutes`, `summary`, `clear_done`), two drop reasons and two
-`data` keys, and changes no routing rule for a message that is not deferred.
+them. Sprint 5 adds three optional options keys (`ttl_minutes`, `summary`,
+`clear_done`), two drop reasons and two `data` keys, and changes no routing
+rule for a message that is not deferred.
+
+**The one S1-S4 change Sprint 5 forces.** ADR-0019 §6 makes the router push a
+`clear_notification` to the Companion outputs an episode reached when an
+observer-mode row's `alert_entity` returns to `idle`. That push is an ordinary
+`notify.mobile_app_*` call, so it lands in the same captured-calls list as a
+real message — but **a clear is not a message**: it is not counted, it fires no
+event, and it must never be read as the `done` message it follows. Every
+acceptance test that counts calls or compares a message list on an output
+after an observer `→ idle` therefore filters `"clear_notification"` out, in
+S1-S3 as in S5. Six older tests were amended for that and for nothing else
+(`test_s1_observer.py::test_observer_mode_routes_done_message_on_return_to_idle`,
+`test_s2_row_texts.py::test_observer_mode_uses_the_rows_done_message_template`,
+and the four `test_s3_done_message.py` tests that read `[-1]` after
+`_drive_to_idle`, through that file's new `_messages()` helper). No assertion
+was weakened: the same texts, in the same order, are still pinned.
+
+Two consequences of §6 the suite deliberately does **not** pin, both settled by
+the ADR's "Amendment 2026-09-07": the closing sequence is observer-mode only
+(on a `notifiers:`-driven row core's `end_alerting` sends the done message
+*before* the state reaches `idle`, so a clear there would wipe it), and an
+episode left open by a real Home Assistant restart lingers until that row's
+next `idle → on`, because core's `AlertEntity` never re-reads its watched
+entity at startup.
 
 | File | What it pins |
 |---|---|
@@ -533,7 +556,21 @@ alone; firing a timer as well would let an implementation that only reacts to
 16. **`persistent_notification` is an output like any other**, named by its
     bare legacy service name (`notify.persistent_notification`). It is what
     the `notification_id` rule keys on, and the tests mock it with
-    `async_mock_service` exactly as they mock a Companion output.
+    `async_mock_service` exactly as they mock a Companion output — but they
+    mock it **after** the config entry is up, not before. Setting the entry up
+    sets up core's `notify` integration, whose `async_setup` registers
+    `notify.persistent_notification` unconditionally
+    (`$HA_CORE_SRC/homeassistant/components/notify/__init__.py`), and
+    `ServiceRegistry._async_register` (`$HA_CORE_SRC/homeassistant/core.py`)
+    replaces an existing handler silently. A mock made before `install(...)`
+    is therefore gone by the time the first message goes out, and captures
+    nothing. Three tests re-mock the bare output right after their
+    `await install(...)` for exactly this reason:
+    `test_s5_clear.py::test_a_message_carries_the_default_tag_and_notification_id`,
+    `test_s5_clear.py::test_a_caller_supplied_tag_and_notification_id_win` and
+    `test_contract.py::test_the_default_tag_and_notification_id_are_the_documented_values`.
+    The other tests that use this output only need the call to *succeed* (so
+    that the episode records it), which core's own handler does.
 17. **The episode's tags are a set, normally of one.** ADR-0019 §6 gives every
     message a default `data.tag`, so an episode has exactly one tag unless a
     caller varied it; the clear is specified as one call per tag, and the
@@ -568,3 +605,6 @@ half of a rule is worth pinning even when today's code already satisfies it.
 - `test_s5_episode.py::test_a_row_without_an_alert_entity_has_no_episodes` —
   `not_notified` must be unreachable for a household that never wrote an
   `alert:` block.
+- `test_s5_clear.py::test_a_caller_supplied_tag_and_notification_id_win` — a
+  default that overrode a caller would be worse than no default; 0.4.0 already
+  passes both keys through untouched, and §6 must not change that.
