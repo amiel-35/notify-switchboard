@@ -1830,3 +1830,149 @@ async def test_a_person_with_no_state_at_all_counts_as_unlinked(
 
     assert switchboard._person_user_id("person.ghost") is None
     assert switchboard._persons_needing_a_user_id() == ["person.ghost"]
+
+
+# ---------------------------------------------------------------------------
+# v0.4 (ADR-0018): `explain`, the test message and the row that reaches somebody
+# ---------------------------------------------------------------------------
+
+
+async def test_target_for_person_prefers_the_default_target(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0018 §6: the default target first, when it reaches that person."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [
+            make_target("garage", audience=["person.alice"]),
+            make_target("leak", audience=["person.alice"]),
+        ],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard.target_for_person("person.alice") == "leak"
+    assert switchboard.target_for_person("person.nobody") is None
+
+
+async def test_explain_names_a_temporary_silence_rather_than_a_switch(
+    hass: HomeAssistant,
+) -> None:
+    """Nothing is `on`, so the sentence has to say when the quiet hour lifts.
+
+    Sending somebody to look for a silence entity that is `off` is exactly the
+    failure `detail` exists to avoid (ADR-0018 §1).
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "off")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+            )
+        ],
+        [make_target("leak", audience=["person.alice"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "silence",
+        {"person": "person.alice", "minutes": 60},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    answer = (await entry.runtime_data.switchboard.async_explain("leak"))["persons"][
+        "person.alice"
+    ]
+
+    assert answer["decision"] == "dropped"
+    assert answer["reason"] == "silenced"
+    assert "input_boolean.night" not in answer["detail"], (
+        "the configured switch is off; naming it would send the user to the wrong place"
+    )
+    assert "notify_switchboard.silence" in answer["detail"]
+
+
+async def test_explain_answers_for_a_person_the_row_names_but_the_table_lacks(
+    hass: HomeAssistant,
+) -> None:
+    """A hand-edited audience: the answer is `unknown_person`, not a crash."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", audience=["person.alice", "person.ghost"])],
+        "leak",
+    )
+
+    answer = (await entry.runtime_data.switchboard.async_explain("leak"))["persons"][
+        "person.ghost"
+    ]
+
+    assert answer["decision"] == "dropped"
+    assert answer["reason"] == "unknown_person"
+    assert answer["outputs"] == []
+    assert answer["missing_outputs"] == []
+    assert answer["detail"]
+
+
+async def test_a_test_message_carries_the_public_tag_and_the_rows_title(
+    hass: HomeAssistant,
+) -> None:
+    """The tag is contract v0.4; the title is the row's, like any caller's."""
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", audience=["person.alice"], default_title="Switchboard")],
+        "leak",
+    )
+
+    await entry.runtime_data.switchboard.async_send_test_message("leak")
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1
+    assert calls[0].data["title"] == "Switchboard"
+    assert calls[0].data["data"]["tag"] == "switchboard-test"
+    assert calls[0].data["message"]
+
+
+async def test_the_alert_grace_timer_is_cancelled_when_the_entry_unloads(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0018 §5: the `async_call_later` handle joins `_unsubs`.
+
+    A config entry that leaves a live timer behind is exactly the class of bug
+    the shutdown handling of ADR-0017 is about, and the acceptance suite's
+    lingering-timer check would only catch it by accident.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak", audience=["person.alice"], alert_entity="alert.gone")],
+        "leak",
+    )
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=90))
+    await hass.async_block_till_done()
+
+    assert not [
+        issue
+        for (domain, _issue_id), issue in ir.async_get(hass).issues.items()
+        if domain == DOMAIN and issue.translation_key == "alert_entity_missing"
+    ], "a cancelled grace check must not fire after the entry is gone"

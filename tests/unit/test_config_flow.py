@@ -8,7 +8,11 @@ import pytest
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from homeassistant.helpers import entity_registry as er
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.notify_switchboard.const import (
     CONF_DEFAULT_TARGET,
@@ -28,9 +32,9 @@ async def _create_entry(hass: HomeAssistant) -> MockConfigEntry:
     return hass.config_entries.async_entries(DOMAIN)[0]
 
 
-def _person_input(**overrides: Any) -> dict[str, Any]:
-    data = {
-        "entity_id": "person.alice",
+def _person_outputs_input(**overrides: Any) -> dict[str, Any]:
+    """The second half of the person editor (ADR-0018 §2 splits it in two)."""
+    data: dict[str, Any] = {
         "outputs": ["mobile_app_alice"],
         "silence_entities": [],
     }
@@ -91,11 +95,14 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
         "edit_target",
         "remove_target",
         "general",
+        # v0.4 (ADR-0018 §6): send one real message and read what happened.
+        "test_person",
+        "test_target",
     }
 
 
 async def _options_step(
-    hass: HomeAssistant, entry: MockConfigEntry, step: str, user_input: Any = None
+    hass: HomeAssistant, entry: MockConfigEntry, step: str, *inputs: Any
 ) -> Any:
     """Open the options menu, pick `step`, and optionally submit `user_input`.
 
@@ -114,42 +121,112 @@ async def _options_step(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": step}
     )
-    if user_input is None:
-        return result
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], user_input
-    )
+    for user_input in inputs:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], user_input
+        )
     await hass.async_block_till_done()
     return result
 
 
-async def test_adding_a_person_then_a_target(hass: HomeAssistant) -> None:
-    """A person and a target can be added, and the default target is derived."""
+async def _add_person(
+    hass: HomeAssistant, entry: MockConfigEntry, person: str = "person.alice", **kw: Any
+) -> Any:
+    """Drive the two-step person editor to the end."""
+    return await _options_step(
+        hass, entry, "person", {"entity_id": person}, _person_outputs_input(**kw)
+    )
+
+
+async def _add_target(
+    hass: HomeAssistant, entry: MockConfigEntry, **overrides: Any
+) -> Any:
+    """Drive the row editor, confirmation step included (ADR-0018 §7)."""
+    return await _options_step(hass, entry, "target", _target_input(**overrides), {})
+
+
+async def test_adding_a_person_bootstraps_the_managed_default_row(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0018 §4: the first person on an empty table gets a row for free."""
     entry = await _create_entry(hass)
 
-    result = await _options_step(hass, entry, "person", _person_input())
+    result = await _add_person(hass, entry)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert entry.options[CONF_PERSONS][0]["entity_id"] == "person.alice"
 
-    result = await _options_step(hass, entry, "target", _target_input())
+    assert entry.options[CONF_PERSONS][0]["entity_id"] == "person.alice"
+    row = entry.options[CONF_TARGETS][0]
+    assert row["slug"] == "default"
+    assert row["managed"] is True
+    assert row["audience"] == ["person.alice"]
+    assert entry.options[CONF_DEFAULT_TARGET] == "default"
+
+
+async def test_adding_a_target_next_to_the_managed_row(hass: HomeAssistant) -> None:
+    """A hand-written row joins the table; the default target does not move."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _add_target(hass, entry)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    row = entry.options[CONF_TARGETS][0]
-    assert row["slug"] == "leak"
-    assert row["snooze_minutes"] == [15, 60]
-    assert row["default_data"] == {"channel": "family"}
-    assert entry.options[CONF_DEFAULT_TARGET] == "leak"
+
+    rows = {row["slug"]: row for row in entry.options[CONF_TARGETS]}
+    assert set(rows) == {"default", "leak"}
+    assert rows["leak"]["snooze_minutes"] == [15, 60]
+    assert rows["leak"]["default_data"] == {"channel": "family"}
+    assert "managed" not in rows["leak"]
+    assert entry.options[CONF_DEFAULT_TARGET] == "default"
+
+
+async def test_the_managed_row_is_not_recreated_once_it_is_gone(
+    hass: HomeAssistant,
+) -> None:
+    """The row bootstraps an empty table; it never re-adds itself later."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
+    await _options_step(hass, entry, "remove_target", {"slug": "default"})
+    await hass.async_block_till_done()
+    assert [row["slug"] for row in entry.options[CONF_TARGETS]] == ["leak"]
+
+    await _add_person(hass, entry, "person.bob", outputs=["mobile_app_bob"])
+    await hass.async_block_till_done()
+
+    assert [row["slug"] for row in entry.options[CONF_TARGETS]] == ["leak"]
 
 
 async def test_recursive_output_is_rejected_by_the_flow(hass: HomeAssistant) -> None:
     """Contract "Output": recursion is refused at config time."""
     entry = await _create_entry(hass)
     result = await _options_step(
-        hass, entry, "person", _person_input(outputs=["switchboard_leak"])
+        hass,
+        entry,
+        "person",
+        {"entity_id": "person.alice"},
+        _person_outputs_input(outputs=["switchboard_leak"]),
     )
     assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "person_outputs"
     assert result["errors"] == {"outputs": "recursive_output"}
+
+
+async def test_a_person_with_no_output_is_refused_by_the_second_step(
+    hass: HomeAssistant,
+) -> None:
+    """The rule lives in `validate_person` and is reported on the right form."""
+    entry = await _create_entry(hass)
+    result = await _options_step(
+        hass,
+        entry,
+        "person",
+        {"entity_id": "person.alice"},
+        _person_outputs_input(outputs=[]),
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"outputs": "no_outputs"}
+    assert entry.options[CONF_PERSONS] == []
 
 
 async def test_resubmitting_a_slug_updates_the_row(hass: HomeAssistant) -> None:
@@ -159,22 +236,21 @@ async def test_resubmitting_a_slug_updates_the_row(hass: HomeAssistant) -> None:
     `duplicate_slug` rule guards any other caller.
     """
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(hass, entry, "target", _target_input())
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
 
-    result = await _options_step(
-        hass, entry, "target", _target_input(name="Another leak")
-    )
+    result = await _add_target(hass, entry, name="Another leak")
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert len(entry.options[CONF_TARGETS]) == 1
-    assert entry.options[CONF_TARGETS][0]["name"] == "Another leak"
+    rows = [row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak"]
+    assert len(rows) == 1
+    assert rows[0]["name"] == "Another leak"
 
 
 async def test_invalid_slug_is_rejected_by_the_flow(hass: HomeAssistant) -> None:
     """A slug has to be a slug (accents and spaces included)."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
+    await _add_person(hass, entry)
     result = await _options_step(
         hass, entry, "target", _target_input(slug="Fuite d'eau")
     )
@@ -198,8 +274,8 @@ async def test_target_without_an_audience_is_rejected(hass: HomeAssistant) -> No
 async def test_removing_a_person_cleans_every_audience(hass: HomeAssistant) -> None:
     """Removing somebody also removes them from the rows that named them."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(hass, entry, "target", _target_input())
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
 
     result = await _options_step(
         hass, entry, "remove_person", {"entity_id": "person.alice"}
@@ -207,7 +283,8 @@ async def test_removing_a_person_cleans_every_audience(hass: HomeAssistant) -> N
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert entry.options[CONF_PERSONS] == []
-    assert entry.options[CONF_TARGETS][0]["audience"] == []
+    for row in entry.options[CONF_TARGETS]:
+        assert row["audience"] == []
 
 
 async def test_removing_the_last_target_clears_the_default(
@@ -215,10 +292,9 @@ async def test_removing_the_last_target_clears_the_default(
 ) -> None:
     """The default target follows the table."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(hass, entry, "target", _target_input())
+    await _add_person(hass, entry)
 
-    result = await _options_step(hass, entry, "remove_target", {"slug": "leak"})
+    result = await _options_step(hass, entry, "remove_target", {"slug": "default"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert entry.options[CONF_TARGETS] == []
@@ -241,17 +317,14 @@ async def test_remove_steps_abort_on_an_empty_table(hass: HomeAssistant) -> None
 async def test_general_step_picks_the_default_target(hass: HomeAssistant) -> None:
     """With two rows, the default target becomes a choice."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(hass, entry, "target", _target_input())
-    await _options_step(
-        hass, entry, "target", _target_input(slug="garage", name="Garage")
-    )
-    assert entry.options[CONF_DEFAULT_TARGET] == "leak"
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
+    assert entry.options[CONF_DEFAULT_TARGET] == "default"
 
-    result = await _options_step(hass, entry, "general", {"default_target": "garage"})
+    result = await _options_step(hass, entry, "general", {"default_target": "leak"})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    assert entry.options[CONF_DEFAULT_TARGET] == "garage"
+    assert entry.options[CONF_DEFAULT_TARGET] == "leak"
 
 
 async def test_editing_an_existing_person_replaces_the_row(
@@ -259,12 +332,9 @@ async def test_editing_an_existing_person_replaces_the_row(
 ) -> None:
     """Submitting the same person again updates rather than duplicates."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(
-        hass,
-        entry,
-        "person",
-        _person_input(outputs=["mobile_app_alice", "persistent_notification"]),
+    await _add_person(hass, entry)
+    await _add_person(
+        hass, entry, outputs=["mobile_app_alice", "persistent_notification"]
     )
     await hass.async_block_till_done()
     assert len(entry.options[CONF_PERSONS]) == 1
@@ -279,22 +349,19 @@ async def test_target_step_stores_the_three_optional_row_texts(
 ) -> None:
     """v0.2 addendum (ADR-0016): message, done_message and default_title."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
+    await _add_person(hass, entry)
 
-    result = await _options_step(
+    result = await _add_target(
         hass,
         entry,
-        "target",
-        _target_input(
-            message="Level {{ alert.attributes.level }}",
-            done_message="All clear",
-            default_title="Switchboard",
-        ),
+        message="Level {{ alert.attributes.level }}",
+        done_message="All clear",
+        default_title="Switchboard",
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
 
-    row = entry.options[CONF_TARGETS][0]
+    row = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
     assert row["message"] == "Level {{ alert.attributes.level }}"
     assert row["done_message"] == "All clear"
     assert row["default_title"] == "Switchboard"
@@ -305,11 +372,11 @@ async def test_target_step_leaves_the_optional_texts_none_when_omitted(
 ) -> None:
     """A Sprint 1 submission keeps producing a Sprint 1 row."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(hass, entry, "target", _target_input())
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
     await hass.async_block_till_done()
 
-    row = entry.options[CONF_TARGETS][0]
+    row = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
     assert row["message"] is None
     assert row["done_message"] is None
     assert row["default_title"] is None
@@ -325,14 +392,14 @@ async def test_an_unparsable_row_template_is_rejected_by_the_schema(
     and the flow raises `InvalidData` before the row is ever built.
     """
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
+    await _add_person(hass, entry)
 
     for field, bad in (("message", "{{ unclosed "), ("done_message", "{% if %}")):
         with pytest.raises(InvalidData) as err:
             await _options_step(hass, entry, "target", _target_input(**{field: bad}))
         assert field in str(err.value)
 
-    assert entry.options[CONF_TARGETS] == []
+    assert [row["slug"] for row in entry.options[CONF_TARGETS]] == ["default"]
 
 
 # ---------------------------------------------------------------------------
@@ -361,17 +428,14 @@ async def test_editing_a_target_pre_fills_every_field_it_is_about_to_overwrite(
     submitted.
     """
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
-    await _options_step(
+    await _add_person(hass, entry)
+    await _add_target(
         hass,
         entry,
-        "target",
-        _target_input(
-            message="Level {{ alert.attributes.level }}",
-            done_message="All clear",
-            default_title="Switchboard",
-            allow_acknowledge=True,
-        ),
+        message="Level {{ alert.attributes.level }}",
+        done_message="All clear",
+        default_title="Switchboard",
+        allow_acknowledge=True,
     )
 
     result = await _options_step(hass, entry, "edit_target", {"slug": "leak"})
@@ -395,20 +459,16 @@ async def test_editing_a_target_pre_fills_every_field_it_is_about_to_overwrite(
 
 async def test_editing_a_person_pre_fills_their_row(hass: HomeAssistant) -> None:
     entry = await _create_entry(hass)
-    await _options_step(
-        hass,
-        entry,
-        "person",
-        _person_input(silence_entities=["input_boolean.night"], wake_time="07:00:00"),
+    await _add_person(
+        hass, entry, silence_entities=["input_boolean.night"], wake_time="07:00:00"
     )
 
     result = await _options_step(
         hass, entry, "edit_person", {"entity_id": "person.alice"}
     )
-    assert result["step_id"] == "person"
+    assert result["step_id"] == "person_outputs"
 
     suggested = _suggested(result["data_schema"])
-    assert suggested["entity_id"] == "person.alice"
     assert suggested["outputs"] == ["mobile_app_alice"]
     assert suggested["silence_entities"] == ["input_boolean.night"]
     assert suggested["wake_time"] == "07:00:00"
@@ -419,7 +479,7 @@ async def test_a_validation_error_gives_back_what_was_typed(
 ) -> None:
     """A rejected form must not also lose the eleven fields that were fine."""
     entry = await _create_entry(hass)
-    await _options_step(hass, entry, "person", _person_input())
+    await _add_person(hass, entry)
 
     result = await _options_step(
         hass, entry, "target", _target_input(slug="Not A Slug", name="Kept")
@@ -442,3 +502,74 @@ async def test_editing_is_refused_while_the_table_is_empty(
         result = await _options_step(hass, entry, step)
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "nothing_to_edit"
+
+
+# ---------------------------------------------------------------------------
+# v0.4 (ADR-0018): discovery corner cases and the test steps
+# ---------------------------------------------------------------------------
+
+
+async def test_test_steps_abort_when_there_is_nothing_to_test(
+    hass: HomeAssistant,
+) -> None:
+    """An empty table has no row to route through and nobody to route to."""
+    entry = await _create_entry(hass)
+
+    for step in ("test_person", "test_target"):
+        result = await _options_step(hass, entry, step)
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "nothing_to_test"
+
+
+async def test_submitting_the_test_result_returns_to_the_menu(
+    hass: HomeAssistant,
+) -> None:
+    """Reading the result is the end of it; nothing is written by a test."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    before = dict(entry.options)
+
+    result = await _options_step(hass, entry, "test_target", {"slug": "default"}, {})
+
+    assert result["type"] is FlowResultType.MENU
+    assert dict(entry.options) == before
+
+
+async def test_discovery_ignores_what_is_not_a_phone_with_a_focus_sensor(
+    hass: HomeAssistant, entity_registry: er.EntityRegistry
+) -> None:
+    """A registration with no device name, and a sensor that is not binary.
+
+    Both are shapes a real instance produces -- an old registration, a
+    Companion sensor of another platform -- and neither must end up pre-selected
+    (ADR-0018 §2 and §3).
+    """
+    hass.states.async_set("person.alice", "home", {"user_id": "user-1"})
+    registration = MockConfigEntry(
+        domain="mobile_app",
+        source="registration",
+        title="Nameless",
+        data={"user_id": "user-1", "device_id": "device-nameless"},
+    )
+    registration.add_to_hass(hass)
+    entity_registry.async_get_or_create(
+        "sensor",
+        "mobile_app",
+        "device-nameless-focus",
+        config_entry=registration,
+        suggested_object_id="nameless_focus",
+    )
+    entry = await _create_entry(hass)
+
+    result = await _options_step(hass, entry, "person", {"entity_id": "person.alice"})
+
+    assert result["step_id"] == "person_outputs"
+    suggested = _suggested(result["data_schema"])
+    assert suggested["outputs"] == [], (
+        "a registration with no device_name names no notify service"
+    )
+    assert suggested["silence_entities"] == [], (
+        "only binary_sensor entities can mean `on` == silent"
+    )
