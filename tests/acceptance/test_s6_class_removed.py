@@ -119,7 +119,7 @@ async def test_class_is_absent_from_the_routing_table_a_diagnostics_dump_exposes
             "carries it invites somebody to explain what it does"
         )
     assert targets[0]["slug"] == "leak"
-    assert targets[0]["default_data"] == {"channel": "REDACTED"}, (
+    assert targets[0]["default_data"] == {"channel": "**REDACTED**"}, (
         "the rest of the dump is untouched, redaction included"
     )
 
