@@ -39,6 +39,7 @@ everything else is a finding (blocking or accepted).
 - [ ] `ruff`, `mypy` (core config), `hassfest`, HACS action green.
 - [ ] `strings.json` is the source; `translations/en|fr|es.json` have identical key sets; `fr` reads naturally; `es` labelled machine-translated.
 - [ ] `CHANGELOG.md` updated under Unreleased; docs updated where behaviour changed.
+- [ ] `CHANGELOG.md` is written for the user: Keep-a-Changelog sections, **10–15 bullets per version at most**, breaking changes first, each bullet says what changes for someone using the integration; no narrative, quotes, sprint/ADR/spec-PR numbers, test counts, coverage or review mentions (those live in PRs and ADRs). The release notes are that section (the release workflow extracts it; the tag must not be pushed before the section exists).
 - [ ] No edits to `.github/workflows` unless the sprint is dedicated to CI.
 
 ## F. Verdict
