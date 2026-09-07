@@ -58,9 +58,9 @@ to a number of minutes or `null`:
 
 ```python
 entry.options["ttl_minutes"] = {
-    "info": 120,      # default
-    "normal": 720,    # default
-    "high": None,     # default: never expires
+    "info": 120,  # default
+    "normal": 720,  # default
+    "high": None,  # default: never expires
 }
 ```
 
