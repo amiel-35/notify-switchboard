@@ -2338,7 +2338,9 @@ async def test_a_flush_running_at_unload_saves_before_the_outputs_not_after(
         "a reloaded entry may already own the file"
     )
     assert switchboard._deferral_unsubs == {}
-    assert [record for record in caplog.records if record.levelno >= logging.ERROR] == []
+    assert [
+        record for record in caplog.records if record.levelno >= logging.ERROR
+    ] == []
     assert "Traceback" not in caplog.text
 
 

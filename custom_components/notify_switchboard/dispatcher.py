@@ -1280,9 +1280,10 @@ class Switchboard:
     def _async_schedule_flush(self, person_id: str) -> None:
         """Run one person's flush in a task of the config entry's own.
 
-        Both entry points into a flush -- the wake-time timer and the early
-        flush of ADR-0019 §4 -- go through here, so a flush never runs *inside*
-        the timer sweep or the state write that triggered it. It calls
+        Two of the three entry points into a flush -- the wake-time timer and
+        the early flush of ADR-0019 §4; the setup catch-up calls the flush
+        inline -- go through here, so a flush never runs *inside* the timer
+        sweep or the state write that triggered it. It calls
         `notify.*` services, re-runs the whole decision and writes the store;
         none of that belongs in the middle of somebody else's callback, and
         scheduling it also gives the midnight counter reset and a flush that
@@ -1292,11 +1293,16 @@ class Switchboard:
         for it rather than cancelling it: `_async_process_on_unload`
         (`homeassistant/config_entries.py`) cancels `_background_tasks` and
         gives `_tasks` ten seconds to finish. That is the behaviour this wants
-        -- a flush that has begun pops deferrals from the store before
-        delivering them and saves once at the end, so cancelling it halfway
-        would deliver messages the store still lists as queued. A flush that
-        has *not* begun stands down instead, on the `_shutdown` flag
+        -- a flush that has begun pops deferrals from the store and saves them
+        gone before it delivers anything, so cancelling it halfway would
+        deliver messages the store still lists as queued. A flush that has
+        *not* begun stands down instead, on the `_shutdown` flag
         `async_shutdown` sets.
+
+        Ten seconds is less than the thirty a single output may take, so the
+        wait is not a guarantee: `_async_flush_deferrals` also stands its own
+        tail down on `_shutdown`, for the flush that finishes after the entry
+        that owned it is gone.
         """
         if self._shutdown:
             return
@@ -1369,12 +1375,22 @@ class Switchboard:
         for deferral, reason in (*drops, *refusals):
             self._async_count_drop(reason, person_id, deferral.slug)
 
-        if survivors:
-            if person is not None and person.summary and len(survivors) > 1:
-                await self._async_deliver_summary(person, survivors)
-            else:
-                for deferral, routed in survivors:
-                    await self._async_deliver(routed, deferral.message, deferral.title)
+        # The pops above are the durable half of a flush, and this is the last
+        # moment at which they are certainly safe to write. What follows can
+        # take `OUTPUT_TIMEOUT_SECONDS` *per output* -- thirty seconds -- while
+        # `_async_process_on_unload` (`homeassistant/config_entries.py`) gives
+        # an entry task ten before giving up on it and returning. A flush stuck
+        # on one hanging output therefore outlives its own entry, and a reload
+        # (an options edit) builds a second `Switchboard` over the same file
+        # while this one is still holding an older picture of it. Saving here
+        # is what makes that harmless: the messages this flush has taken are on
+        # disk before anything can go slow, so the tail below has nothing left
+        # it *must* write and can simply stand down.
+        if drops or survivors:
+            self._episodes_dirty = False
+            await self.store.async_save()
+
+        await self._async_deliver_survivors(person, survivors)
 
         if held:
             _LOGGER.debug(
@@ -1388,9 +1404,27 @@ class Switchboard:
         # nothing left it cancels the timer an early flush has just made moot.
         self._async_schedule_deferral(person_id)
 
-        if drops or survivors:
+        if self._shutdown:
+            # The entry unloaded while an output was hanging: `self.store`
+            # belongs to a `Switchboard` nobody holds any more, and a reloaded
+            # entry may already own the file. Everything durable was written
+            # before the first delivery; what would be added here is the
+            # episode membership of messages that were delivered anyway, and it
+            # is not worth writing a released instance's state over a live one.
+            # The entities are gone too, so there is nothing left to refresh.
+            _LOGGER.debug(
+                "Flush of %s outlived the config entry: leaving the store and "
+                "the entities to whoever owns them now",
+                person_id,
+            )
+            return
+
+        # Only the episode membership recorded by the deliveries above is left
+        # to persist; the rest went to disk before them.
+        if self._episodes_dirty:
             self._episodes_dirty = False
             await self.store.async_save()
+        if drops or survivors:
             self._async_notify_entities()
 
     @callback
@@ -1539,6 +1573,27 @@ class Switchboard:
             if drop.person in (person_id, None):
                 return None, drop.reason, ()
         return None, None, ()
+
+    async def _async_deliver_survivors(
+        self,
+        person: PersonConfig | None,
+        survivors: list[tuple[DeferredMessage, RoutedDelivery]],
+    ) -> None:
+        """Send what a flush decided to keep, as a digest or one by one.
+
+        The digest of §2 needs a person who asked for one and more than one
+        message to fold into it; anything else is delivered message by message,
+        exactly as it would have been at the moment it was queued. An empty
+        list is a normal outcome -- everything expired, dropped or still
+        silenced -- and sends nothing.
+        """
+        if not survivors:
+            return
+        if person is not None and person.summary and len(survivors) > 1:
+            await self._async_deliver_summary(person, survivors)
+            return
+        for deferral, routed in survivors:
+            await self._async_deliver(routed, deferral.message, deferral.title)
 
     async def _async_deliver_summary(
         self,
