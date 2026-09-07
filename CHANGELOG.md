@@ -59,6 +59,28 @@ what 0.7.0 had.
   (ADR-0018 §1). Those sentences are rendered in the **instance** language
   (`hass.config.language`), which a user whose own account is set to another
   language would not otherwise expect; the test-result screen now says so.
+- **An explanation names a rule, a floor and a whereabouts in words too.**
+  The `detail` sentences were written in plain language and then filled with
+  the router's own vocabulary: "sa règle de présence est `home_only`", "seuls
+  les messages de niveau `high`", "Alice est actuellement `not_home`". A
+  presence rule and a priority floor are now resolved through the very
+  `selector` labels the pickers offer — one place the wording lives — with the
+  stored value kept in brackets after the words, exactly as an output label
+  keeps its service name, because both are configuration somebody may be sent
+  to go and change. Where somebody is gets no brackets: `home`, `not_home`,
+  `unknown` and `unavailable` become words, and a zone name is passed through
+  untouched because the household chose it. Finally, `delivery_failed` and
+  `unknown_target` had no sentence of their own and fell through to the
+  generic one, which prints the reason verbatim; both now have one, so every
+  drop reason the contract defines is a sentence.
+- **The built-in dashboard notification is offered as an output**
+  (ADR-0018 §2, amendment 2026-09-07). `notify.persistent_notification` was
+  hidden from the `outputs` and `audience` pickers alongside the two services
+  that really cannot be outputs; it is Home Assistant's own notification
+  drawer, the most common output of somebody with no phone and the one the
+  quickstart uses before any phone exists, and it is offered with its
+  translated label. Only `notify.notify` and `notify.send_message` stay out of
+  the lists — the router's own refusal is unchanged.
 - **A household read the whole interface and it was rewritten again.** A
   non-technical French reviewer went through every screen; the pass that
   followed quotes names in a repair, drops the developer notes a user cannot

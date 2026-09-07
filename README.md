@@ -556,6 +556,8 @@ options call the same thing.
 | Watch the alert directly | `observer_mode` |
 | Importance (not very important / normal / important / critical) | `priority` (`info` / `normal` / `high` / `critical`) |
 | Tell people depending on presence | `presence_rule` |
+| At home / away from home / somewhere the house cannot name | the `person.*` state (`home` / `not_home` / `unknown`) |
+| Home Assistant notifications | the `persistent_notification` output |
 | Put on hold / "later" buttons | snooze |
 | Set aside | deferred |
 | How long a message set aside stays useful | `ttl_minutes` |
