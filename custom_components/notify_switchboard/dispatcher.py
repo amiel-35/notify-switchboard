@@ -2621,7 +2621,7 @@ class Switchboard:
             )
         except TemplateError as err:
             _LOGGER.error(
-                "Target %s: could not render the row text %r: %s", target.slug, raw, err
+                "Target %s: could not render its text %r: %s", target.slug, raw, err
             )
             return None
         text = str(rendered).strip()

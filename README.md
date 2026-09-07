@@ -69,8 +69,8 @@ install "Notify Switchboard" and restart Home Assistant.
 
 The second button at the top of this page starts the config flow. Or:
 Settings → Devices & services → Add integration → "Notify Switchboard".
-Setup takes no input, and **two forms of two and five fields** are enough to
-get a working `notify.switchboard`:
+Setup takes no input, and two short forms — **two fields, then five** — are
+enough to get a working `notify.switchboard`:
 
 1. **Add a person** — pick a `person.*`, then answer two things: which notify
    services reach them, and which entities mean they are silent. The notify
@@ -80,10 +80,10 @@ get a working `notify.switchboard`:
    the link is the `user_id` a Companion registration stores and the one a
    `person.*` publishes. You can still type a service that does not exist yet.
 2. That is it, on a fresh install: the first person added to an empty routing
-   table also creates a `default` **target** and points the default target at
-   it, so `notify.switchboard` reaches a real phone straight away. While that
-   target is managed, a second person joins its audience automatically;
-   editing it hands it to you for good.
+   table also gets a **target** called `default`, which becomes the one
+   `notify.switchboard` uses when no target is named — so it reaches a real
+   phone straight away. While that target is managed, a second person joins
+   its audience automatically; editing it hands it to you for good.
 3. **Add a target** — one per alert, when you want more than "everybody". Five
    fields: a slug (it becomes `notify.switchboard_<slug>`), a name, the
    `alert.*` it is about, the audience, and whether the router watches that

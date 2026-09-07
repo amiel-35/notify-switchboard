@@ -860,7 +860,7 @@ async def test_a_broken_template_falls_back_instead_of_breaking_the_route(
     hass.states.async_set("alert.observed", "idle")
     await hass.async_block_till_done()
     assert calls[1].data["message"] == "Back to normal"
-    assert "could not render the row text" in caplog.text
+    assert "could not render its text" in caplog.text
 
 
 async def test_a_template_rendering_to_nothing_falls_back_too(
