@@ -24,11 +24,13 @@ from typing import Any
 
 import pytest
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
 )
 
+from custom_components.notify_switchboard import dispatcher
 from custom_components.notify_switchboard.config_flow import (
     _audience_options,
     _output_label,
@@ -36,6 +38,24 @@ from custom_components.notify_switchboard.config_flow import (
     _person_label,
     _target_label,
 )
+from custom_components.notify_switchboard.const import (
+    DECISION_DEFERRED,
+    DECISION_ROUTED,
+    DROP_DELIVERY_FAILED,
+    DROP_EXPIRED,
+    DROP_NO_OUTPUTS,
+    DROP_NOT_IN_AUDIENCE,
+    DROP_NOT_NOTIFIED,
+    DROP_PRESENCE,
+    DROP_RECURSION,
+    DROP_SILENCED,
+    DROP_SNOOZED,
+    DROP_UNKNOWN_PERSON,
+    DROP_UNKNOWN_TARGET,
+    VALID_PRESENCE_RULES,
+    VALID_PRIORITIES,
+)
+from custom_components.notify_switchboard.router import RoutingContext
 
 from .test_config_flow import (  # noqa: PLC2701 - the flow helpers live there
     _add_person,
@@ -497,3 +517,134 @@ def _selector_options(result: Any, key: str) -> list[dict[str, str]]:
                 for option in validator.config["options"]
             ]
     raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
+
+
+# ---------------------------------------------------------------------------
+# The code words a `detail` placeholder carries
+# ---------------------------------------------------------------------------
+
+# Every drop reason the contract defines. A reason with no `detail_<reason>`
+# key falls back to the generic `detail_dropped`, whose sentence interpolates
+# `{reason}` -- which is how a household ends up reading "delivery_failed".
+DROP_REASONS = (
+    DROP_NOT_IN_AUDIENCE,
+    DROP_UNKNOWN_PERSON,
+    DROP_PRESENCE,
+    DROP_SILENCED,
+    DROP_SNOOZED,
+    DROP_RECURSION,
+    DROP_UNKNOWN_TARGET,
+    DROP_NO_OUTPUTS,
+    DROP_DELIVERY_FAILED,
+    DROP_EXPIRED,
+    DROP_NOT_NOTIFIED,
+)
+
+# The `person.*` states the router reads. `unavailable` is in the list because
+# a `person` entity really can be one, and "Alice is currently unavailable" is
+# the code speaking exactly as `not_home` is.
+PERSON_STATES = ("home", "not_home", "unknown", "unavailable")
+
+# Nothing in this set may reach a sentence through a placeholder: they are the
+# router's own words for a choice the user made in words of their own.
+CODE_VALUES = frozenset(
+    {*VALID_PRIORITIES, *VALID_PRESENCE_RULES, *PERSON_STATES, *DROP_REASONS}
+)
+# The ones no prose could ever contain by accident, so they can be looked for
+# inside a longer value rather than only as the whole of it.
+SLUGGED = frozenset(value for value in CODE_VALUES if "_" in value)
+
+SILENCE_ENTITY = "binary_sensor.night"
+
+
+def _offenders(template: str, placeholders: dict[str, str]) -> dict[str, str]:
+    """Return the placeholders this template actually shows, and that are code.
+
+    A placeholder the template does not interpolate is a slot nobody reads --
+    `{reason}` is set on every call and only `detail_dropped` prints it -- so
+    only the ones the sentence really carries are judged.
+    """
+    return {
+        name: value
+        for name, value in placeholders.items()
+        if f"{{{name}}}" in template
+        and (value in CODE_VALUES or any(word in value for word in SLUGGED))
+    }
+
+
+@pytest.mark.parametrize("language", ["en", "fr"])
+async def test_no_detail_sentence_interpolates_a_code_word(
+    hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch, language: str
+) -> None:
+    """`explain` answers in words, placeholders included (sprint 7.1, rule 2).
+
+    The JSON sweep above cannot see this one: the sentences are written in
+    plain language and it is what the router *fills them with* that is not --
+    `home_only`, `not_home`, `high`, `delivery_failed`. So the placeholders are
+    read back at the moment they are substituted, for every decision and every
+    drop reason the contract defines, in both the instance languages the sweep
+    covers.
+    """
+    await hass.config.async_update(language=language)
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "not_home", {"friendly_name": "Alice"})
+    hass.states.async_set(SILENCE_ENTITY, "on", {"friendly_name": "Night"})
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=[SILENCE_ENTITY],
+            )
+        ],
+        [make_target("leak", presence_rule="home_only")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    target = switchboard.table.targets["leak"]
+    person = switchboard.table.persons["person.alice"]
+    # Built by hand rather than read off the world: the point is the sentence,
+    # not how a floor is discovered. A `high` floor on the one silence that is
+    # `on` is what makes `detail_silenced_floor` the template that answers a
+    # `normal` call.
+    context = RoutingContext(
+        now=dt_util.utcnow(),
+        person_states={"person.alice": "not_home"},
+        silenced={SILENCE_ENTITY: "high"},
+    )
+
+    filled: list[tuple[str, dict[str, str]]] = []
+    original = dispatcher._fill
+
+    def _spy(template: str, placeholders: Any) -> str:
+        filled.append((template, dict(placeholders)))
+        return original(template, placeholders)
+
+    monkeypatch.setattr(dispatcher, "_fill", _spy)
+
+    found: dict[str, str] = {}
+    for key in (DECISION_ROUTED, DECISION_DEFERRED, *DROP_REASONS):
+        filled.clear()
+        await switchboard._async_detail(
+            key,
+            target,
+            "person.alice",
+            person,
+            context,
+            priority="normal",
+            outputs=["notify.mobile_app_alice"],
+            until=dt_util.utcnow(),
+        )
+        template, placeholders = filled[-1]
+        found |= {
+            f"{key}.{name}": value
+            for name, value in _offenders(template, placeholders).items()
+        }
+
+    assert not found, (
+        f"in {language!r}, {len(found)} `detail` placeholder(s) put one of the "
+        "router's own words on a screen; a sentence a household reads names a "
+        "rule, a whereabouts, an importance and a reason the way the pickers "
+        f"do (sprint 7.1, rule 2):\n{found}"
+    )
