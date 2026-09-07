@@ -29,10 +29,10 @@ what 0.7.0 had.
   is rewritten to say what will happen rather than how the router works, in
   French first, then English and Spanish (machine-translated, as the rest of
   `es` is). The reference is the person step: "Services notify et silence"
-  over `person.dev_bob` became "Prévenir Bob" — *« Sur quels appareils Bob
-  reçoit les notifications, et quand faut-il ne pas le déranger ? »* — with
-  "Services notify" and "Entités de silence" becoming "Où prévenir" and
-  "Quand ne pas déranger".
+  over `person.dev_bob` became "Changer les appareils de Bob" — *« Sur quels
+  appareils Bob reçoit les notifications, et quand faut-il ne pas déranger
+  Bob ? »* — with "Services notify" and "Entités de silence" becoming "Où
+  prévenir" and "Quand ne pas déranger".
 - **People, devices and targets are named the way the household names them.**
   A step description interpolates the friendly name, never the entity id; the
   person and target pickers list names instead of ids; the audience selector
@@ -50,6 +50,24 @@ what 0.7.0 had.
   translated "this person's device" marker stays reserved for their own phones,
   which is the question the ordering and the marker exist to answer. Stored
   values are unchanged: an option's `value` is still the raw service name.
+- **An explanation names devices, not `notify` services.** The `{outputs}` of
+  a `detail` sentence — what `explain` answers and what the options-menu test
+  result shows — is built from the same labels the `outputs` picker offers, so
+  the phone somebody ticked as "Bob's iPhone" is still "Bob's iPhone" one
+  screen later. The `outputs` key of the `explain` answer is untouched: it
+  still carries the full `notify.*` names a script pastes into Developer tools
+  (ADR-0018 §1). Those sentences are rendered in the **instance** language
+  (`hass.config.language`), which a user whose own account is set to another
+  language would not otherwise expect; the test-result screen now says so.
+- **A household read the whole interface and it was rewritten again.** A
+  non-technical French reviewer went through every screen; the pass that
+  followed quotes names in a repair, drops the developer notes a user cannot
+  act on (`return_response`, "120 par défaut, et une version future pourra
+  choisir un autre nombre", the `alert` template variable), stops making
+  `{person}` agree in gender, capitalises "le Standard de notification"
+  everywhere, aligns each menu entry with the title of the screen it opens,
+  says "mis de côté" rather than "retenu" throughout, and gives the two
+  deletion pickers a sentence saying what confirming will do.
 - **The priority and presence choices are translated chips** rather than
   `info` / `normal` / `high` / `critical` and `always` / `home_only` /
   `away_only`, through a `selector` translation key. The stored values are

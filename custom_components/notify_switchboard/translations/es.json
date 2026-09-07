@@ -9,23 +9,23 @@
     "persistent_notification": "Notificaciones de Home Assistant",
     "default_target_name": "Todo el mundo",
     "test_message": "Mensaje de prueba de la Centralita de notificaciones.",
-    "detail_routed": "Este mensaje iría a {outputs}.",
-    "detail_deferred": "Ahora mismo no hay que molestar a {person} ({entities}). El mensaje esperaría y se entregaría a las {until}.",
+    "detail_routed": "Este mensaje se enviaría a: {outputs}.",
+    "detail_deferred": "Ahora mismo no hay que molestar a {person} — {entities}. El mensaje esperaría y se entregaría a las {until}.",
     "detail_dropped": "Este mensaje no llegaría a {person} ({reason}).",
     "detail_presence": "Este destino no avisa a todo el mundo en cualquier situación: su regla de presencia es {rule} y {person} está ahora {state}.",
-    "detail_silenced": "Ahora mismo no hay que molestar a {person} ({entities}). Solo pasaría una alerta crítica.",
-    "detail_silenced_temporary": "A {person} se le ha dejado tranquilo un rato, hasta las {until}. Solo pasaría una alerta crítica.",
+    "detail_silenced": "Ahora mismo no hay que molestar a {person} — {entities}. Solo pasaría una alerta crítica.",
+    "detail_silenced_temporary": "No hay que molestar a {person} durante un rato, hasta las {until}. Solo pasaría una alerta crítica.",
     "detail_snoozed": "{person} ha dejado {target} en espera hasta las {until}.",
     "detail_no_outputs": "No hay ningún dispositivo indicado para {person}: no hay adónde enviar esto.",
     "detail_not_in_audience": "{person} no está entre las personas a las que avisa {target}.",
     "detail_unknown_person": "{target} quiere avisar a {person}, que no está en la lista de personas de la casa.",
     "detail_recursion": "Todos los dispositivos de {person} apuntan de vuelta a la propia Centralita de notificaciones: el mensaje daría vueltas sin fin.",
-    "summary_title": "{count} mensajes mientras no estabas",
+    "summary_title": "{count} mensajes guardados para ti",
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
     "detail_expired": "Un mensaje guardado para {person} se abandonaría: habría esperado demasiado para seguir mereciendo la pena.",
-    "detail_not_notified": "{person} no recibió nada la última vez que se disparó {target}: el mensaje de vuelta a la normalidad no le concierne.",
-    "detail_silenced_floor": "Ahora mismo no hay que molestar a {person} ({entities}), y solo pasan los mensajes de importancia {floor} y superior. Una alerta crítica pasa siempre."
+    "detail_not_notified": "{person} no recibió nada la última vez que se disparó {target}: el mensaje de vuelta a la normalidad no concierne a {person}.",
+    "detail_silenced_floor": "Ahora mismo no hay que molestar a {person} — {entities}, y solo pasan los mensajes de nivel {floor} y más importantes. Una alerta crítica pasa siempre."
   },
   "entity": {
     "binary_sensor": {
@@ -35,7 +35,7 @@
     },
     "event": {
       "delivery": {
-        "name": "Envío"
+        "name": "Mensaje enviado"
       }
     },
     "sensor": {
@@ -46,7 +46,7 @@
         "name": "Guardadas hoy"
       },
       "dropped_today": {
-        "name": "No entregadas hoy"
+        "name": "Perdidas hoy"
       },
       "last_notification": {
         "name": "Última notificación"
@@ -85,7 +85,7 @@
           "edit_target_advanced": "Ajustes avanzados de un destino",
           "remove_target": "Eliminar un destino",
           "general": "Destino usado por defecto",
-          "ttl": "Cuánto tiempo sigue mereciendo la pena un mensaje guardado",
+          "ttl": "Cuánto tiempo sigue siendo útil un mensaje guardado",
           "test_person": "Enviar un mensaje de prueba a alguien",
           "test_target": "Enviar un mensaje de prueba por un destino",
           "edit_target_escalation": "Qué pasa cuando la casa está vacía"
@@ -93,7 +93,7 @@
       },
       "person": {
         "title": "Añadir a alguien",
-        "description": "Elige a quién quieres añadir o modificar. La pantalla siguiente ya propone sus teléfonos y su modo Concentración.",
+        "description": "Elige a quién quieres añadir. La pantalla siguiente ya propone sus teléfonos y su modo Concentración.",
         "data": {
           "entity_id": "Persona"
         },
@@ -109,7 +109,7 @@
         }
       },
       "person_outputs": {
-        "title": "Avisar a {person}",
+        "title": "Cambiar los dispositivos de {person}",
         "description": "¿En qué dispositivos recibe {person} las notificaciones, y cuándo no hay que molestarla?",
         "data": {
           "outputs": "Dónde avisar",
@@ -121,19 +121,19 @@
         }
       },
       "person_advanced": {
-        "title": "La noche de {person}",
+        "title": "Configurar la noche de {person}",
         "description": "A qué hora termina su noche y cómo devolverle por la mañana lo que se ha guardado. Las dos respuestas son opcionales, y dejar la hora de despertar vacía es una respuesta: los mensajes esperan entonces a que el periodo de «no molestar» termine por sí solo, cuando anuncia un final — un horario lo hace — y se abandonan si no.",
         "data": {
           "wake_time": "Hora de despertar",
           "summary": "Resumirlo todo en un solo mensaje"
         },
         "data_description": {
-          "wake_time": "Lo que se ha guardado durante la noche se entrega a esa hora en lugar de perderse. Vacío: los mensajes esperan al final del periodo de «no molestar», cuando anuncia uno.",
+          "wake_time": "La hora a la que termina la noche, por ejemplo 07:00. Lo que se ha guardado durante la noche se entrega entonces, en lugar de perderse. Vacío: los mensajes esperan al final del periodo de «no molestar», cuando anuncia uno.",
           "summary": "Al despertar, una sola notificación que enumera todo lo que se ha guardado, en lugar de una notificación por mensaje. Activado por defecto."
         }
       },
       "edit_person_advanced": {
-        "title": "La noche de alguien",
+        "title": "Configurar la noche de alguien",
         "description": "Elige de quién quieres configurar la noche. Sus dispositivos y sus periodos de «no molestar» se quedan tal cual.",
         "data": {
           "entity_id": "Persona"
@@ -145,7 +145,7 @@
           "entity_id": "Persona"
         },
         "data_description": {
-          "entity_id": "Esta persona ya no será avisada por ningún destino."
+          "entity_id": "Esta persona ya no será avisada por ningún destino. Valida para quitarla."
         }
       },
       "target": {
@@ -159,16 +159,16 @@
           "observer_mode": "Vigilar la alerta directamente"
         },
         "data_description": {
-          "slug": "Letras minúsculas sin espacios, por ejemplo fuga_agua. Se convierte en notify.switchboard_fuga_agua. Cambiarlo más tarde rompe todo lo que usaba el nombre antiguo.",
+          "slug": "Letras minúsculas sin espacios, por ejemplo fuga_agua. Este nombre funciona entre bastidores; una vez creado, ya no se cambia. Se convierte en notify.switchboard_fuga_agua.",
           "name": "El nombre que ve la gente. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
           "alert_entity": "La alerta de Home Assistant que acompaña este destino. Necesaria para el botón «Visto».",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "La centralita mira la alerta ella misma y avisa en cuanto se dispara, sin que tengas que hacer que la alerta la llame. Es la forma recomendada."
+          "observer_mode": "La Centralita de notificaciones mira la alerta ella misma. No tienes que hacer nada más: en cuanto la alerta se dispara, se avisa a la gente. Es la forma recomendada."
         }
       },
       "target_saved": {
         "title": "Destino guardado",
-        "description": "Queda una cosa por hacer, una sola vez: copiar este bloque en tu configuración, sustituir binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reiniciar Home Assistant.\n\n```yaml\n{snippet}\n```\n\nEl bloque sigue la elección que acabas de hacer: si la centralita vigila la alerta directamente, aquí no hay nadie que declarar; si no, esto es justamente lo que conecta la alerta con la centralita.\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Ajustes avanzados de un destino» en este menú.",
+        "description": "Queda una cosa por hacer, una sola vez: copiar este bloque en tu configuración, sustituir binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reiniciar Home Assistant.\n\n```yaml\n{snippet}\n```\n\nEl bloque sigue la elección que acabas de hacer: si la Centralita de notificaciones vigila la alerta directamente, aquí no hay nadie que declarar; si no, esto es justamente lo que conecta la alerta con la Centralita de notificaciones.\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Ajustes avanzados de un destino» en este menú.",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -183,8 +183,8 @@
           "default_priority": "Importancia por defecto",
           "presence_rule": "Avisar según la presencia",
           "allow_acknowledge": "Botón «Visto»",
-          "snooze_minutes": "Botones «más tarde»",
-          "default_data": "Opciones enviadas con cada mensaje",
+          "snooze_minutes": "Botones «más tarde», en minutos",
+          "default_data": "Ajustes técnicos añadidos a cada mensaje",
           "message": "Texto del mensaje",
           "done_message": "Texto de la vuelta a la normalidad",
           "default_title": "Título por defecto",
@@ -195,10 +195,10 @@
           "presence_rule": "¿Hay que estar en casa, estar fuera, o da igual, para que te avisen?",
           "allow_acknowledge": "Añade a la notificación un botón que apaga la alerta.",
           "snooze_minutes": "Duraciones en minutos separadas por comas, por ejemplo 15, 60. Vacío: ningún botón «más tarde».",
-          "default_data": "Se añade a cada mensaje de este destino. Si la llamada proporciona lo mismo, gana la llamada.",
-          "message": "Opcional, y usado solo cuando la centralita vigila ella misma la alerta. La alerta está disponible en la plantilla con el nombre alert. Vacío: se envía el nombre del destino.",
-          "done_message": "Opcional, enviado cuando la alerta se apaga, si la centralita la vigila ella misma. Vacío: se envía un texto ya preparado.",
-          "default_title": "Título usado cuando la llamada no da ninguno, y para todos los mensajes que la centralita envía por su cuenta.",
+          "default_data": "Si el mensaje ya dice lo mismo, gana el mensaje.",
+          "message": "Opcional, y usado solo cuando la Centralita de notificaciones vigila ella misma la alerta. Vacío: se envía el nombre del destino. Los usuarios avanzados pueden escribir una plantilla.",
+          "done_message": "Opcional, enviado cuando la alerta se apaga, si la Centralita de notificaciones la vigila ella misma. Vacío: se envía un texto ya preparado.",
+          "default_title": "Título usado cuando la llamada no da ninguno, y para todos los mensajes que la Centralita de notificaciones envía por su cuenta.",
           "clear_done": "Quita el mensaje de vuelta a la normalidad de los teléfonos que lo han recibido, una vez terminada la alerta. Desactivado por defecto: suena y luego se queda."
         }
       },
@@ -222,7 +222,7 @@
           "slug": "Destino"
         },
         "data_description": {
-          "slug": "Lo que lo usaba para avisar a la gente ya no avisará a nadie."
+          "slug": "Lo que lo usaba para avisar a la gente ya no avisará a nadie. Valida para eliminar este destino."
         }
       },
       "general": {
@@ -232,21 +232,21 @@
           "critical_payload": "Hacer sonar los teléfonos para las alertas críticas"
         },
         "data_description": {
-          "default_target": "El que se usa cuando se le pide a la centralita que avise sin decir por qué destino.",
+          "default_target": "Se usa cuando no se dice nada más.",
           "critical_payload": "Una alerta crítica hace sonar entonces el teléfono aunque esté en «No molestar». Activado por defecto; solo afecta a la aplicación Home Assistant."
         }
       },
       "ttl": {
-        "title": "Cuánto tiempo sigue mereciendo la pena un mensaje guardado",
+        "title": "Cuánto tiempo sigue siendo útil un mensaje guardado",
         "description": "Un mensaje guardado mientras alguien no quería que le molestaran no merece necesariamente la pena doce horas más tarde. Indica, según la importancia, cuánto tiempo sigue mereciendo la pena entregarlo. Un campo vacío quiere decir que no caduca nunca. Las alertas críticas nunca se guardan: por eso aquí no tienen plazo.",
         "data": {
-          "info": "Poco importantes",
-          "normal": "Normales",
-          "high": "Importantes"
+          "info": "Mensajes poco importantes",
+          "normal": "Mensajes normales",
+          "high": "Mensajes importantes"
         },
         "data_description": {
-          "info": "En minutos, a partir del momento en que el mensaje se guardó. Hoy 120 por defecto, y una versión futura podrá elegir otro número.",
-          "normal": "En minutos, a partir del momento en que el mensaje se guardó. Hoy 720 por defecto, y una versión futura podrá elegir otro número.",
+          "info": "En minutos, a partir del momento en que el mensaje se guardó.",
+          "normal": "En minutos, a partir del momento en que el mensaje se guardó.",
           "high": "En minutos, a partir del momento en que el mensaje se guardó. Vacío por defecto: estos mensajes no caducan nunca."
         }
       },
@@ -272,7 +272,7 @@
       },
       "test_result": {
         "title": "Resultado de la prueba",
-        "description": "El mensaje ha salido. Esto es lo que ha pasado con cada uno:\n\n{result}"
+        "description": "El mensaje ha salido. Esto es lo que ha pasado con cada uno:\n\n{result}\n\nEstas explicaciones están escritas en el idioma de Home Assistant, que no es necesariamente el de tu cuenta."
       },
       "target_escalation": {
         "title": "Qué pasa cuando la casa está vacía",
@@ -297,19 +297,19 @@
       "duplicate_person": "Esta persona ya está aquí.",
       "no_outputs": "Indica al menos un dispositivo.",
       "recursive_output": "Un dispositivo no puede apuntar de vuelta a la propia Centralita de notificaciones.",
-      "component_service_output": "Esto no es un dispositivo: es el propio mecanismo de notificación, que no suena en ninguna parte. Elige un dispositivo de verdad.",
-      "invalid_output": "Este nombre contiene caracteres que un nombre de dispositivo no puede llevar.",
-      "invalid_entity": "Esto no es algo que Home Assistant conozca.",
-      "invalid_time": "Usa HH:MM o HH:MM:SS.",
-      "invalid_slug": "Usa solo minúsculas, cifras y guiones bajos.",
-      "duplicate_slug": "Otro destino ya lleva este identificador.",
+      "component_service_output": "Esto no es un dispositivo: elige un teléfono, un altavoz o una tableta.",
+      "invalid_output": "Este nombre contiene caracteres que no están permitidos.",
+      "invalid_entity": "Esto no existe (o ya no existe) en tu casa.",
+      "invalid_time": "Indica una hora, por ejemplo 7:30.",
+      "invalid_slug": "Solo letras minúsculas, cifras y el signo _.",
+      "duplicate_slug": "Otro destino ya tiene este nombre.",
       "invalid_priority": "Elige: poco importante, normal, importante o crítico.",
       "invalid_presence_rule": "Elige: siempre, solo las personas en casa, o solo las personas que están fuera.",
       "not_an_alert": "Elige una alerta.",
       "empty_audience": "Elige al menos una persona.",
       "unknown_person": "Este destino quiere avisar a alguien que no está en la lista de personas de la casa.",
       "invalid_snooze_minutes": "Usa minutos enteros y positivos separados por comas.",
-      "invalid_default_data": "Este campo espera una lista de opciones, no texto."
+      "invalid_default_data": "Este campo es para ajustes técnicos; déjalo vacío si no lo sabes."
     },
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",
@@ -321,35 +321,35 @@
   "issues": {
     "unknown_target": {
       "title": "Un destino solicitado no existe",
-      "description": "Algo ha pedido el destino {slug}, que no existe. El mensaje se ha abandonado. Crea ese destino, o corrige lo que lo pide."
+      "description": "Algo ha pedido el destino «{slug}», que no existe. El mensaje se ha abandonado. Crea ese destino, o corrige lo que lo pide."
     },
     "missing_output": {
       "title": "Un dispositivo ya no responde",
-      "description": "{output} falla desde hace varias notificaciones seguidas: no existe, o todos los envíos han acabado en error. Los mensajes destinados a él se pierden. Repáralo, o quítalo de los dispositivos de la persona."
+      "description": "El dispositivo «{output}» no ha recibido nada varias veces seguidas: no existe, o todos los envíos han acabado en error. Los mensajes destinados a él se pierden. Repáralo, o quítalo de los dispositivos de la persona."
     },
     "invalid_service_target": {
       "title": "Algo pide una y otra vez un destino que no existe",
-      "description": "La Centralita de notificaciones ha rechazado varias veces el destino {value}, que no existe. Algo — casi siempre una tarjeta o un script que se ha quedado en un destino renombrado — sigue pidiéndolo. Corrígelo, o crea ese destino."
+      "description": "La Centralita de notificaciones no encuentra el destino «{value}». Algo — casi siempre una tarjeta o un script que se ha quedado en un destino renombrado — sigue pidiéndolo. Corrígelo, o crea ese destino."
     },
     "invalid_service_person": {
       "title": "Algo nombra una y otra vez a alguien a quien no puede avisar",
-      "description": "La Centralita de notificaciones ha rechazado varias veces a {value}: no está en la lista de personas de la casa, o ese destino no la avisa. Corrige lo que lo pide, o añade a esa persona."
+      "description": "La Centralita de notificaciones no encuentra «{value}»: esa persona no está en la lista de personas de la casa, o ese destino no la avisa. Corrige lo que lo pide, o añade a esa persona."
     },
     "invalid_service_calls_many": {
       "title": "Algo pide una y otra vez nombres que no existen",
-      "description": "La Centralita de notificaciones ha rechazado ya más de {count} destinos o personas diferentes. En lugar de un aviso por nombre, este solo los representa a todos. Algo produce nombres que no existen — casi siempre una plantilla que no da lo que se cree. Corrígelo; este aviso desaparece al recargar la Centralita de notificaciones."
+      "description": "La Centralita de notificaciones ha rechazado ya más de {count} destinos o personas diferentes. En lugar de un aviso por nombre, este solo los representa a todos. Algo fabrica nombres que no existen — casi siempre una automatización que produce un nombre falso. Corrígelo; este aviso desaparece cuando reinicias la Centralita de notificaciones."
     },
     "person_without_user_id": {
       "title": "Alguien no está vinculado a ninguna cuenta de Home Assistant",
-      "description": "{person} recibe notificaciones con los botones «Visto» y «Más tarde», pero su ficha no está vinculada a ninguna cuenta de Home Assistant. La Centralita de notificaciones no puede saber entonces quién ha pulsado, y aplica la acción a todos aquellos a los que avisa el destino. Vincúlala en Ajustes > Personas y luego recarga la Centralita de notificaciones."
+      "description": "{person} recibe notificaciones con los botones «Visto» y «Más tarde», pero su ficha no está vinculada a ninguna cuenta de Home Assistant. La Centralita de notificaciones no puede saber entonces quién ha pulsado, y aplica la acción a todos aquellos a los que avisa el destino. Vincula a esta persona con su cuenta en Ajustes > Personas y luego recarga la Centralita de notificaciones."
     },
     "person_without_outputs": {
       "title": "Alguien no tiene ningún dispositivo",
-      "description": "{person} recibe avisos de al menos un destino, pero no hay ningún dispositivo indicado para ella: todos los mensajes destinados a ella se pierden. Abre las opciones de la Centralita de notificaciones, modifica esa persona y dale al menos un dispositivo."
+      "description": "Al menos un destino avisa a {person}, pero no hay ningún dispositivo indicado para {person}: todos los mensajes destinados a esa persona se pierden. Abre las opciones de la Centralita de notificaciones, modifica esa persona y dale al menos un dispositivo."
     },
     "alert_entity_missing": {
       "title": "Un destino vigila una alerta que no existe",
-      "description": "El destino {slug} vigila {entity_id}, que no existe. Así que no vigila nada y su botón «Visto» no apaga nada. Crea esa alerta, o vacía el campo «Alerta vigilada» del destino, y luego recarga la Centralita de notificaciones."
+      "description": "El destino «{slug}» vigila una alerta que ya no existe ({entity_id}). Así que no vigila nada y su botón «Visto» no apaga nada. Crea esa alerta, o quítala del campo «Alerta vigilada» del destino, y luego recarga la Centralita de notificaciones."
     }
   },
   "exceptions": {
@@ -375,7 +375,7 @@
       "message": "El destino {target} no avisa a nadie."
     },
     "no_loaded_entry": {
-      "message": "La Centralita de notificaciones no está cargada, así que no puede hacer nada. Vuelve a activarla e inténtalo otra vez."
+      "message": "La Centralita de notificaciones está apagada, así que no puede hacer nada. Vuelve a encenderla e inténtalo otra vez."
     }
   },
   "selector": {
@@ -402,7 +402,7 @@
       "fields": {
         "target": {
           "name": "Destino",
-          "description": "El identificador corto del destino. Tiene que vigilar una alerta y ofrecer el botón «Visto»."
+          "description": "El destino afectado (su identificador corto). Tiene que vigilar una alerta y ofrecer el botón «Visto»."
         }
       }
     },
@@ -412,7 +412,7 @@
       "fields": {
         "target": {
           "name": "Destino",
-          "description": "El identificador corto del destino que hay que dejar en espera."
+          "description": "El destino afectado (su identificador corto), el que hay que dejar en espera."
         },
         "minutes": {
           "name": "Minutos",
@@ -430,7 +430,7 @@
       "fields": {
         "target": {
           "name": "Destino",
-          "description": "El identificador corto del destino que hay que poner otra vez en marcha."
+          "description": "El destino afectado (su identificador corto), el que hay que poner otra vez en marcha."
         },
         "person": {
           "name": "Persona",
@@ -453,7 +453,7 @@
       }
     },
     "unsilence": {
-      "name": "Volver a molestar a alguien",
+      "name": "Hacer que alguien vuelva a estar localizable",
       "description": "Cancela ahora mismo un «no molestar» puesto por la acción anterior. No hace nada si a la persona no se la ha dejado tranquila así.",
       "fields": {
         "person": {
@@ -464,11 +464,11 @@
     },
     "explain": {
       "name": "Explicar",
-      "description": "Responde a la pregunta «¿qué le pasaría a un mensaje enviado ahora mismo a este destino?», persona por persona, sin enviar nada. Hay que llamarla pidiendo la respuesta (return_response).",
+      "description": "Responde a la pregunta «¿qué le pasaría a un mensaje enviado ahora mismo a este destino?», persona por persona, sin enviar nada. Hay que llamarla pidiendo la respuesta.",
       "fields": {
         "target": {
           "name": "Destino",
-          "description": "El identificador corto del destino que hay que examinar."
+          "description": "El destino afectado (su identificador corto), el que hay que examinar."
         },
         "priority": {
           "name": "Importancia",

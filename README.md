@@ -557,8 +557,8 @@ options call the same thing.
 | Importance (not very important / normal / important / critical) | `priority` (`info` / `normal` / `high` / `critical`) |
 | Tell people depending on presence | `presence_rule` |
 | Put on hold / "later" buttons | snooze |
-| Kept back | deferred |
-| How long a message kept back is still worth sending | `ttl_minutes` |
+| Set aside | deferred |
+| How long a message set aside stays useful | `ttl_minutes` |
 | Raise the importance when the house is empty | `escalate_when_nobody_home` |
 | Who gets what (the sensor) | `sensor.switchboard_routing_table` |
 
