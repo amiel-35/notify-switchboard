@@ -17,7 +17,12 @@
     "detail_no_outputs": "Aucun service notify n'est configuré pour {person} : il n'y a nulle part où envoyer ce message.",
     "detail_not_in_audience": "{person} ne fait pas partie de l'audience de la cible {target}.",
     "detail_unknown_person": "La cible {target} nomme {person}, qui n'est pas dans la table de Notify Switchboard.",
-    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui bouclerait."
+    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui bouclerait.",
+    "summary_title": "{count} messages pendant votre absence",
+    "summary_line": "• {title} — {message}",
+    "summary_line_untitled": "• {message}",
+    "detail_expired": "Un message en attente pour {person} serait abandonné une fois sa durée de vie écoulée.",
+    "detail_not_notified": "{person} n'a rien reçu pendant le dernier épisode de la cible {target} : le message de retour à la normale ne le concerne pas."
   },
   "entity": {
     "binary_sensor": {
@@ -73,7 +78,8 @@
           "remove_target": "Supprimer une cible",
           "general": "Cible par défaut",
           "test_person": "Tester une personne",
-          "test_target": "Tester une cible"
+          "test_target": "Tester une cible",
+          "ttl": "Durée de vie"
         }
       },
       "person": {
@@ -119,7 +125,8 @@
           "observer_mode": "Mode observateur",
           "message": "Modèle de message",
           "done_message": "Modèle de retour à la normale",
-          "default_title": "Titre par défaut"
+          "default_title": "Titre par défaut",
+          "clear_done": "Effacer le message de retour à la normale"
         },
         "data_description": {
           "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
@@ -135,7 +142,8 @@
           "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier.",
           "message": "Modèle facultatif utilisé en mode observateur quand l'alerte se déclenche. L'état de l'alerte est disponible sous alert, par exemple {{ alert.attributes.level }}. Laissez vide pour envoyer le nom.",
           "done_message": "Modèle facultatif utilisé en mode observateur quand l'alerte revient au repos. Laissez vide pour envoyer le texte traduit de retour à la normale.",
-          "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur."
+          "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur.",
+          "clear_done": "Retirer la notification de retour à la normale des téléphones qui l'ont reçue, une fois l'épisode clos. Désactivé par défaut : elle sonne, puis elle reste."
         }
       },
       "edit_target": {
@@ -169,12 +177,14 @@
         "data": {
           "outputs": "Services notify",
           "silence_entities": "Entités de silence",
-          "wake_time": "Heure de réveil"
+          "wake_time": "Heure de réveil",
+          "summary": "Résumer la nuit"
         },
         "data_description": {
           "outputs": "Choisissez parmi les services notify de cette instance, ou saisissez-en un qui n'existe pas encore : il est toléré et réessayé.",
           "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire. Un capteur Focus d'iPhone est proposé automatiquement.",
-          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu."
+          "wake_time": "Fin du silence de nuit. Un message écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu.",
+          "summary": "Une seule notification à l'heure de réveil listant tout ce qui a été retenu, au lieu d'une notification par message. Activé par défaut."
         }
       },
       "target_saved": {
@@ -204,6 +214,20 @@
       "test_result": {
         "title": "Résultat du test",
         "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
+      },
+      "ttl": {
+        "title": "Durée de vie",
+        "description": "Combien de temps un message retenu jusqu'à l'heure de réveil mérite encore d'être délivré. Laissez un champ vide pour que les messages de cette priorité n'expirent jamais. Critical n'est pas listé : il n'est jamais retenu, donc jamais expiré.",
+        "data": {
+          "info": "Info",
+          "normal": "Normal",
+          "high": "Haute"
+        },
+        "data_description": {
+          "info": "Minutes pendant lesquelles un message info reste utile après avoir été retenu. Par défaut : 120.",
+          "normal": "Minutes pendant lesquelles un message normal reste utile après avoir été retenu. Par défaut : 720.",
+          "high": "Minutes pendant lesquelles un message de priorité haute reste utile. Vide par défaut : il n'expire jamais."
+        }
       }
     },
     "error": {

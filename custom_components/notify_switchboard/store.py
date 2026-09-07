@@ -1,9 +1,10 @@
 """Persisted state for Notify Switchboard.
 
-Doctrine §5: nothing lives in RAM only. Snoozes, night deferrals and the
-temporary per-person silences of `notify_switchboard.silence` (v0.2, ADR-0016)
-go through `homeassistant.helpers.storage.Store` so they survive a reload or a
-restart, and the recorder database is never touched.
+Doctrine §5: nothing lives in RAM only. Snoozes, night deferrals, the temporary
+per-person silences of `notify_switchboard.silence` (v0.2, ADR-0016) and the
+episodes of a row's `alert_entity` (v0.5, ADR-0019 §5) go through
+`homeassistant.helpers.storage.Store` so they survive a reload or a restart,
+and the recorder database is never touched.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from .const import STORAGE_KEY, STORAGE_MINOR_VERSION, STORAGE_VERSION
 STORAGE_MINOR_VERSION_QUEUED_AT = 2
 # Minor version that introduced the temporary per-person silences (ADR-0016).
 STORAGE_MINOR_VERSION_SILENCES = 3
+# Minor version that introduced the episodes of a row's alert (ADR-0019 §5).
+STORAGE_MINOR_VERSION_EPISODES = 4
 
 
 class StoredData(TypedDict, total=False):
@@ -30,6 +33,7 @@ class StoredData(TypedDict, total=False):
     snoozes: list[dict[str, Any]]
     deferrals: list[dict[str, Any]]
     silences: list[dict[str, Any]]
+    episodes: list[dict[str, Any]]
 
 
 @dataclass(slots=True)
@@ -85,6 +89,51 @@ class DeferredMessage:
             return None
 
 
+@dataclass(slots=True)
+class Episode:
+    """One run of a routing-table row's `alert_entity` (ADR-0019 §5).
+
+    An episode opens on that entity's `idle -> on` transition and closes on its
+    `-> idle` one. While it is open the router records who was actually told
+    (`persons`), which `notify.*` outputs were successfully called (`outputs`)
+    and under which effective `data.tag` the messages went out (`tags`).
+
+    The record is **closed, not deleted**, when the alert returns to idle: a
+    `done` message is by definition sent after that, so the recipients have to
+    outlive the episode's end. It is reset when the row's *next* episode opens.
+    """
+
+    slug: str
+    persons: set[str] = field(default_factory=set)
+    outputs: set[str] = field(default_factory=set)
+    tags: set[str] = field(default_factory=set)
+    is_open: bool = False
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable representation, sorted for stability."""
+        return {
+            "slug": self.slug,
+            "persons": sorted(self.persons),
+            "outputs": sorted(self.outputs),
+            "tags": sorted(self.tags),
+            "open": self.is_open,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict[str, Any]) -> Episode | None:
+        """Rebuild an episode from storage, or None when the row is unusable."""
+        slug = raw.get("slug")
+        if not slug:
+            return None
+        return cls(
+            slug=str(slug),
+            persons={str(person) for person in raw.get("persons") or ()},
+            outputs={str(output) for output in raw.get("outputs") or ()},
+            tags={str(tag) for tag in raw.get("tags") or ()},
+            is_open=bool(raw.get("open")),
+        )
+
+
 class SwitchboardStorage(Store[StoredData]):
     """`Store` subclass owning the schema migration of the stored document."""
 
@@ -116,6 +165,12 @@ class SwitchboardStorage(Store[StoredData]):
             # so the list simply starts empty.
             old_data.setdefault("silences", [])
 
+        if old_minor_version < STORAGE_MINOR_VERSION_EPISODES:
+            # Episodes did not exist either, and an upgrade must not invent one:
+            # a restart in the middle of a leak must not turn "back to normal"
+            # into a message for people who slept through it (ADR-0019 §5).
+            old_data.setdefault("episodes", [])
+
         return old_data
 
 
@@ -136,6 +191,11 @@ class SwitchboardStore:
         # UTC instant the silence lifts. Configured `silence_entities` are read,
         # never owned, and never appear here.
         self.silences: dict[str, datetime] = {}
+        # One episode per routing-table row that has an `alert_entity`, keyed on
+        # the **row** and never on the alert: two rows may watch one alert with
+        # different audiences, and the contract says the row is the identity
+        # (ADR-008, ADR-0019 §5).
+        self.episodes: dict[str, Episode] = {}
 
     async def async_load(self) -> None:
         """Load snoozes, deferrals and silences, dropping anything unparsable."""
@@ -164,6 +224,12 @@ class SwitchboardStore:
                 continue
             self.deferrals[deferral.key] = deferral
 
+        for raw in data.get("episodes", []):
+            episode = Episode.from_dict(raw)
+            if episode is None:
+                continue
+            self.episodes[episode.slug] = episode
+
     async def async_save(self) -> None:
         """Persist the current snoozes and deferrals."""
         await self._store.async_save(
@@ -183,6 +249,7 @@ class SwitchboardStore:
                     {"person": person, "until": until.isoformat()}
                     for person, until in self.silences.items()
                 ],
+                "episodes": [episode.as_dict() for episode in self.episodes.values()],
             }
         )
 
@@ -191,6 +258,7 @@ class SwitchboardStore:
         self.snoozes.clear()
         self.deferrals.clear()
         self.silences.clear()
+        self.episodes.clear()
         await self._store.async_remove()
 
     def purge_expired_snoozes(self, now: datetime) -> bool:

@@ -65,6 +65,7 @@ from .const import (
     CONF_ALLOW_ACKNOWLEDGE,
     CONF_AUDIENCE,
     CONF_CLASS,
+    CONF_CLEAR_DONE,
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
     CONF_DEFAULT_TARGET,
@@ -79,12 +80,15 @@ from .const import (
     CONF_SILENCE_ENTITIES,
     CONF_SLUG,
     CONF_SNOOZE_MINUTES,
+    CONF_SUMMARY,
     CONF_TARGETS,
+    CONF_TTL_MINUTES,
     CONF_WAKE_TIME,
     DEFAULT_PRESENCE_RULE,
     DEFAULT_PRIORITY,
     DEFAULT_TARGET_CLASS,
     DEFAULT_TARGET_SLUG,
+    DEFAULT_TTL_MINUTES,
     DOMAIN,
     LEGACY_SERVICE_NAME,
     VALID_PRESENCE_RULES,
@@ -135,6 +139,22 @@ FALLBACK_DEFAULT_TARGET_NAME = "Everybody"
 # `TargetConfig.service_name` composes; `entity_id` is the one thing the router
 # cannot know, so it is left as an obvious placeholder.
 ALERT_SNIPPET_ENTITY_PLACEHOLDER = "binary_sensor.CHANGE_ME"
+
+# The ceiling of the time-to-live number selector: thirty days in minutes. A
+# deferral that outlives a month is a message nobody was waiting for, and an
+# unbounded field is the same `OverflowError` trap `MAX_SILENCE_MINUTES` closes.
+MAX_TTL_MINUTES = 43200
+
+
+def _ttl_value(raw: Any) -> int | None:
+    """Read one time-to-live field: a positive number, or None for "never"."""
+    if raw in (None, ""):
+        return None
+    try:
+        minutes = int(float(raw))
+    except TypeError, ValueError:  # pragma: no cover - the selector refuses it
+        return None
+    return minutes if minutes > 0 else None
 
 
 def _empty_options() -> dict[str, Any]:
@@ -335,7 +355,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
         return list(self._options.get(CONF_TARGETS) or [])
 
     def _load(self) -> None:
-        """Take a working copy of the stored options."""
+        """Take a working copy of the stored options.
+
+        The copy is built key by key rather than by copying the dict, so that a
+        half-written or hand-edited file cannot smuggle a shape the rest of this
+        flow does not expect. `ttl_minutes` (v0.5, ADR-0019 §1) is optional, so
+        it is only carried over when it is there -- and it *has* to be carried
+        over, or editing a person would silently reset the household's policy.
+        """
         if not self._options:
             stored = dict(self.config_entry.options or {})
             self._options = {
@@ -343,6 +370,8 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 CONF_TARGETS: [dict(row) for row in stored.get(CONF_TARGETS) or []],
                 CONF_DEFAULT_TARGET: stored.get(CONF_DEFAULT_TARGET),
             }
+            if CONF_TTL_MINUTES in stored:
+                self._options[CONF_TTL_MINUTES] = dict(stored[CONF_TTL_MINUTES])
 
     def _save(self) -> ConfigFlowResult:
         """Write the whole validated table back at once.
@@ -383,6 +412,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 "edit_target",
                 "remove_target",
                 "general",
+                "ttl",
                 "test_person",
                 "test_target",
             ],
@@ -552,6 +582,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 ),
                 CONF_WAKE_TIME: user_input.get(CONF_WAKE_TIME) or None,
             }
+            # v0.5 (ADR-0019 §2): the key is only written when it is False, so
+            # a person row edited without touching it keeps the exact dict it
+            # had and an absent key keeps meaning "summarise".
+            if not user_input.get(CONF_SUMMARY, True):
+                row[CONF_SUMMARY] = False
             persons = self._persons
             is_new = not any(other["entity_id"] == person_id for other in persons)
             errors = validate_person(row, persons, is_new=is_new)
@@ -595,6 +630,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_WAKE_TIME): selector.TimeSelector(
                     selector.TimeSelectorConfig()
                 ),
+                vol.Optional(CONF_SUMMARY, default=True): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -715,6 +751,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 CONF_DONE_MESSAGE: user_input.get(CONF_DONE_MESSAGE) or None,
                 CONF_DEFAULT_TITLE: user_input.get(CONF_DEFAULT_TITLE) or None,
             }
+            # v0.5 (ADR-0019 §6): same discipline as `managed`, absent is false.
+            if user_input.get(CONF_CLEAR_DONE):
+                row[CONF_CLEAR_DONE] = True
             # Re-read the raw value so an unparsable duration is reported.
             row_for_validation = dict(row)
             row_for_validation[CONF_SNOOZE_MINUTES] = user_input.get(
@@ -780,6 +819,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 vol.Optional(CONF_DEFAULT_TITLE): selector.TextSelector(
                     selector.TextSelectorConfig()
                 ),
+                vol.Optional(
+                    CONF_CLEAR_DONE, default=False
+                ): selector.BooleanSelector(),
             }
         )
         # Same reasoning as `person`: the three v0.2 texts (`message`,
@@ -905,6 +947,75 @@ class SwitchboardOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="general", data_schema=schema)
+
+    async def async_step_ttl(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit `ttl_minutes`, the household's policy for held-back messages.
+
+        The form always opens on the *effective* policy -- the stored mapping
+        where there is one, the documented defaults everywhere else -- so what a
+        user reads is what the router applies. An empty field means "never
+        expires", which is exactly what a `null` in the mapping means, and
+        `critical` has no field because a critical message is never held back in
+        the first place (ADR-0019 §1).
+
+        The mapping is written whole, and only when it differs from the
+        defaults: a household that never opens this step keeps an options dict
+        with the exact three keys it always had.
+        """
+        self._load()
+        if user_input is not None:
+            chosen = {
+                priority: _ttl_value(user_input.get(priority))
+                for priority in DEFAULT_TTL_MINUTES
+            }
+            if chosen == DEFAULT_TTL_MINUTES:
+                self._options.pop(CONF_TTL_MINUTES, None)
+            else:
+                self._options[CONF_TTL_MINUTES] = chosen
+            return self._save()
+
+        stored = self._options.get(CONF_TTL_MINUTES)
+        current = dict(DEFAULT_TTL_MINUTES)
+        if isinstance(stored, dict):
+            current.update(
+                {
+                    priority: stored[priority]
+                    for priority in DEFAULT_TTL_MINUTES
+                    if priority in stored
+                }
+            )
+        schema = vol.Schema(
+            {
+                # `None` is accepted alongside the number: a cleared field is
+                # how a user says "never expires", and a frontend may send it
+                # as an explicit null rather than by omitting the key.
+                vol.Optional(priority): vol.Any(
+                    None,
+                    selector.NumberSelector(
+                        selector.NumberSelectorConfig(
+                            min=1,
+                            max=MAX_TTL_MINUTES,
+                            step=1,
+                            mode=selector.NumberSelectorMode.BOX,
+                        )
+                    ),
+                )
+                for priority in DEFAULT_TTL_MINUTES
+            }
+        )
+        return self.async_show_form(
+            step_id="ttl",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                {
+                    priority: minutes
+                    for priority, minutes in current.items()
+                    if minutes is not None
+                },
+            ),
+        )
 
     # ------------------------------------------------------------------
     # Testing a person or a target (ADR-0018 §6)

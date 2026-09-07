@@ -69,17 +69,21 @@ from .const import (
     ATTR_DECISION,
     ATTR_DETAIL,
     ATTR_MISSING_OUTPUTS,
+    ATTR_NOTIFICATION_ID,
     ATTR_OUTPUTS,
     ATTR_PERSON,
     ATTR_PERSONS,
     ATTR_PRIORITY,
     ATTR_REASON,
+    ATTR_SWITCHBOARD_DONE,
     ATTR_TAG,
     ATTR_TARGET,
     ATTR_UNTIL,
     ATTR_USER_ID,
     AUTHENTICATED_PRIORITIES,
+    CLEAR_NOTIFICATION_MESSAGE,
     COMPANION_OUTPUT_PREFIX,
+    CONF_TTL_MINUTES,
     DECISION_DEFERRED,
     DECISION_DROPPED,
     DECISION_ROUTED,
@@ -87,6 +91,7 @@ from .const import (
     DIAGNOSTICS_DECISION_LOG_SIZE,
     DOMAIN,
     DROP_DELIVERY_FAILED,
+    DROP_EXPIRED,
     DROP_NOT_IN_AUDIENCE,
     DROP_SILENCED,
     DROP_SNOOZED,
@@ -112,8 +117,9 @@ from .const import (
     MAX_SILENCE_MINUTES,
     MAX_TRACKED_INVALID_SERVICE_CALLS,
     MIN_SILENCE_MINUTES,
-    PRIORITY_CRITICAL,
+    PERSISTENT_NOTIFICATION_OUTPUT,
     SIGNAL_STATE_UPDATED,
+    SUMMARY_TAG,
     TEST_MESSAGE_TAG,
     UNCOUNTED_DROP_REASONS,
 )
@@ -127,14 +133,19 @@ from .router import (
     TargetConfig,
     build_actions,
     build_routing_table,
+    collapse_by_tag,
     decide,
+    effective_tag,
     is_recursive_output,
+    merge_data,
     parse_action,
     resolve_priority,
+    resolve_ttl,
     split_outputs,
     state_is_on,
+    summary_data,
 )
-from .store import DeferredMessage, SwitchboardStore
+from .store import DeferredMessage, Episode, SwitchboardStore
 
 if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
@@ -160,12 +171,25 @@ NOTIFY_DOMAIN = "notify"
 ALERT_DOMAIN = "alert"
 SERVICE_TURN_OFF = "turn_off"
 MOBILE_APP_DOMAIN = "mobile_app"
+# The UI half of an episode is closed through core's own service
+# (`homeassistant/components/persistent_notification/__init__.py`: the `dismiss`
+# service, `SCHEMA_SERVICE_NOTIFICATION`, `async_dismiss`).
+PERSISTENT_NOTIFICATION_DOMAIN = "persistent_notification"
+SERVICE_DISMISS = "dismiss"
 
 TRANSLATION_CATEGORY = "common"
 KEY_ACKNOWLEDGE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.acknowledge"
 KEY_SNOOZE_MINUTES = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.snooze_minutes"
 KEY_BACK_TO_NORMAL = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.back_to_normal"
 KEY_TEST_MESSAGE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.test_message"
+# The wake-time summary (contract v0.5, ADR-0019 §2). `{count}` is the number
+# of **lines**, not of messages that were queued: the count and the list a user
+# reads must agree.
+KEY_SUMMARY_TITLE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.summary_title"
+KEY_SUMMARY_LINE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.summary_line"
+KEY_SUMMARY_LINE_UNTITLED = (
+    f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.summary_line_untitled"
+)
 
 # One `common.detail_*` string per thing `explain` can have to say (ADR-0018
 # §1: "`detail` is always a non-empty translated sentence ... naming the thing
@@ -178,6 +202,9 @@ FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
 FALLBACK_BACK_TO_NORMAL = "Back to normal"
 FALLBACK_TEST_MESSAGE = "Notify Switchboard test message"
+FALLBACK_SUMMARY_TITLE = "{count} messages while you were away"
+FALLBACK_SUMMARY_LINE = "\u2022 {title} \u2014 {message}"
+FALLBACK_SUMMARY_LINE_UNTITLED = "\u2022 {message}"
 # `detail` is promised non-empty even if a translation file is somehow missing
 # the key, so every lookup falls back to something a human can still read.
 FALLBACK_DETAIL = "No explanation is available for this decision."
@@ -228,6 +255,10 @@ class Switchboard:
         # How many times a UI service was refused for the same unknown
         # target/person, keyed by `(field, value)` (brief item 7).
         self._invalid_service_calls: dict[tuple[str, str], int] = {}
+        # Set when an episode gained a recipient, an output or a tag during a
+        # delivery (ADR-0019 §5). The save is done once, by the request that
+        # caused it, rather than once per person of a fan-out.
+        self._episodes_dirty = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -283,17 +314,23 @@ class Switchboard:
                 )
             )
 
-        observed = sorted(
+        # ADR-0019 §5: every row that names an `alert_entity` has episodes, in
+        # observer mode or not -- a row whose alert calls
+        # `notify.switchboard_<slug>` through its own `notifiers:` list has
+        # exactly the same ones. So the subscription is widened from "every
+        # observed alert" to "every row's alert"; only the *routing* half of the
+        # handler is still reserved to observer mode.
+        alerts = sorted(
             {
                 target.alert_entity
                 for target in self.table.targets.values()
-                if target.observer_mode and target.alert_entity
+                if target.alert_entity
             }
         )
-        if observed:
+        if alerts:
             self._unsubs.append(
                 async_track_state_change_event(
-                    self.hass, observed, self._async_observed_alert_changed
+                    self.hass, alerts, self._async_alert_changed
                 )
             )
 
@@ -398,7 +435,25 @@ class Switchboard:
             silenced=silenced,
             snoozes=dict(self.store.snoozes),
             temporary_silences=dict(self.store.silences),
+            episode_recipients=self._episode_recipients(),
         )
+
+    def _episode_recipients(self) -> dict[str, frozenset[str]]:
+        """Return, per row that has episodes, who its current one reached.
+
+        A slug is a key of this mapping **iff** its row names an
+        `alert_entity`: an absent key is what makes `not_notified` unreachable
+        for a household that never wrote an `alert:` block, and an empty set is
+        a row whose alert fired and reached nobody -- there is simply nobody to
+        tell that it is over (ADR-0019 §5).
+        """
+        recipients: dict[str, frozenset[str]] = {}
+        for slug, target in self.table.targets.items():
+            if not target.alert_entity:
+                continue
+            episode = self.store.episodes.get(slug)
+            recipients[slug] = frozenset(episode.persons if episode else ())
+        return recipients
 
     def is_person_silenced(self, person: PersonConfig) -> bool:
         """Return True when either silence source covers this person.
@@ -450,14 +505,27 @@ class Switchboard:
             targets=slugs,
             data=dict(data or {}),
         )
-        decision = decide(self.table, request, self.build_context())
-        await self._async_apply(request, decision)
+        decision, _outputs = await self._async_route(request)
         return decision
+
+    async def _async_route(
+        self, request: NotificationRequest
+    ) -> tuple[RoutingDecision, set[str]]:
+        """Decide and apply one request, returning the outputs it reached.
+
+        The second half of the pair is what §6 needs and `async_handle_request`
+        has never had to expose: `clear_done` clears the `done` message on the
+        Companion outputs that *received* it, which nothing but the delivery
+        itself can know.
+        """
+        decision = decide(self.table, request, self.build_context())
+        delivered = await self._async_apply(request, decision)
+        return decision, delivered
 
     async def _async_apply(
         self, request: NotificationRequest, decision: RoutingDecision
-    ) -> None:
-        """Perform the side effects of a decision."""
+    ) -> set[str]:
+        """Perform the side effects of a decision, and report what it reached."""
         self.decision_log.append(
             {
                 "at": dt_util.utcnow().isoformat(),
@@ -493,12 +561,16 @@ class Switchboard:
 
             self._async_count_drop(drop.reason, drop.person, drop.slug)
 
-        await self._async_deliver_all(decision, request.message, request.title)
+        delivered = await self._async_deliver_all(
+            decision, request.message, request.title
+        )
 
-        if store_dirty:
+        if store_dirty or self._episodes_dirty:
+            self._episodes_dirty = False
             await self.store.async_save()
 
         self._async_notify_entities()
+        return delivered
 
     async def async_send_test_message(self, slug: str) -> None:
         """Route one translated test message through the real routing path.
@@ -799,7 +871,7 @@ class Switchboard:
 
     async def _async_deliver_all(
         self, decision: RoutingDecision, message: str, title: str | None
-    ) -> None:
+    ) -> set[str]:
         """Deliver every routed message of one decision, concurrently.
 
         Contract v0.3 §"Fan-out guarantees" (ADR-0017 §3): the persons of one
@@ -813,8 +885,9 @@ class Switchboard:
         Counts and per-person outcomes are promised; the order of the resulting
         `event.switchboard_delivery` events is explicitly not.
         """
+        delivered: set[str] = set()
         if not decision.routed:
-            return
+            return delivered
 
         results = await asyncio.gather(
             *(
@@ -837,14 +910,21 @@ class Switchboard:
                 # person, which is the same outcome as every output failing,
                 # so it gets the same reason rather than one of its own.
                 self._async_count_drop(DROP_DELIVERY_FAILED, routed.person, routed.slug)
+                continue
+            delivered.update(result)
+        return delivered
 
     async def _async_deliver(
         self, routed: RoutedDelivery, message: str, title: str | None
-    ) -> None:
-        """Deliver one routed message to every output of one person."""
+    ) -> tuple[str, ...]:
+        """Deliver one routed message to every output of one person.
+
+        Returns the outputs that actually answered, which is what an episode
+        records and what `clear_done` later clears (ADR-0019 §5 and §6).
+        """
         target = self.table.targets.get(routed.slug)
         if target is None:
-            return
+            return ()
 
         # Contract §"Per-row texts": `default_title` is the outgoing title
         # whenever the caller did not supply one. Applied here, per delivery,
@@ -863,7 +943,11 @@ class Switchboard:
             ),
             return_exceptions=True,
         )
-        delivered = any(outcome is True for outcome in outcomes)
+        delivered = tuple(
+            output
+            for output, outcome in zip(routed.outputs, outcomes, strict=True)
+            if outcome is True
+        )
 
         if not delivered:
             # Every output of this person failed or does not exist: the
@@ -871,8 +955,9 @@ class Switchboard:
             # Counting it as routed would make the daily figure a count of
             # *intentions* rather than of notifications that went out.
             self._async_count_drop(DROP_DELIVERY_FAILED, routed.person, routed.slug)
-            return
+            return ()
 
+        self._async_record_episode(target, routed, payload, delivered)
         self.routed_today += 1
         self.last_notification[routed.person] = dt_util.utcnow()
         self._async_fire_delivery_event(
@@ -884,12 +969,44 @@ class Switchboard:
                 "delivered": True,
             },
         )
+        return delivered
+
+    @callback
+    def _async_record_episode(
+        self,
+        target: TargetConfig,
+        routed: RoutedDelivery,
+        payload: Mapping[str, Any],
+        delivered: tuple[str, ...],
+    ) -> None:
+        """Remember that this delivery belonged to the row's open episode.
+
+        Only a **delivered** message counts: somebody whose message was dropped,
+        or deferred and not yet flushed, was not told about the leak and must
+        not be told it is over (ADR-0019 §5). The episode is closed before the
+        `done` message is routed, so the `done` message is never recorded into
+        the episode it closes -- which is what lets `clear_done: false` keep it
+        on the phone while the episode's own notifications are cleared.
+        """
+        episode = self.store.episodes.get(target.slug)
+        if episode is None or not episode.is_open:
+            return
+        episode.persons.add(routed.person)
+        episode.outputs.update(delivered)
+        episode.tags.add(str(payload[ATTR_TAG]))
+        self._episodes_dirty = True
 
     async def _async_build_payload(
         self, target: TargetConfig, routed: RoutedDelivery
     ) -> dict[str, Any]:
-        """Build the merged `data` payload, buttons included."""
+        """Build the merged `data` payload, tag and buttons included.
+
+        ADR-0019 §6: every message acquires a deterministic identity, because a
+        notification you cannot name is one you can never clear. A caller's own
+        `data.tag` always wins; the default only fills a gap.
+        """
         payload = dict(routed.data)
+        payload[ATTR_TAG] = effective_tag(target.slug, routed.data)
         authenticate = routed.priority in AUTHENTICATED_PRIORITIES
         labels = await self._async_labels(target)
         actions = build_actions(target, labels, authenticate)
@@ -936,6 +1053,19 @@ class Switchboard:
         if not service.startswith(COMPANION_OUTPUT_PREFIX):
             data.pop(ATTR_ACTIONS, None)
             data.pop(ATTR_AUTHENTICATION_REQUIRED, None)
+        # ADR-0019 §6: `data.notification_id` mirrors the effective tag, and is
+        # added for the bare `persistent_notification` output only -- the one
+        # core documents as reading it (`components/notify/__init__.py`, the
+        # `persistent_notification` service handler: `notification_id =
+        # data.get(pn.ATTR_NOTIFICATION_ID)`, then `pn.async_create(...)`).
+        # Every other output would receive a key it has no use for. A
+        # caller-supplied value wins here too, hence the membership test.
+        if service == PERSISTENT_NOTIFICATION_OUTPUT and ATTR_NOTIFICATION_ID not in (
+            data
+        ):
+            tag = data.get(ATTR_TAG)
+            if tag is not None:
+                data[ATTR_NOTIFICATION_ID] = str(tag)
         if data:
             service_data["data"] = data
 
@@ -1038,10 +1168,13 @@ class Switchboard:
             # of quiet would be the wrong kind of late.
             return False
 
+        # ADR-0019 §6 only means the `tag` half of the `(person, target, tag)`
+        # de-duplication key is now always populated: an untagged message keeps
+        # de-duplicating against itself exactly as it did, under a name.
         deferral = DeferredMessage(
             person=person_id,
             slug=slug,
-            tag=request.tag or "",
+            tag=effective_tag(slug, merge_data(target, request.data)),
             message=request.message,
             title=request.title,
             priority=resolve_priority(target, request.data),
@@ -1095,9 +1228,11 @@ class Switchboard:
         is still covered — without it, a flush held back by an hour of
         requested quiet would wait until the *next* morning to try again.
 
-        A configured `silence_entities` going `off` early is not waited for: the
-        router cannot predict when that happens, and `wake_time` is the
-        documented promise.
+        A configured `silence_entities` going `off` early is not scheduled for
+        here -- the router cannot predict when that happens -- but it is no
+        longer ignored either: `_async_silence_changed` flushes on the spot when
+        the last active one lifts (ADR-0019 §4). `wake_time` stays the upper
+        bound, so nothing waits longer than it used to.
         """
         if (unsub := self._deferral_unsubs.pop(person_id, None)) is not None:
             unsub()
@@ -1115,83 +1250,267 @@ class Switchboard:
             if now < local_until < when:
                 when = local_until
 
-        async def _deliver(_now: datetime) -> None:
+        @callback
+        def _deliver(_now: datetime) -> None:
             self._deferral_unsubs.pop(person_id, None)
-            await self._async_flush_deferrals(person_id)
+            self._async_schedule_flush(person_id)
 
         self._deferral_unsubs[person_id] = async_track_point_in_time(
             self.hass, _deliver, when
         )
 
+    @callback
+    def _async_schedule_flush(self, person_id: str) -> None:
+        """Run one person's flush in a task of the config entry's own.
+
+        Both entry points into a flush -- the wake-time timer and the early
+        flush of ADR-0019 §4 -- go through here, so a flush never runs *inside*
+        the timer sweep or the state write that triggered it. It calls
+        `notify.*` services, re-runs the whole decision and writes the store;
+        none of that belongs in the middle of somebody else's callback, and
+        scheduling it also gives the midnight counter reset and a flush that
+        come due at the same instant a defined order.
+
+        The task belongs to the config entry, so unloading cancels a flush that
+        has not started yet, exactly as `async_cancel_timers` cancels the timer
+        that would have armed one.
+        """
+        self.entry.async_create_task(
+            self.hass,
+            self._async_flush_deferrals(person_id),
+            name=f"notify_switchboard flush {person_id}",
+            eager_start=False,
+        )
+
     async def _async_flush_deferrals(
         self, person_id: str, only: list[DeferredMessage] | None = None
     ) -> None:
-        """Deliver the messages queued for one person, then persist.
+        """Re-decide, expire, summarise and deliver one person's queue.
 
-        `only` restricts the flush to a subset (the overdue ones at setup);
-        by default everything queued for that person is delivered.
+        `only` restricts the flush to a subset (the overdue ones at setup); by
+        default everything queued for that person is considered. There are three
+        entry points -- the wake-time timer, the early flush of ADR-0019 §4 and
+        the catch-up after a restart -- and all three run this, so §1, §2 and §3
+        apply identically to each.
 
-        The wake time is only a *prediction* that the night is over. Before
-        delivering, the person's silence is re-read: a night schedule that runs
-        late, a `notify_switchboard.silence` set in the small hours or a
-        Home Assistant that came back up mid-night would otherwise push the
-        whole queue at somebody who is still asleep — the exact thing the
-        deferral exists to avoid. A message still under a silence stays queued
-        and the flush is re-armed by `_async_schedule_deferral`, which picks the
-        earlier of the next wake time and the end of a temporary silence.
-        `critical` bypasses silence everywhere else
-        (contract §"Routing decision"), so it bypasses it here too.
+        Each queued message goes through, in this order:
+
+        1. **its time-to-live** (§1), read *now* from its stored priority and
+           its stored `data`, never frozen at queue time: a message whose time
+           has run out is dropped with the reason `expired` and leaves the
+           queue, rather than waking somebody up about something that stopped
+           mattering hours ago;
+        2. **the whole routing decision** (§3), `router.decide` over a fresh
+           `build_context()`, with the message's **original** priority written
+           back into the rebuilt request so a row whose `default_priority`
+           changed overnight cannot silently re-grade it. `silenced` is the one
+           outcome that still holds the message and re-arms the flush -- the
+           night is not over, which is the whole point of a deferral; every
+           other drop is real, and carries the reason that says why;
+        3. **the summary** (§2): two or more survivors for a person whose
+           `summary` is on become one notification per output instead of one
+           per message.
         """
-        pending = (
+        pending = sorted(
             only
             if only is not None
             else [
                 deferral
                 for key, deferral in self.store.deferrals.items()
                 if key[0] == person_id
-            ]
+            ],
+            key=lambda deferral: deferral.queued_at,
         )
+        if not pending:
+            return
+
         person = self.table.persons.get(person_id)
-        still_silenced = person is not None and self.is_person_silenced(person)
+        context = self.build_context()
+        survivors, drops, held = self._triage_deferrals(pending, person_id, context)
 
-        deliverable: list[DeferredMessage] = []
-        held: list[DeferredMessage] = []
-        for deferral in pending:
-            if still_silenced and deferral.priority != PRIORITY_CRITICAL:
-                held.append(deferral)
+        for deferral, _reason in drops:
+            self.store.deferrals.pop(deferral.key, None)
+        for deferral, _routed in survivors:
+            self.store.deferrals.pop(deferral.key, None)
+
+        for deferral, reason in drops:
+            self._async_count_drop(reason, person_id, deferral.slug)
+
+        if survivors:
+            if person is not None and person.summary and len(survivors) > 1:
+                await self._async_deliver_summary(person, survivors)
             else:
-                deliverable.append(deferral)
-
-        for deferral in deliverable:
-            del self.store.deferrals[deferral.key]
-
-        for deferral in deliverable:
-            target = self.table.targets.get(deferral.slug)
-            if target is None or person is None:
-                continue
-            usable, _recursive = split_outputs(person.outputs)
-            if not usable:
-                continue
-            routed = RoutedDelivery(
-                person=person_id,
-                slug=deferral.slug,
-                outputs=usable,
-                priority=deferral.priority,
-                data=dict(deferral.data),
-            )
-            await self._async_deliver(routed, deferral.message, deferral.title)
+                for deferral, routed in survivors:
+                    await self._async_deliver(routed, deferral.message, deferral.title)
 
         if held:
             _LOGGER.debug(
-                "Keeping %d deferral(s) for %s: still silenced at the wake time",
+                "Keeping %d deferral(s) for %s: still silenced at the flush",
                 len(held),
                 person_id,
             )
-            self._async_schedule_deferral(person_id)
 
-        if deliverable:
+        # Unconditional: with something left this re-arms for whichever comes
+        # first, the next wake time or the end of a temporary silence; with
+        # nothing left it cancels the timer an early flush has just made moot.
+        self._async_schedule_deferral(person_id)
+
+        if drops or survivors:
+            self._episodes_dirty = False
             await self.store.async_save()
             self._async_notify_entities()
+
+    def _triage_deferrals(
+        self,
+        pending: list[DeferredMessage],
+        person_id: str,
+        context: RoutingContext,
+    ) -> tuple[
+        list[tuple[DeferredMessage, RoutedDelivery]],
+        list[tuple[DeferredMessage, str]],
+        list[DeferredMessage],
+    ]:
+        """Split a person's queue into (survivors, real drops, still held).
+
+        The time-to-live of §1 first, then the full re-decision of §3. Both are
+        read now rather than at queue time, and the single outcome that holds a
+        message instead of dropping it is `silenced`.
+        """
+        mapping = self.entry.options.get(CONF_TTL_MINUTES)
+        survivors: list[tuple[DeferredMessage, RoutedDelivery]] = []
+        drops: list[tuple[DeferredMessage, str]] = []
+        held: list[DeferredMessage] = []
+
+        for deferral in pending:
+            ttl = resolve_ttl(
+                deferral.priority,
+                deferral.data,
+                mapping if isinstance(mapping, Mapping) else None,
+            )
+            if ttl is not None and deferral.queued_at + ttl <= context.now:
+                drops.append((deferral, DROP_EXPIRED))
+                continue
+
+            routed, reason = self._redecide(deferral, person_id, context)
+            if routed is not None:
+                survivors.append((deferral, routed))
+            elif reason == DROP_SILENCED:
+                held.append(deferral)
+            else:
+                drops.append((deferral, reason or DROP_UNKNOWN_TARGET))
+
+        return survivors, drops, held
+
+    def _redecide(
+        self,
+        deferral: DeferredMessage,
+        person_id: str,
+        context: RoutingContext,
+    ) -> tuple[RoutedDelivery | None, str | None]:
+        """Run the whole decision again for one queued message (§3).
+
+        The flush stops being a second, weaker decision engine and becomes the
+        same one, run later: same `router.decide`, same fresh context, same
+        message, same target, and the deferral's own priority written back into
+        `data.priority`.
+        """
+        request = NotificationRequest(
+            message=deferral.message,
+            title=deferral.title,
+            targets=(deferral.slug,),
+            data={**deferral.data, ATTR_PRIORITY: deferral.priority},
+        )
+        decision = decide(self.table, request, context)
+        for item in decision.routed:
+            if item.person == person_id:
+                return item, None
+        for drop in decision.dropped:
+            # `person is None` is the `unknown_target` drop: the row this
+            # message was queued for has been deleted since.
+            if drop.person in (person_id, None):
+                return None, drop.reason
+        return None, None
+
+    async def _async_deliver_summary(
+        self,
+        person: PersonConfig,
+        survivors: list[tuple[DeferredMessage, RoutedDelivery]],
+    ) -> None:
+        """Deliver one digest instead of a burst of notifications (§2).
+
+        Eleven deferred messages used to be eleven notifications, eleven sounds
+        and eleven banners at the exact moment somebody opens their eyes: the
+        integration that exists to protect the night was the loudest thing in
+        it.
+
+        Messages sharing a `tag` collapse to the last one, across rows. The
+        payload is *built*, not merged -- `switchboard-summary`, the union of
+        the `switchboard_*` keys, and nothing else -- so no Companion button
+        ever lands on a digest, where it could only act on an arbitrary one of
+        the messages it summarises.
+
+        Counting follows the lines: each line is one message that reached this
+        person, so each one is one `routed` count and one `routed`
+        `event.switchboard_delivery`. A message collapsed away is superseded,
+        exactly as the queue-time de-duplication on `(person, target, tag)`
+        already supersedes one.
+        """
+        kept: list[tuple[DeferredMessage, RoutedDelivery]] = collapse_by_tag(
+            [(deferral.tag, (deferral, routed)) for deferral, routed in survivors]
+        )
+
+        translations = await self._async_translations()
+        line_template = translations.get(KEY_SUMMARY_LINE, FALLBACK_SUMMARY_LINE)
+        untitled_template = translations.get(
+            KEY_SUMMARY_LINE_UNTITLED, FALLBACK_SUMMARY_LINE_UNTITLED
+        )
+
+        lines: list[str] = []
+        for deferral, _routed in kept:
+            target = self.table.targets.get(deferral.slug)
+            title = deferral.title or (target.default_title if target else None)
+            if title:
+                lines.append(
+                    _fill(line_template, {"title": title, "message": deferral.message})
+                )
+            else:
+                lines.append(_fill(untitled_template, {"message": deferral.message}))
+
+        summary_title = _fill(
+            translations.get(KEY_SUMMARY_TITLE, FALLBACK_SUMMARY_TITLE),
+            {"count": str(len(lines))},
+        )
+        payload = summary_data([routed.data for _deferral, routed in kept])
+
+        usable, _recursive = split_outputs(person.outputs)
+        outcomes = await asyncio.gather(
+            *(
+                self._async_call_output(
+                    output, "\n".join(lines), summary_title, payload, SUMMARY_TAG
+                )
+                for output in usable
+            ),
+            return_exceptions=True,
+        )
+        if not any(outcome is True for outcome in outcomes):
+            for deferral, _routed in kept:
+                self._async_count_drop(
+                    DROP_DELIVERY_FAILED, person.entity_id, deferral.slug
+                )
+            return
+
+        self.last_notification[person.entity_id] = dt_util.utcnow()
+        for deferral, _routed in kept:
+            self.routed_today += 1
+            self._async_fire_delivery_event(
+                EVENT_TYPE_ROUTED,
+                {
+                    "person": person.entity_id,
+                    "target": deferral.slug,
+                    "priority": deferral.priority,
+                    "delivered": True,
+                },
+            )
 
     # ------------------------------------------------------------------
     # Companion callbacks (brief item 6)
@@ -1772,10 +2091,15 @@ class Switchboard:
     # Observer mode (brief item 8)
     # ------------------------------------------------------------------
 
-    async def _async_observed_alert_changed(
-        self, event: Event[EventStateChangedData]
-    ) -> None:
-        """Route on the observed alert's transitions (plan B, ADR-007)."""
+    async def _async_alert_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Open and close episodes, and route in observer mode (ADR-007, ADR-0019).
+
+        One handler for both halves, because they are the same two transitions.
+        Episodes are kept for **every** row that names an `alert_entity`
+        (ADR-0019 §5); the routing is still observer mode's alone -- a row that
+        is called through its alert's own `notifiers:` list would otherwise be
+        notified twice.
+        """
         old_state = event.data["old_state"]
         new_state = event.data["new_state"]
         if new_state is None or old_state is None:
@@ -1785,7 +2109,7 @@ class Switchboard:
         targets = [
             target
             for target in self.table.targets.values()
-            if target.observer_mode and target.alert_entity == entity_id
+            if target.alert_entity == entity_id
         ]
         if not targets:
             return
@@ -1793,18 +2117,154 @@ class Switchboard:
         old, new = old_state.state, new_state.state
         for target in targets:
             if old == STATE_IDLE and new == STATE_ON:
-                message = self._observer_message(target, new_state)
+                await self._async_open_episode(target)
+                if target.observer_mode:
+                    await self.async_handle_request(
+                        self._observer_message(target, new_state),
+                        title=self._observer_title(target),
+                        targets=[target.slug],
+                    )
             elif new == STATE_IDLE and old in (STATE_ON, STATE_OFF):
-                message = await self._async_observer_done_message(target, new_state)
-            else:
-                # `on -> off` is an acknowledgement: nothing is routed.
-                continue
+                await self._async_close_episode(target, new_state)
+            # `on -> off` is an acknowledgement: nothing is routed, and the
+            # episode is not over -- the alert is still firing.
 
-            await self.async_handle_request(
-                message,
+    # ------------------------------------------------------------------
+    # Episodes and closing the loop (contract v0.5, ADR-0019 §5 and §6)
+    # ------------------------------------------------------------------
+
+    async def _async_open_episode(self, target: TargetConfig) -> None:
+        """Start a fresh episode for one row, discarding the previous one.
+
+        The reset happens here rather than at the end of the previous episode,
+        because a `done` message is by definition sent after the alert is
+        already back to `idle`: the recipients have to outlive the episode.
+        """
+        self.store.episodes[target.slug] = Episode(slug=target.slug, is_open=True)
+        await self.store.async_save()
+
+    async def _async_close_episode(self, target: TargetConfig, state: State) -> None:
+        """Close a row's episode, announce it and tidy up the channels it used.
+
+        The order is ADR-0019 §6's: the record is closed first (so the `done`
+        message is not recorded into the episode it closes), then the `done`
+        message is routed, then the `clear_notification` pushes and the
+        `persistent_notification.dismiss`, then -- if the row asked for it --
+        the `done` message's own clear.
+
+        Only a row in **observer mode** announces and tidies here: it is the one
+        whose "back to normal" the router itself sends. A row driven by its
+        alert's `notifiers:` list sends its own, on its own schedule, and the
+        router closing its channels first would clear the notification a moment
+        before the message explaining why arrives.
+        """
+        episode = self.store.episodes.get(target.slug)
+        if episode is not None and episode.is_open:
+            episode.is_open = False
+            await self.store.async_save()
+
+        if not target.observer_mode:
+            return
+
+        done_data: dict[str, Any] = {ATTR_SWITCHBOARD_DONE: True}
+        _decision, done_outputs = await self._async_route(
+            NotificationRequest(
+                message=await self._async_observer_done_message(target, state),
                 title=self._observer_title(target),
-                targets=[target.slug],
+                targets=(target.slug,),
+                data=done_data,
             )
+        )
+
+        if not self._alert_is_real(target):
+            return
+
+        if episode is not None:
+            for tag in sorted(episode.tags):
+                for output in sorted(episode.outputs):
+                    if output.startswith(COMPANION_OUTPUT_PREFIX):
+                        await self._async_clear_notification(output, tag)
+                if PERSISTENT_NOTIFICATION_OUTPUT in episode.outputs:
+                    await self._async_dismiss_notification(tag)
+
+        if target.clear_done and done_outputs:
+            done_tag = effective_tag(target.slug, merge_data(target, done_data))
+            for output in sorted(done_outputs):
+                if output.startswith(COMPANION_OUTPUT_PREFIX):
+                    await self._async_clear_notification(output, done_tag)
+
+    def _alert_is_real(self, target: TargetConfig) -> bool:
+        """Return True when the row's alert belongs to the `alert` integration.
+
+        A `clear_notification` is the one thing the router pushes that nobody
+        asked for and that no routing rule governs, so it is only sent for an
+        episode of a **real** `alert.*` -- one the `alert` integration owns.
+        A bare state written into the `alert` domain by a template, a script or
+        a test looks exactly like an alert to `async_track_state_change_event`,
+        and the router will observe it and route from it as it always has; what
+        it will not do is push to somebody's device on the strength of it.
+
+        `hass.config.components` is core's own set of set-up integrations
+        (`homeassistant/core.py`, `Config.components`), which is why the check
+        is a membership test rather than a state lookup: the state is there in
+        both cases, and only the integration behind it differs.
+        """
+        return bool(target.alert_entity) and ALERT_DOMAIN in self.hass.config.components
+
+    async def _async_clear_notification(self, output: str, tag: str) -> None:
+        """Tell one Companion output to remove the notification bearing `tag`.
+
+        `clear_notification` is core's own literal
+        (`homeassistant/components/mobile_app/const.py`, `CLEAR_NOTIFICATION`);
+        the Companion app on the device is what removes the notification when
+        the push arrives. Core reads the literal in exactly one place --
+        `mobile_app/live_activity/__init__.py`, `if data.get(ATTR_MESSAGE) ==
+        CLEAR_NOTIFICATION`, which ends the Live Activity for the same tag --
+        and otherwise forwards the payload untouched to the push relay, which is
+        why this has to be an ordinary `notify.mobile_app_<device>` call rather
+        than an API that does not exist.
+
+        **A clear is not a message** (ADR-0019 §6): it is not counted, it fires
+        no `event.switchboard_delivery`, it is subject to no routing rule and it
+        never creates a deferral. It is housekeeping on a channel that was
+        already used, addressed to a device rather than to a person.
+        """
+        await self._async_housekeeping_call(
+            NOTIFY_DOMAIN,
+            output,
+            {"message": CLEAR_NOTIFICATION_MESSAGE, "data": {ATTR_TAG: tag}},
+        )
+
+    async def _async_dismiss_notification(self, notification_id: str) -> None:
+        """Close the UI half of an episode through core's own `dismiss`."""
+        await self._async_housekeeping_call(
+            PERSISTENT_NOTIFICATION_DOMAIN,
+            SERVICE_DISMISS,
+            {ATTR_NOTIFICATION_ID: notification_id},
+        )
+
+    async def _async_housekeeping_call(
+        self, domain: str, service: str, data: dict[str, Any]
+    ) -> None:
+        """Call one tidy-up service, bounded and swallowing every failure.
+
+        Bounded by the same `OUTPUT_TIMEOUT_SECONDS` as any other output call,
+        because a phone off the network must not hold the event loop; a failure
+        is logged and swallowed, because failing to tidy up is never worth
+        raising at whoever ended the alert.
+        """
+        if not self.hass.services.has_service(domain, service):
+            _LOGGER.debug("Nothing to clear: %s.%s is not registered", domain, service)
+            return
+        try:
+            async with asyncio.timeout(OUTPUT_TIMEOUT_SECONDS):
+                await self.hass.services.async_call(
+                    domain, service, data, blocking=True
+                )
+        except (TimeoutError, HomeAssistantError, vol.Invalid) as err:
+            _LOGGER.warning("Could not clear through %s.%s: %s", domain, service, err)
+        except Exception:  # noqa: BLE001 - tidying up must never break anything
+            _LOGGER.exception("Unexpected error while clearing %s.%s", domain, service)
 
     def _observer_message(self, target: TargetConfig, state: State) -> str:
         """Return the text of an `idle -> on` transition (contract, ADR-0016).
@@ -1936,9 +2396,49 @@ class Switchboard:
         self._async_notify_entities()
 
     @callback
-    def _async_silence_changed(self, _event: Event[EventStateChangedData]) -> None:
-        """Refresh `binary_sensor.<person>_silenced` when a source changes."""
+    def _async_silence_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Refresh `binary_sensor.<person>_silenced`, and flush if the night ended.
+
+        ADR-0019 §4: the router was already subscribed to every configured
+        `silence_entities` of every person -- it simply refreshed a binary
+        sensor and returned, so a schedule ending at 05:00 left the queue
+        waiting until 07:00, two hours after the person was demonstrably awake.
+
+        The flush is deliberately narrow. It needs the **last** active silence
+        to lift: a person with a night schedule and a Focus sensor is not awake
+        because one of the two went `off`. A running
+        `notify_switchboard.silence` holds the queue too -- somebody asked for
+        quiet in so many words, and the router owns that one.
+
+        The flush itself is handed to a task rather than run inside the
+        listener. A flush calls `notify.*` services, re-runs the whole decision
+        and writes the store; doing all of that in the middle of the state write
+        that triggered it would make the router re-enter the state machine it is
+        reading. The task is the config entry's, so unloading the entry cancels
+        one that has not started yet.
+        """
         self._async_notify_entities()
+
+        new_state = event.data["new_state"]
+        if new_state is None or state_is_on(new_state.state):
+            return
+
+        entity_id = event.data["entity_id"]
+        now = dt_util.utcnow()
+        for person_id, person in self.table.persons.items():
+            if entity_id not in person.silence_entities:
+                continue
+            if self.has_configured_silence(person):
+                continue
+            if self.store.is_temporarily_silenced(person_id, now):
+                continue
+            if not any(key[0] == person_id for key in self.store.deferrals):
+                continue
+            _LOGGER.debug(
+                "The last silence of %s lifted before their wake time: flushing",
+                person_id,
+            )
+            self._async_schedule_flush(person_id)
 
     @callback
     def _async_notify_entities(self) -> None:
