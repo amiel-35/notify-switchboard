@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, time, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -13,7 +15,7 @@ import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -22,7 +24,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.notify_switchboard import async_migrate_entry
-from custom_components.notify_switchboard.const import DOMAIN
+from custom_components.notify_switchboard.const import DOMAIN, STORAGE_KEY
 from custom_components.notify_switchboard.diagnostics import (
     _redact_options,
     async_get_config_entry_diagnostics,
@@ -2238,6 +2240,106 @@ async def test_a_flush_pending_at_unload_neither_delivers_nor_re_arms(
     await hass.async_block_till_done()
     assert switchboard._deferral_unsubs == {}
     assert calls == []
+
+
+async def test_a_flush_running_at_unload_saves_before_the_outputs_not_after(
+    hass: HomeAssistant, hass_storage: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A flush that outlives its entry writes the store *before* delivering.
+
+    `OUTPUT_TIMEOUT_SECONDS` is thirty seconds and `_async_process_on_unload`
+    (`homeassistant/config_entries.py`) gives an entry task ten: a flush stuck
+    on one hanging output outlives the unload that waited for it. Its tail then
+    runs on a released `Switchboard`, whose store a reloaded entry -- an
+    options edit during a slow flush -- may already have replaced over the same
+    file. `await self.store.async_save()` there writes a dead instance's state
+    over the live one.
+
+    The `_shutdown` flag covers the flush that has *not* begun and the re-arm;
+    it did not cover this tail. So the durable half of a flush -- the deferrals
+    leaving the queue -- is written as soon as they are popped, before the
+    first output is awaited, and the tail stands down like the two schedulers
+    already do.
+    """
+    began = asyncio.Event()
+    release = asyncio.Event()
+    delivered: list[ServiceCall] = []
+
+    async def _hanging_output(call: ServiceCall) -> None:
+        began.set()
+        await release.wait()
+        delivered.append(call)
+
+    hass.services.async_register("notify", "mobile_app_bob", _hanging_output)
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak", audience=["person.bob"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "drip"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert delivered == []
+
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard.store.deferrals != {}
+
+    saves: list[None] = []
+    original_save = switchboard.store.async_save
+
+    async def _counting_save() -> None:
+        saves.append(None)
+        await original_save()
+
+    switchboard.store.async_save = _counting_save  # type: ignore[method-assign]
+
+    # The early flush of ADR-0019 §4 begins on the entry's own task, pops the
+    # queue, and hangs on the output.
+    hass.states.async_set("input_boolean.night", "off")
+    async with asyncio.timeout(5):
+        await began.wait()
+
+    assert switchboard.store.deferrals == {}, "the flush has taken the queue"
+    assert len(saves) == 1, (
+        "the deferrals left the queue before the first output was awaited, so "
+        "the store has to be written there -- not only after a delivery that "
+        "may outlive the entry"
+    )
+    assert hass_storage[STORAGE_KEY]["data"]["deferrals"] == [], (
+        "the file still queues a message this flush has already taken"
+    )
+
+    # Unload while the output hangs, then let it answer: the tail runs with
+    # `_shutdown` set, which is exactly the window core leaves open.
+    unloading = hass.async_create_task(hass.config_entries.async_unload(entry.entry_id))
+    async with asyncio.timeout(5):
+        while not switchboard._shutdown:
+            await asyncio.sleep(0)
+
+    saves.clear()
+    release.set()
+    assert await unloading
+    await hass.async_block_till_done()
+
+    assert delivered != [], "the output did answer; this is the tail, not a timeout"
+    assert saves == [], (
+        "the tail of a flush that outlived its entry must not write the store: "
+        "a reloaded entry may already own the file"
+    )
+    assert switchboard._deferral_unsubs == {}
+    assert [record for record in caplog.records if record.levelno >= logging.ERROR] == []
+    assert "Traceback" not in caplog.text
 
 
 async def test_a_flush_writes_its_outcomes_to_the_decision_log(
