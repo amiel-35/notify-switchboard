@@ -2734,3 +2734,61 @@ async def test_a_queue_whose_silence_is_still_running_is_not_caught_up(
 
     assert calls == []
     assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+
+async def test_a_temporary_silence_outliving_the_schedule_does_not_strand_the_queue(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A person with no wake time has exactly one timer: it must not be lost.
+
+    The fallback timer of §3 is armed on the end the *configured* silence
+    publishes. A `notify_switchboard.silence` asked for after the message was
+    queued can outlive that end, and then the sequence is:
+
+    * 07:00, the schedule ends and the timer fires; the flush re-decides,
+      finds the person still temporarily silent and holds the message;
+    * the re-arm that follows reads the schedule, which is now `off` and
+      publishes nothing -- so before this test there was no timer left at all;
+    * 07:30, the temporary silence expires. Nothing was waiting for it.
+
+    The queue then sat in the store until the *next* night ended, which for a
+    message with a time to live usually means it never arrived. Falling back to
+    the temporary silence keeps a timer armed across the handover.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(NIGHT_UTC)
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("schedule.night", "on", {"next_event": SEVEN_UTC.isoformat()})
+    entry = await _install_without_a_wake_time(hass, "schedule.night")
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "water"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 06:30: an hour of requested quiet, ending half an hour after the night.
+    freezer.move_to(SIX_UTC + timedelta(minutes=30))
+    await hass.services.async_call(
+        DOMAIN,
+        "silence",
+        {"person": "person.alice", "minutes": 60},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # 07:00: the night ends, the timer fires, and the message is still held.
+    freezer.move_to(SEVEN_UTC)
+    hass.states.async_set("schedule.night", "off", {})
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+    assert calls == []
+    assert len(entry.runtime_data.switchboard.store.deferrals) == 1
+
+    # 07:30: the temporary silence lifts. Somebody has to be waiting for it.
+    freezer.move_to(SEVEN_UTC + timedelta(minutes=30))
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert [call.data["message"] for call in calls] == ["water"]
+    assert entry.runtime_data.switchboard.store.deferrals == {}
