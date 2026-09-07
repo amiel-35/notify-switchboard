@@ -140,13 +140,28 @@ inbound message ─────────────────────�
 
 - **Both entry points go through one task.** `_async_schedule_flush` hands the
   flush to a task of the config entry's own, so it never runs inside the timer
-  sweep or the state write that triggered it, and unloading the entry cancels
-  one that has not started.
+  sweep or the state write that triggered it. Unloading the entry **waits** for
+  that task rather than cancelling it — `_async_process_on_unload`
+  (`homeassistant/config_entries.py`) cancels only `_background_tasks` and
+  gives `_tasks` ten seconds — which is what a flush wants, since it pops
+  deferrals from the store before delivering and saves once at the end. A
+  flush that has not begun by then stands down on the `_shutdown` flag
+  `async_shutdown` sets, and nothing re-arms a deferral timer past that point.
 - **The time-to-live is read at the flush**, from the deferral's stored
   priority and stored `data` (`router.resolve_ttl`), never frozen at queue
   time: `entry.options["ttl_minutes"]` is a household policy, so shortening
   `info` at 02:00 means it for what is already waiting. `critical` is never
   deferred, so it can never expire.
+- **A flush writes to `decision_log` like an inbound call.** A deferred
+  message is decided twice — once when it is queued, once when it is flushed —
+  and only the first used to reach the diagnostics, so `last_decisions` went
+  quiet over exactly the window it exists to explain. Each re-decided message
+  gets its own entry now, in `_async_apply`'s shape plus `flush: true`; a
+  message still held by the silence appears there too. And `_redecide` carries
+  back the refusals that come *beside* a delivery — `router.route_person`
+  returns a `recursion` drop alongside the usable outputs — so a loop
+  configured into the table is counted at the flush exactly as it is live,
+  instead of being lost when the first routed item returns.
 - **`silenced` is the one re-decision outcome that holds a message.** The
   night is not over, which is the whole point of a deferral; the flush is
   re-armed for whichever comes first, the end of a temporary silence or the
@@ -158,6 +173,20 @@ inbound message ─────────────────────�
   digest of three alerts could only act on an arbitrary one of them. Each
   **line** counts as one routed message and fires one `routed` event, so the
   daily figures still add up to what was queued.
+- **A digest is a delivery, so it is recorded into the episodes it
+  summarises** (ADR-0019 §6, amendment (b)): each kept line writes the person,
+  the outputs that answered and the tag `switchboard-summary` into its row's
+  open episode. Without it the person a digest woke would be filtered out of
+  the `done` message by the `not_notified` rule, and the digest would stay on
+  their phone after the alert ended.
+
+  The side effect is literal and deliberate: a digest carries **one** tag for
+  the several rows it collapses, so the first of those episodes to close
+  clears `switchboard-summary` and the whole digest goes with it — including
+  its lines about alerts that are still running. The alternative — one tag per
+  line — would need one notification per line, which is exactly what the
+  summary exists to avoid. The reading is the ADR's, not an accident: §5
+  records "the tag actually delivered", and a digest delivered exactly one.
 - **Snooze resolves the acting person from `context.user_id` first.** The
   Companion webhook re-fires the action event with the registration's own
   context (`homeassistant/components/mobile_app/webhook.py`,
@@ -326,11 +355,11 @@ that received it.
 `event.switchboard_delivery`, it is subject to no presence, silence, snooze or
 deferral rule, and it never creates a deferral of its own. It is bounded by
 the same `OUTPUT_TIMEOUT_SECONDS` as any other output call and a failure is
-logged and swallowed. The router only pushes one for a row whose alert belongs
-to the `alert` integration (`_alert_is_real`): a bare state written into the
-`alert` domain by a template or a script is observed and routed from as it
-always was, but the router will not push to somebody's device on the strength
-of it.
+logged and swallowed. Observer mode is the only narrowing (ADR-0019 §6,
+amendment (a)): the clear does not ask what backs the `alert.*` state, so a
+state written into the `alert` domain by a template, a script or a test is
+tidied up after exactly like one the `alert` integration owns — the router
+observed it and notified on the strength of it either way.
 
 ### Per-row texts and the template context
 

@@ -39,7 +39,11 @@ migration — no new action, no new event type, no renamed name.
   row default data and **no Companion buttons**, which on a digest of three
   alerts could only acknowledge an arbitrary one of them. The new per-person
   option `summary` (**Summarise the night**, on by default, written into the
-  row only when it is off) turns it back into one notification per message.
+  row only when it is off) turns it back into one notification per message. A
+  digest is a delivery like any other, so it is recorded into every episode
+  that contributed a line to it, under the tag `switchboard-summary`: the
+  person a digest woke is told when the alert ends, and the digest is cleared
+  with it.
 - **Episodes, and a "back to normal" that goes to the right people.** For every
   routing-table row that names an `alert_entity` — in observer mode or not —
   the router now remembers one **episode**: from that alert's `idle → on` to
@@ -72,7 +76,11 @@ migration — no new action, no new event type, no renamed name.
   **not a message**: it is not counted, it fires no `event.switchboard_delivery`,
   no routing rule applies to it, it is bounded by the same
   `OUTPUT_TIMEOUT_SECONDS` as any other output call, and a failure is logged
-  and swallowed.
+  and swallowed. The whole closing sequence is **observer mode only**
+  (ADR-0019 §6, amendment (a)): a row driven by its alert's own `notifiers:`
+  list sends its "back to normal" before the state reaches `idle`, so clearing
+  there would wipe the message that just arrived. Nothing else narrows it — in
+  particular the clear does not ask what wrote the `alert.*` state.
 
 ### Changed
 
@@ -97,7 +105,20 @@ migration — no new action, no new event type, no renamed name.
   needs both off — one of two lifting is not the end of a night.
 - Both entry points into a flush now go through a task of the config entry's
   own, so a flush never runs inside the timer sweep or the state write that
-  triggered it, and unloading the entry cancels one that has not started.
+  triggered it. Unloading the entry **waits** for that task rather than
+  cancelling it — `_async_process_on_unload` cancels only `_background_tasks`
+  and gives `_tasks` ten seconds — which is what a flush wants, since it takes
+  messages out of the store before delivering them and saves once at the end. A
+  flush that has not begun by then stands down instead of running against
+  listeners that are already detached, and nothing re-arms a deferral timer
+  past that point.
+- **A flush is visible in the diagnostics.** Every message a flush re-decides
+  now writes its own `decision_log` entry, in the shape an inbound call writes,
+  with `flush: true` to tell the two decisions on the same message apart; a
+  message still held by the silence appears there too. And a refusal that comes
+  back *beside* a delivery — `recursion`, when one of a person's outputs is a
+  `notify.switchboard*` service — is counted at the flush as it always was on
+  the live path, instead of being discarded with the rest of the decision.
 - The router subscribes to **every row's** `alert_entity`, not only to the
   observed ones, because every such row has episodes. Only the *routing* half
   of the handler is still reserved to observer mode.
@@ -108,8 +129,11 @@ migration — no new action, no new event type, no renamed name.
   (`common.summary_title` with its `{count}`, `common.summary_line`,
   `common.summary_line_untitled`), a `detail` sentence for each new reason, and
   the three new options fields.
-- Editing a person or a row no longer silently resets `ttl_minutes`: the
-  options flow's working copy carries it through.
+- The options flow's working copy is built key by key rather than copied, so
+  every optional key has to be named in it: `ttl_minutes`, new in this version,
+  is carried through explicitly, and an unrelated edit — a person's outputs, a
+  row's audience — cannot drop the household's expiry policy. (Nothing shipped
+  ever lost it: there was no `ttl_minutes` to lose before 0.5.0.)
 
 ### Documentation
 
@@ -122,10 +146,9 @@ migration — no new action, no new event type, no renamed name.
 - `docs/blueprints.md`: how to mark a "back to normal" message with
   `switchboard_done` (the blueprints themselves are unchanged).
 - `docs/known-issues.md`: the 2026-09-07 S2 entry is resolved in both halves,
-  and three new entries record what Sprint 5 could not close — five acceptance
-  assertions that contradict each other or a frozen Sprint 1-3 test, and the
-  rule that keeps a `clear_notification` from being pushed for an `alert.*`
-  state the `alert` integration does not own.
+  and one new entry records what Sprint 5 could not close — an episode left
+  open across a real Home Assistant restart, because core's `AlertEntity` never
+  re-reads its watched entity (ADR-0019 §6, amendment (d)).
 
 ---
 

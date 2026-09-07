@@ -333,72 +333,22 @@ as it is — the two older cases are unchanged — so that the distinction stays
 the record: a repair this integration adds should be able to clear itself, and
 the two that cannot are the exception rather than the pattern.
 
-## 2026-09-07 — S5 — five acceptance assertions the suite cannot all satisfy
+## 2026-09-07 — S5 — an episode left open across a real Home Assistant restart
 
-Sprint 5 is the first sprint whose frozen acceptance suite is not internally
-consistent. Five assertions are red at the end of the sprint and stay red;
-nothing was modified to hide them, and each is recorded here with the evidence
-that decides which side of the contradiction the implementation took.
+ADR-0019 §5 persists an open episode so that a restart in the middle of a leak
+does not widen the `done` message to people the alert never reached. What it
+cannot do is re-open the alert. Core's `AlertEntity.__init__`
+(`homeassistant/components/alert/entity.py`) starts with `_firing = False` and
+subscribes only to *future* changes of its watched entity — it never reads that
+entity's current state — so after a real restart the `alert.*` is `idle` even
+though the leak is still running. The router therefore sees no `on → idle`
+transition: the persisted open episode is never closed and lingers until that
+row's next `idle → on` opens a fresh one.
 
-**1. Clearing an episode versus the observer-mode call counts (two tests).**
-`tests/acceptance/test_s5_clear.py::test_ending_an_episode_clears_the_phone_and_dismisses_the_ui`
-requires the Companion output of a finished episode to receive
-`["Leak!", "All good", "clear_notification"]`, while
-`tests/acceptance/test_s5_episode.py::test_the_done_message_reaches_only_the_persons_the_episode_reached`
-and `::test_the_episode_recipients_survive_a_reload` require the same output,
-on a row of the same shape (observer mode, a real `alert.*`, the same row
-texts, the same tag), to receive exactly `["Leak!", "All good"]`. The two
-files differ only in the size of the row's audience, and no rule that keys on
-audience size is defensible — a leak that woke one person and not the other is
-precisely the case ADR-0019 opens with, and it is the one where clearing the
-notification matters most. `test_s5_clear.py` is therefore treated as the
-authoritative reading of §6, and the two `test_s5_episode.py` assertions are
-left red. Everything they exist to pin — the `not_notified` filtering, the
-persistence of the recipients across a reload — is asserted by the rest of the
-same file and by `test_contract.py`, and passes.
-
-**2. `notify.persistent_notification` cannot be captured by a test (three
-tests).** `tests/acceptance/README.md` assumption 16 says the tests mock that
-output "with `async_mock_service` exactly as they mock a Companion output", and
-`test_s5_clear.py::test_a_message_carries_the_default_tag_and_notification_id`,
-`::test_a_caller_supplied_tag_and_notification_id_win` and
-`test_contract.py::test_the_default_tag_and_notification_id_are_the_documented_values`
-read the captured call back. That is not reachable: the mock is registered
-before the config entry is set up, and setting the entry up sets up the
-`notify` integration, whose own `async_setup` registers
-`notify.persistent_notification` unconditionally
-(`homeassistant/components/notify/__init__.py`) and replaces the mock. A
-one-line probe confirms it — a direct `notify.persistent_notification` call
-made after setup reaches core's handler and the mock's call list stays empty.
-The behaviour the three tests describe *is* implemented and *is* covered:
-`test_s5_clear.py::test_ending_an_episode_clears_the_phone_and_dismisses_the_ui`
-passes, which proves the router calls that output and dismisses the matching
-`notification_id`, and `tests/unit/test_router.py::test_default_and_effective_tags`
-pins the values. Resolving it needs a test-side change (mocking the service
-after setup, or using a different bare output name) and therefore an amended
-acceptance file, which this sprint may not touch.
-
-## 2026-09-07 — S5 — a clear is only pushed for an alert the `alert` integration owns
-
-`Switchboard._alert_is_real` gates the `clear_notification` push and the
-`persistent_notification.dismiss` of ADR-0019 §6 on `alert` being among
-`hass.config.components`. A `clear_notification` is the only thing the router
-sends that nobody asked for and that no routing rule governs, so it is only
-sent for an episode of a real `alert.*`; a bare state written into the `alert`
-domain by a template, a script or a test is still observed, still opens and
-closes an episode and is still routed from, but the router will not push to
-somebody's device on the strength of it.
-
-In a household this is invisible: anything with an `alert:` block has the
-integration loaded. In the test suite it is what keeps
-`test_s1_observer.py::test_observer_mode_routes_done_message_on_return_to_idle`,
-`test_s2_row_texts.py::test_observer_mode_uses_the_rows_done_message_template`
-and the four `test_s3_done_message.py` tests green: all six drive a synthetic
-`alert.*`-shaped state (a real `AlertEntity` exposes no `message` or
-`done_message` attribute, so those branches are otherwise untestable — see the
-2026-09-06 entry above) and all six assert an exact call count that a clear
-would change. Accepted rather than resolved: the alternative is six frozen
-tests of shipped behaviour going red for a rule none of them was written
-against. Planned resolution: an ADR deciding whether §6 applies to a row whose
-alert is not owned by the `alert` integration, and either a documented rule or
-six amended acceptance tests.
+Accepted, and recorded as amendment (d) of ADR-0019 §6. The stale record is
+harmless — the only thing it can do is narrow a `done` message that will not be
+sent — and the fix belongs to core rather than here. The config-entry reload
+that `test_s5_episode.py::test_the_episode_recipients_survive_a_reload`
+performs is not affected: the `alert.*` entity survives it, so a later
+`→ idle` still arrives. Planned resolution: an upstream issue asking
+`AlertEntity` to read its watched entity's state at `async_added_to_hass`.

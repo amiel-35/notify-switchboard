@@ -153,6 +153,11 @@ which notify services answered, and under which tag. It survives a restart.
   away too.
 - A clear is not a message: it is not counted, it fires no event, and no
   routing rule applies to it.
+- A **summary counts as having told you**: if a night's digest carried a line
+  about the leak, you get the back-to-normal message and the digest is cleared
+  with the episode. One digest carries one tag for all its lines, so the first
+  of those alerts to end clears the whole digest — the price of one
+  notification instead of eleven.
 
 ## Services
 

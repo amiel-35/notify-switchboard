@@ -106,10 +106,8 @@ rules:
       acceptance suite that is written before the code and never modified to
       make it pass. router.py, store.py, validation.py, const.py and most of
       the rest are at 100% after the Sprint 5 additions; the lowest is
-      legacy.py at 97%, with config_flow.py and dispatcher.py at 99%. Five
-      Sprint 5 acceptance assertions are red and stay red: they contradict
-      either each other or a frozen Sprint 1-3 test, and docs/known-issues.md
-      records exactly which and why.
+      legacy.py at 97%, with config_flow.py and dispatcher.py at 99%. The
+      whole suite -- acceptance and unit -- is green.
 
   # -------------------------------------------------------------------- Gold
   devices:
