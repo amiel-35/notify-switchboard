@@ -698,6 +698,53 @@ async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
     )
 
 
+async def test_the_alert_snippet_of_an_observer_row_names_no_notifiers(
+    hass: HomeAssistant,
+) -> None:
+    """Observer mode is defined by the alert *not* naming the router.
+
+    The router watches the alert entity itself, so the block to paste needs no
+    `notifiers:` at all -- the README says so in as many words. Emitting one
+    anyway wires the row both ways at once: the alert calls the router on every
+    `repeat`, and the router routes the same event again on its own. What the
+    user sees is a duplicated notification they were told to create.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(observer_mode=True)
+    )
+
+    assert result["step_id"] == "target_saved"
+    snippet = (result["description_placeholders"] or {})["snippet"]
+    assert "notifiers" not in snippet, (
+        f"an observer row is wired by the router, not by the alert; got {snippet!r}"
+    )
+    # It is still a complete, pasteable block.
+    parsed = yaml.safe_load(snippet)
+    assert parsed["alert"]["leak"]["state"] == "on"
+
+
+async def test_the_alert_snippet_of_a_notifiers_row_still_names_the_router(
+    hass: HomeAssistant,
+) -> None:
+    """The other half of the same rule: observer mode off keeps `notifiers:`."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "target", _target_input(observer_mode=False)
+    )
+
+    snippet = (result["description_placeholders"] or {})["snippet"]
+    assert yaml.safe_load(snippet)["alert"]["leak"]["notifiers"] == [
+        "switchboard_leak"
+    ]
+
+
 async def test_the_test_result_is_rendered_as_a_markdown_list(
     hass: HomeAssistant,
 ) -> None:
