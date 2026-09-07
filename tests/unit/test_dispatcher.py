@@ -11,6 +11,7 @@ import homeassistant.helpers.entity_registry as er
 import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import (
@@ -25,6 +26,7 @@ from custom_components.notify_switchboard.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 from custom_components.notify_switchboard.dispatcher import (
+    OUTPUT_TIMEOUT_SECONDS,
     companion_service_name,
     next_wake_time,
 )
@@ -1347,3 +1349,136 @@ async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
 
     assert [call.data["message"] for call in calls] == ["critical"]
     assert switchboard.store.deferrals == {}
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3: shutdown, fan-out and the person_without_user_id repair
+# ---------------------------------------------------------------------------
+
+
+async def test_stopping_home_assistant_detaches_every_listener(
+    hass: HomeAssistant,
+) -> None:
+    """Regression: a config entry is not unloaded when Home Assistant stops.
+
+    Nothing else runs `async_shutdown`, so a `_async_stop_event` that only
+    cancelled the deferral timers left the midnight counter reset armed by
+    `async_track_time_change` (and the bus/state listeners) attached to a loop
+    that is about to go away. Under load that surfaced as an intermittent
+    "Lingering timer after test ... Switchboard._async_reset_counters" in the
+    config-flow tests, whose options steps reload the entry.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"], wake_time="07:00:00")],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard._unsubs
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+
+    assert switchboard._unsubs == []
+    assert switchboard._deferral_unsubs == {}
+    assert switchboard._silence_unsubs == {}
+
+
+async def test_the_output_timeout_is_thirty_seconds(hass: HomeAssistant) -> None:
+    """ADR-0017 §3 fixes the value, not only the name."""
+    assert OUTPUT_TIMEOUT_SECONDS == 30
+
+
+async def test_a_recursive_output_is_refused_at_runtime(hass: HomeAssistant) -> None:
+    """Contract §"Output": an output pointing back at the router never runs.
+
+    The config flow refuses it too, but a hand-edited options file reaches the
+    dispatcher, and there the refusal has to be synchronous -- calling it would
+    recurse rather than fail.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert (
+        await switchboard._async_call_output(
+            "switchboard_leak", "Water", None, {}, "leak"
+        )
+        is False
+    )
+
+
+async def test_the_repair_is_deleted_for_a_person_who_left_the_table(
+    hass: HomeAssistant,
+) -> None:
+    """A `repairs` issue outlives its process; a person removed from the table
+    would otherwise keep a warning nobody can act on.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("person.bob", "home")
+
+    entry = await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [
+            make_target(
+                "leak", audience=["person.alice", "person.bob"], snooze_minutes=[15]
+            )
+        ],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    raised = {
+        issue_id
+        for (domain, issue_id), issue in registry.issues.items()
+        if domain == DOMAIN and issue.translation_key == "person_without_user_id"
+    }
+    assert raised == {
+        "person_without_user_id_person.alice",
+        "person_without_user_id_person.bob",
+    }
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [
+                make_target("leak", audience=["person.alice"], snooze_minutes=[15])
+            ],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    remaining = {
+        issue_id
+        for (domain, issue_id), issue in registry.issues.items()
+        if domain == DOMAIN and issue.translation_key == "person_without_user_id"
+    }
+    assert remaining == {"person_without_user_id_person.alice"}
+
+
+async def test_a_person_with_no_state_at_all_counts_as_unlinked(
+    hass: HomeAssistant,
+) -> None:
+    """`person.*` missing entirely: there is no `user_id` to resolve either."""
+    entry = await install(
+        hass,
+        [make_person("person.ghost", ["mobile_app_ghost"])],
+        [make_target("leak", audience=["person.ghost"], allow_acknowledge=True)],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard._person_user_id("person.ghost") is None
+    assert switchboard._persons_needing_a_user_id() == ["person.ghost"]

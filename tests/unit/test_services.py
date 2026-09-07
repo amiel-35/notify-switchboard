@@ -50,6 +50,7 @@ from custom_components.notify_switchboard.services import (
     SNOOZE_SCHEMA,
     UNSILENCE_SCHEMA,
     UNSNOOZE_SCHEMA,
+    async_loaded_switchboard,
 )
 from custom_components.notify_switchboard.store import SwitchboardStorage
 
@@ -155,10 +156,15 @@ def test_unsnooze_and_unsilence_schemas() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_services_are_removed_on_unload_and_come_back_on_reload(
+async def test_services_survive_an_unload_and_act_again_after_a_reload(
     hass: HomeAssistant,
 ) -> None:
-    """No dangling service may survive an unload: its closure holds a dead entry."""
+    """v0.3 (ADR-0017 §5): unloading removes the ability to act, not the actions.
+
+    0.2.0 unregistered them, because their closures held the unloaded entry's
+    `Switchboard`. They now resolve the loaded entry at call time, so nothing
+    dangles and an automation naming one of them keeps validating.
+    """
     entry = await install(
         hass,
         [make_person("person.alice", ["mobile_app_alice"])],
@@ -171,12 +177,29 @@ async def test_services_are_removed_on_unload_and_come_back_on_reload(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     for service in UI_SERVICES:
-        assert not hass.services.has_service(DOMAIN, service)
+        assert hass.services.has_service(DOMAIN, service)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+        )
+    assert err.value.translation_key == "no_loaded_entry"
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    for service in UI_SERVICES:
-        assert hass.services.has_service(DOMAIN, service)
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+    )
+
+
+async def test_a_service_call_without_the_integration_set_up_finds_no_entry(
+    hass: HomeAssistant,
+) -> None:
+    """`async_loaded_switchboard` is the single refusal point, and it is reachable."""
+    with pytest.raises(ServiceValidationError) as err:
+        async_loaded_switchboard(hass)
+    assert err.value.translation_domain == DOMAIN
+    assert err.value.translation_key == "no_loaded_entry"
 
 
 async def test_a_reload_rebinds_the_services_to_the_new_switchboard(

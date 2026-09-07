@@ -105,9 +105,12 @@ has (this is asserted by re-running the whole S1 suite unmodified — see
   no `alert_entity`, or that entity does not currently exist). Read by
   observer mode on `idle -> on`, ahead of the row's bare `name` and behind
   the alert's own `message` attribute when present (see `test_s2_row_texts.py`).
-- `done_message` — the same idea for the `on|off -> idle` transition, ahead
-  of the translated `common.back_to_normal` and behind the alert's own
-  `done_message` attribute when present.
+- `done_message` — the same idea for the `on|off -> idle` transition, but the
+  chain is deliberately **not** the mirror of `message`'s, and this paragraph
+  originally described it the wrong way round (corrected in 0.3.0, ADR-0017 §6;
+  `docs/contract.md` is authoritative): the row's `done_message` template comes
+  **first**, then the alert's own `done_message` attribute, then the translated
+  `common.back_to_normal`. Pinned by `test_s3_done_message.py`.
 - `default_title` — used as the outgoing `title` when the caller did not
   supply one (a legacy `notify.switchboard[_<slug>]` call without `title`,
   or any observer-mode-generated message, which never had a caller to omit
