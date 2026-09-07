@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -45,6 +46,7 @@ def make_person(
     silence_entities: list[str] | None = None,
     wake_time: str | None = None,
     summary: bool = True,
+    min_priority: str = "info",
 ) -> dict[str, Any]:
     """Build one row of `entry.options["persons"]`.
 
@@ -52,6 +54,10 @@ def make_person(
     whose default is **on**, so it is only written when it is `False`. Every
     S1-S4 person row therefore keeps the exact dict it always had, and an
     absent key means "summarise".
+
+    `min_priority` is the v0.6 addendum (ADR-0020 §6): the same discipline,
+    with `info` — the bottom of the rank, which drops nothing — as the default
+    that is never written.
     """
     row: dict[str, Any] = {
         "entity_id": entity_id,
@@ -61,6 +67,8 @@ def make_person(
     }
     if not summary:
         row["summary"] = False
+    if min_priority != "info":
+        row["min_priority"] = min_priority
     return row
 
 
@@ -82,6 +90,11 @@ def make_target(
     default_title: str | None = None,
     managed: bool = False,
     clear_done: bool = False,
+    escalate_when_nobody_home: bool = False,
+    escalation_after_minutes: int | None = None,
+    escalation_audience: list[str] | None = None,
+    max_deliveries: int | None = None,
+    require_authentication: bool | None = None,
 ) -> dict[str, Any]:
     """Build one row of `entry.options["targets"]` (the routing table).
 
@@ -116,6 +129,21 @@ def make_target(
     if clear_done:
         # v0.5 addendum (ADR-0019 §6): same discipline, same reason.
         row["clear_done"] = True
+    # v0.6 addendum (ADR-0020): five optional row keys, each written only when
+    # it differs from its default, so every S1-S5 row keeps the exact dict it
+    # had. `escalation_after_minutes` and `escalation_audience` are documented
+    # as required together, and the builder lets a test write one without the
+    # other on purpose -- that half-written row is itself a case to pin.
+    if escalate_when_nobody_home:
+        row["escalate_when_nobody_home"] = True
+    if escalation_after_minutes is not None:
+        row["escalation_after_minutes"] = escalation_after_minutes
+    if escalation_audience is not None:
+        row["escalation_audience"] = list(escalation_audience)
+    if max_deliveries is not None:
+        row["max_deliveries"] = max_deliveries
+    if require_authentication is not None:
+        row["require_authentication"] = require_authentication
     return row
 
 
@@ -445,7 +473,7 @@ def dismissals(hass) -> list:
 
 
 @pytest.fixture
-def real_alert(hass):
+async def real_alert(hass):
     """Set up one real `alert.*` watching one `binary_sensor`, and drive it.
 
     Returns an object with `begin()` / `end()`, which move the watched binary
@@ -455,15 +483,28 @@ def real_alert(hass):
     `begin_alerting` / `end_alerting`).
 
     `repeat` is deliberately long enough never to fire during a test, and the
-    alert carries **no** `notifiers`: the episode tests drive the router
-    through observer mode or through `data.switchboard_done`, and an alert that
-    also called `notify.switchboard_<slug>` itself would route every message
-    twice. Ending the alert calls `end_alerting`, which cancels the repeat
-    (unlike `alert.turn_off`, which only sets `_ack`), so these tests leave no
-    lingering timer behind and need no `expected_lingering_timers` override.
+    alert carries **no** `notifiers` by default: the episode tests drive the
+    router through observer mode or through `data.switchboard_done`, and an
+    alert that also called `notify.switchboard_<slug>` itself would route every
+    message twice. Ending the alert calls `end_alerting`, which cancels the
+    repeat (unlike `alert.turn_off`, which only sets `_ack`), so these tests
+    leave no lingering timer behind and need no `expected_lingering_timers`
+    override — provided every test that calls `begin()` also calls `end()`.
+
+    `notifiers` is the one v0.6 addition (ADR-0020 §0 and §2): the escalation
+    granularity is a property of core's own repeat, so the test that pins it
+    has to let the alert do the calling.
     """
 
-    async def _make(object_id: str, *, repeat: int = 60, can_ack: bool = True):
+    made: list[Any] = []
+
+    async def _make(
+        object_id: str,
+        *,
+        repeat: int = 60,
+        can_ack: bool = True,
+        notifiers: list[str] | None = None,
+    ):
         watched = f"binary_sensor.{object_id}_source"
         hass.states.async_set(watched, "off")
         assert await async_setup_component(
@@ -478,7 +519,7 @@ def real_alert(hass):
                         "repeat": [repeat],
                         "can_acknowledge": can_ack,
                         "skip_first": True,
-                        "notifiers": [],
+                        "notifiers": list(notifiers or []),
                     }
                 }
             },
@@ -487,6 +528,7 @@ def real_alert(hass):
 
         class _Alert:
             entity_id = f"alert.{object_id}"
+            watched_entity_id = watched
 
             async def begin(self) -> None:
                 hass.states.async_set(watched, "on")
@@ -496,6 +538,118 @@ def real_alert(hass):
                 hass.states.async_set(watched, "off")
                 await hass.async_block_till_done()
 
-        return _Alert()
+        made.append(_Alert())
+        return made[-1]
 
-    return _make
+    yield _make
+
+    # Safety net: a test whose assertion fails before its own `end()` would
+    # otherwise leave core's repeat armed and turn one red into a red plus a
+    # teardown error. `end_alerting` cancels it; ending an alert that is
+    # already idle is a no-op, so a test that ends its own alert is unaffected.
+    for alert in made:
+        await alert.end()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 6 fixtures: escalation, floors and the two new global entities
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def acknowledgements_sensor(hass):
+    """Return the current `sensor.switchboard_acknowledgements` state object."""
+
+    def _get():
+        return hass.states.get("sensor.switchboard_acknowledgements")
+
+    return _get
+
+
+@pytest.fixture
+def routing_table_sensor(hass):
+    """Return the current `sensor.switchboard_routing_table` state object."""
+
+    def _get():
+        return hass.states.get("sensor.switchboard_routing_table")
+
+    return _get
+
+
+@pytest.fixture
+async def schedule_silence(hass):
+    """Set up one real `schedule.*` that is `on` all week, carrying block `data`.
+
+    ADR-0020 §6(b) reads a `min_priority` **state attribute** off a silence
+    entity that is `on`, and core's `schedule` is the documented way to
+    produce one: `Schedule._update`
+    (`$HA_CORE_SRC/homeassistant/components/schedule/__init__.py`) does
+    `self._attr_extra_state_attributes.update(current_data)` with the active
+    time range's `data:` (`CONF_DATA` in `.../schedule/const.py`, validated by
+    `CUSTOM_DATA_SCHEMA = vol.Schema({str: vol.Any(bool, str, int, float)})`).
+
+    Every day of the week is covered from `00:00:00` to `24:00` — which
+    `deserialize_to_time` turns into `time.max`, the "any time in the day is
+    smaller" case — so the entity is `on` whatever day the suite runs on and
+    the test needs no frozen clock.
+    """
+
+    made: list[str] = []
+
+    async def _make(object_id: str, data: dict[str, Any] | None = None) -> str:
+        block: dict[str, Any] = {"from": "00:00:00", "to": "24:00"}
+        if data is not None:
+            block["data"] = dict(data)
+        assert await async_setup_component(
+            hass,
+            "schedule",
+            {
+                "schedule": {
+                    object_id: {
+                        "name": object_id,
+                        "monday": [block],
+                        "tuesday": [block],
+                        "wednesday": [block],
+                        "thursday": [block],
+                        "friday": [block],
+                        "saturday": [block],
+                        "sunday": [block],
+                    }
+                }
+            },
+        )
+        await hass.async_block_till_done()
+        entity_id = f"schedule.{object_id}"
+        state = hass.states.get(entity_id)
+        assert state is not None and state.state == "on", (
+            f"{entity_id} must be `on` for this fixture to mean anything; got {state!r}"
+        )
+        made.append(entity_id)
+        return entity_id
+
+    yield _make
+
+    # A `Schedule` always arms a timer for its next event
+    # (`Schedule._update` -> `async_track_point_in_utc_time`), and cancels it
+    # only through the `async_on_remove(self._clean_up_listener)` its
+    # `async_added_to_hass` registers. Removing the entity is therefore the
+    # supported way to leave no lingering timer behind.
+    component = hass.data.get(DATA_INSTANCES, {}).get("schedule")
+    if component is not None:
+        for entity_id in made:
+            await component.async_remove_entity(entity_id)
+    await hass.async_block_till_done()
+
+
+async def explain(hass, **data):
+    """Call `notify_switchboard.explain` the way a caller has to.
+
+    Shared with `test_s4_explain.py`, which has its own copy; this one lives in
+    `conftest.py` because three S6 files need it.
+    """
+    assert hass.services.has_service(DOMAIN, "explain"), (
+        f"{DOMAIN}.explain must exist (contract v0.4, ADR-0018 §1)"
+    )
+    return await hass.services.async_call(
+        DOMAIN, "explain", data, blocking=True, return_response=True
+    )

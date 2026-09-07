@@ -32,6 +32,15 @@ automation filters on a reason, a Companion channel filters on a tag. The four
 `event.switchboard_delivery` event types are asserted, unchanged, by
 `test_services_and_entities_exist_after_setup` above — v0.5 adds reasons, not
 types. What each rule *does* is `test_s5_*.py`'s business.
+
+Extended a fifth time for the v0.6 addendum (ADR-0020): two more frozen entity
+names (`sensor.switchboard_acknowledgements`,
+`sensor.switchboard_routing_table`), two more drop reasons (`max_deliveries`,
+`below_min_priority`), the new row and person keys, the `escalated` key of an
+`explain` response — which is why `EXPLAIN_RESPONSE_KEYS` below grows from
+three names to four — and the payload of the `acknowledged` event. The four
+`event.switchboard_delivery` event types and the three `explain` `decision`
+values are still unchanged. What each rule *does* is `test_s6_*.py`'s business.
 """
 
 from __future__ import annotations
@@ -40,7 +49,7 @@ from datetime import datetime, timedelta
 
 import homeassistant.util.dt as dt_util
 import pytest
-from homeassistant.core import SupportsResponse
+from homeassistant.core import Context, SupportsResponse
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
@@ -173,7 +182,9 @@ async def test_frozen_entity_ids_do_not_depend_on_the_instance_language(
 # v0.4 addendum (ADR-0018): the read-only service and its response keys
 # ---------------------------------------------------------------------------
 
-EXPLAIN_RESPONSE_KEYS = {"target", "priority", "persons"}
+# v0.6 addendum (ADR-0020 §8): `escalated` joins the three v0.4 keys. A card
+# is written against this set, so it is guarded here rather than inferred.
+EXPLAIN_RESPONSE_KEYS = {"target", "priority", "persons", "escalated"}
 EXPLAIN_PERSON_KEYS = {
     "decision",
     "until",
@@ -413,3 +424,190 @@ async def test_the_summary_tag_is_a_frozen_value(
 
     assert len(calls["mobile_app_alice"]) == 1
     assert calls["mobile_app_alice"][0].data["data"]["tag"] == "switchboard-summary"
+
+
+# ---------------------------------------------------------------------------
+# v0.6 addendum (ADR-0020): two entities, two reasons, new keys, one payload
+# ---------------------------------------------------------------------------
+
+ACKNOWLEDGED_PAYLOAD_KEYS = {
+    "event_type",
+    "target",
+    "alert_entity",
+    "user_id",
+    "person",
+}
+
+
+async def test_the_two_new_global_entities_exist_after_setup(
+    hass, enable_custom_integrations, install, mock_outputs
+):
+    """`sensor.switchboard_acknowledgements` and `sensor.switchboard_routing_table`."""
+    mock_outputs("mobile_app_alice")
+    entry = make_entry(
+        hass,
+        persons=[
+            make_person("person.alice", ["mobile_app_alice"], min_priority="high")
+        ],
+        targets=[
+            make_target(
+                "leak",
+                "Leak",
+                alert_entity="alert.leak",
+                audience=["person.alice"],
+                escalate_when_nobody_home=True,
+                escalation_after_minutes=20,
+                escalation_audience=["person.alice"],
+                max_deliveries=3,
+                require_authentication=False,
+            )
+        ],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    for entity_id in (
+        "sensor.switchboard_acknowledgements",
+        "sensor.switchboard_routing_table",
+    ):
+        assert hass.states.get(entity_id) is not None, (
+            f"{entity_id} is a frozen public name (contract v0.6, ADR-0020)"
+        )
+
+    # The row above carries all five new row keys and the person carries
+    # `min_priority`: an entry that does not load is not a contract at all.
+    assert hass.states.get("sensor.switchboard_routing_table").state == "1"
+
+
+@pytest.mark.parametrize("language", ["fr", "es", "en"])
+async def test_the_two_new_entity_ids_do_not_depend_on_the_instance_language(
+    hass, enable_custom_integrations, install, language
+):
+    """v0.3 §"Names" applies to the v0.6 entities unchanged: English ids, any language."""
+    hass.config.language = language
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    for entity_id in (
+        "sensor.switchboard_acknowledgements",
+        "sensor.switchboard_routing_table",
+    ):
+        assert hass.states.get(entity_id) is not None, (
+            f"{entity_id} must exist verbatim on a '{language}' instance "
+            "(docs/contract.md, ADR-0011/ADR-0017/ADR-0020)"
+        )
+
+
+async def test_max_deliveries_is_a_drop_reason(
+    hass, enable_custom_integrations, install, mock_outputs, set_person, real_alert
+):
+    """`max_deliveries` is a public reason: an automation may filter on it."""
+    mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    alert = await real_alert("leak")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[
+            make_target(
+                "leak",
+                "Leak",
+                alert_entity="alert.leak",
+                audience=["person.alice"],
+                max_deliveries=1,
+            )
+        ],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await alert.begin()
+    for index in range(2):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": f"m{index}"}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    reasons = hass.states.get("sensor.switchboard_dropped_today").attributes["reasons"]
+    assert "max_deliveries" in reasons, (
+        "`max_deliveries` joins the frozen drop reasons in v0.6 (ADR-0020 §3)"
+    )
+
+
+async def test_below_min_priority_is_a_drop_reason_and_min_priority_is_a_person_key(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """`min_priority` is a public person key; `below_min_priority` a public reason."""
+    mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    entry = make_entry(
+        hass,
+        persons=[
+            make_person("person.alice", ["mobile_app_alice"], min_priority="high")
+        ],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify",
+        "switchboard_leak",
+        {"message": "m", "data": {"priority": "normal"}},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    reasons = hass.states.get("sensor.switchboard_dropped_today").attributes["reasons"]
+    assert "below_min_priority" in reasons, (
+        "`below_min_priority` joins the frozen drop reasons in v0.6 (ADR-0020 §6)"
+    )
+
+
+async def test_the_acknowledged_event_payload_is_the_documented_one(
+    hass, enable_custom_integrations, install, mock_outputs, real_alert
+):
+    """The payload of the `acknowledged` event is frozen; the event types are not touched."""
+    mock_outputs("mobile_app_alice")
+    hass.states.async_set("person.alice", "home", {"user_id": "user-alice"})
+    await real_alert("leak")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[
+            make_target(
+                "leak",
+                "Leak",
+                alert_entity="alert.leak",
+                allow_acknowledge=True,
+                audience=["person.alice"],
+            )
+        ],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "acknowledge",
+        {"target": "leak"},
+        blocking=True,
+        context=Context(user_id="user-alice"),
+    )
+    await hass.async_block_till_done()
+
+    attributes = hass.states.get("event.switchboard_delivery").attributes
+    assert attributes["event_type"] == "acknowledged"
+    assert set(attributes) >= ACKNOWLEDGED_PAYLOAD_KEYS, (
+        "the `acknowledged` payload carries `target`, `alert_entity`, "
+        f"`user_id` and `person` (contract v0.6, ADR-0020 §4); got "
+        f"{sorted(attributes)}"
+    )
+    assert attributes["person"] == "person.alice"

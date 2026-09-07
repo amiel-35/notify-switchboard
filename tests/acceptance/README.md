@@ -608,3 +608,125 @@ half of a rule is worth pinning even when today's code already satisfies it.
 - `test_s5_clear.py::test_a_caller_supplied_tag_and_notification_id_win` — a
   default that overrode a caller would be worse than no default; 0.4.0 already
   passes both keys through untouched, and §6 must not change that.
+
+## Sprint 6 (`test_s6_*.py`, and the v0.6 additions to `test_contract.py`)
+
+Executable specification for the v0.6 addendum, against `docs/contract.md`
+§"v0.6 addendum (ADR-0020)",
+`docs/ADR/0020-bounded-declarative-escalation.md` and
+`docs/sprints/sprint-6-brief.md`. Same discipline as S1-S5: written before the
+implementation, and the coding agent must make them pass without modifying
+them.
+
+**The guard-rail these tests exist to protect.** The router owns **no timer
+and no counter of its own** for escalation. The only clock is core `alert`'s
+own `repeat`; the only state is what the store already keeps per episode. No
+test below fires a router timer, because there is none to fire, and none of
+them should ever be made to pass by adding one. Where a test needs time to
+have passed it moves the *state machine's* clock and calls again — which is
+exactly what a real alert's repeat does.
+
+**The one S1-S5 change Sprint 6 forces.** ADR-0020 §8 adds a fourth top-level
+key, `escalated`, to the `notify_switchboard.explain` response. `test_contract.py`
+freezes that set, so
+`test_explain_response_carries_exactly_the_frozen_keys` is red today and its
+`EXPLAIN_RESPONSE_KEYS` constant grew from three names to four. That is the
+only pre-existing assertion this sprint touches; no S1-S5 test was weakened,
+and the per-person keys of an `explain` answer are unchanged.
+
+| File | What it pins |
+|---|---|
+| `test_s6_nobody_home.py` | `escalate_when_nobody_home` makes a call `critical` for one decision when no audience person is in state `home`; a named zone or an unknown state is not home; one person home is enough to hold the silence; the flag never overrides the presence rule; `explain` reports `escalated: nobody_home` and the escalated `priority`, and reports `null` for a rule that changed nothing. |
+| `test_s6_escalation.py` | An episode older than N minutes with the alert still `on` widens the audience and raises the priority one step; younger does not; an acknowledged (`off`) alert does not; a closed episode does not; a row missing half the key pair or naming no `alert_entity` does not; `info` stays `info` while the audience still widens; `explain` reports `escalated: after_minutes` over the effective audience; and — in a test whose name says so — the escalation fires at the first repeat after N minutes, so a `repeat: [15]` alert with `escalation_after_minutes: 20` escalates at **30**. |
+| `test_s6_max_deliveries.py` | The cap drops with the new reason `max_deliveries`; it is per (episode, person), not per episode; the `done` message is neither counted nor blocked; the count starts again at the next episode; a row with no `alert_entity` is never capped; `critical` does not bypass it; and a delivery dropped for a stronger reason does not consume the budget. |
+| `test_s6_acknowledgements.py` | `sensor.switchboard_acknowledgements` exists, its state counts today's records and `last` / `by_target` carry the `{target, person, user_id, at}` record; the `acknowledged` event payload gains `person` next to `user_id`; `person` is `null` when the canonical `user_id` link does not resolve; the records survive a reload; a refused acknowledgement records nothing. |
+| `test_s6_routing_table.py` | `sensor.switchboard_routing_table` exists, its state is the row count, and its `targets` / `persons` lists carry exactly the documented keys in options order — which is also how a `place` key (Router S7) would be caught; `default_data`, its value and a person's `outputs` appear nowhere in the attributes. |
+| `test_s6_min_priority.py` | The per-person floor drops with the new reason `below_min_priority`, is evaluated before silence and snooze, lets the floor and everything above it through, and is named in `explain`'s `detail`; a real `schedule` block carrying `data: {min_priority: high}` silences only below `high` with the existing `silenced` reason, while a block with no attribute, or with an unreadable one, silences everything; `critical` still bypasses both. |
+| `test_s6_require_authentication.py` | `true` authenticates an `info` row's buttons, `false` leaves a `critical` row's unauthenticated, `null` keeps the priority rule, and a `null` row reads the **escalated** priority. |
+| `test_contract.py` | The two new global entity names, in every instance language; `max_deliveries` and `below_min_priority` as public drop reasons; the new row and person keys loading; the `acknowledged` payload; and `escalated` as the fourth `explain` response key. |
+
+### Fixtures and helpers added in `conftest.py`
+
+- **`make_person(..., min_priority=...)`** and **`make_target(...,
+  escalate_when_nobody_home=, escalation_after_minutes=, escalation_audience=,
+  max_deliveries=, require_authentication=)`** write the six v0.6 options
+  keys, each only when it differs from its default — `min_priority` defaults
+  to `info`, `escalate_when_nobody_home` to off, the other four to absent — so
+  every S1-S5 row keeps the exact dict it had. `escalation_after_minutes` and
+  `escalation_audience` can deliberately be written one without the other:
+  that half-written row is itself a case S6 pins.
+- **`schedule_silence`** sets up one real core `schedule` that is `on` every
+  day from `00:00:00` to `24:00` (which `deserialize_to_time` turns into
+  `time.max`), optionally carrying a block `data:` dict, and returns its
+  entity id. It needs no frozen clock, and it **removes the entity at
+  teardown**: a `Schedule` always arms a timer for its next event and cancels
+  it only through the `async_on_remove(self._clean_up_listener)` its
+  `async_added_to_hass` registers.
+- **`acknowledgements_sensor`** and **`routing_table_sensor`** mirror
+  `routed_sensor` / `dropped_sensor` for the two new global entities.
+- **`explain`** — the same one-line caller `test_s4_explain.py` has locally,
+  promoted to `conftest.py` because three S6 files need it.
+- **`real_alert`** gained a `notifiers` argument, and became an async fixture
+  that **ends every alert it made at teardown**. The `notifiers` list is what
+  lets the granularity test drive a real `repeat` into
+  `notify.switchboard_<slug>`; the teardown is a safety net, so that a test
+  whose assertion fails before its own `end()` produces one red rather than a
+  red plus a lingering-timer error. `tests/conftest.py` is unchanged: still
+  exactly the three S1/S2 tests that acknowledge an alert.
+
+### Moving time
+
+Two ways, and the difference is the point.
+
+- Where the rule only needs the *clock* to have moved, a helper wraps one
+  service call in `freezegun.freeze_time(dt_util.utcnow() + timedelta(...))`.
+  Nothing is fired: the escalation is decided when the call arrives, from the
+  episode's stored start, and a test that had to release a timer would be
+  testing a timer the router must not own.
+- `test_s6_escalation.py::test_escalation_fires_at_the_first_repeat_after_n_minutes_so_the_delay_is_rounded_up`
+  is the exception, and deliberately the only one: it moves `freezer` to
+  absolute instants and releases core's own repeat with
+  `async_fire_time_changed`, because what it pins **is** that clock.
+
+### Assumptions added by Sprint 6
+
+20. **A raised priority is observed through `authenticationRequired`.** A
+    routed message carries no `priority` in its payload, so the tests read the
+    escalation's effect where it is visible to a user: `normal` produces no
+    `authenticationRequired`, `high` and `critical` do (contract §"Buttons and
+    callbacks"). `explain`'s `priority` key is used wherever the exact value
+    matters.
+21. **`detail` is asserted by the tokens that are never translated.** For a
+    floor, the priority value (`"high"`); for a silence, the entity id — the
+    same discipline `test_s4_explain.py` already applies. Nothing asserts the
+    wording of a sentence.
+22. **A real `schedule` is used for the scheduled floor**, not a hand-written
+    state with a `min_priority` attribute, because the mechanism being
+    specified is core's per-block `data`. One test then covers the general
+    rule ADR-0020 §6 states — the router reads the *attribute*, not the domain
+    — from the other direction: an entity that is `on` with no such attribute
+    silences everything.
+23. **The `at` field of an acknowledgement record is asserted non-empty, never
+    for its exact value.** It is an ISO 8601 instant; pinning a format string
+    would be pinning an implementation.
+
+### Tests that are green from the start, on purpose
+
+Following the S3-S5 precedent: the negative half of a rule is worth pinning
+even when today's code already satisfies it. Sixteen of the fifty-six S6
+tests are green on 0.5.0, and every one of them is a line an over-eager
+implementation crosses first — `escalate_when_nobody_home` overriding a
+presence rule, a floor dropping `critical`, a cap outliving its episode, a
+silence entity with no floor suddenly letting messages through, `null`
+`require_authentication` drifting away from the priority rule.
+
+### What Sprint 6 deliberately does not pin
+
+- **An episode restored from a 0.5.0 store document.** ADR-0020 §2 says the
+  migration invents no `started_at` and that such an episode never escalates.
+  Reaching that state in a test means writing a `minor_version: 4` document by
+  hand *and* getting the row's `alert_entity` to read `on` without opening a
+  fresh episode — at which point the test would pass for the wrong reason.
+  The decision is in the ADR; the migration is unit-test territory.
+- **The options flow.** Which page the five new row keys live on, and that it
+  refuses half a key pair, is the coding agent's to design and unit-test.
