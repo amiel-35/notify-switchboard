@@ -545,14 +545,18 @@ DROP_REASONS = (
 # the code speaking exactly as `not_home` is.
 PERSON_STATES = ("home", "not_home", "unknown", "unavailable")
 
-# Nothing in this set may reach a sentence through a placeholder: they are the
-# router's own words for a choice the user made in words of their own.
+# Nothing in this set may *be* what a placeholder puts on a screen: they are
+# the router's own words for a choice the user made in words of their own.
+#
+# "Be", not "contain": ADR-0018 §2 keeps the stored value in brackets after the
+# words -- "Only people who are at home (home_only)" -- for the same reason an
+# output label keeps its service name, and a frozen acceptance test
+# (`test_s4_explain.py`) holds that shape for the presence rule. What the
+# amendment forbids is the identifier standing alone, with no words in front
+# of it.
 CODE_VALUES = frozenset(
     {*VALID_PRIORITIES, *VALID_PRESENCE_RULES, *PERSON_STATES, *DROP_REASONS}
 )
-# The ones no prose could ever contain by accident, so they can be looked for
-# inside a longer value rather than only as the whole of it.
-SLUGGED = frozenset(value for value in CODE_VALUES if "_" in value)
 
 SILENCE_ENTITY = "binary_sensor.night"
 
@@ -567,8 +571,7 @@ def _offenders(template: str, placeholders: dict[str, str]) -> dict[str, str]:
     return {
         name: value
         for name, value in placeholders.items()
-        if f"{{{name}}}" in template
-        and (value in CODE_VALUES or any(word in value for word in SLUGGED))
+        if f"{{{name}}}" in template and value in CODE_VALUES
     }
 
 

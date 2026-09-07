@@ -25,7 +25,12 @@
     "summary_line_untitled": "• {message}",
     "detail_expired": "Un mensaje guardado para {person} se abandonaría: habría esperado demasiado para seguir mereciendo la pena.",
     "detail_not_notified": "{person} no recibió nada la última vez que se disparó {target}: el mensaje de vuelta a la normalidad no concierne a {person}.",
-    "detail_silenced_floor": "Ahora mismo no hay que molestar a {person} — {entities}, y solo pasan los mensajes de nivel {floor} y más importantes. Una alerta crítica pasa siempre."
+    "detail_silenced_floor": "Ahora mismo no hay que molestar a {person} — {entities}, y solo pasan los mensajes marcados «{floor}» o por encima. Una alerta crítica pasa siempre.",
+    "detail_unknown_target": "«{target}» ya no es uno de los mensajes que esta casa sabe enviar, así que no hay adónde entregar este.",
+    "detail_delivery_failed": "Este mensaje se entregó a los dispositivos indicados para {person} y ninguno lo aceptó, así que no llegó.",
+    "state_home": "en casa",
+    "state_not_home": "fuera de casa",
+    "state_unknown": "en un lugar que la casa no sabe nombrar"
   },
   "entity": {
     "binary_sensor": {

@@ -119,6 +119,13 @@ from .const import (
 from .dispatcher import (
     MOBILE_APP_DEVICE_NAME,
     OUTPUT_LABEL_FALLBACKS,
+    # The `SelectSelector` translation keys of the two coded choices
+    # (`component.<domain>.selector.<key>.options.<value>`): the stored values
+    # stay `info` / `home_only`, and only what the chip reads changes. They
+    # live in `dispatcher.py` because `explain` quotes the very same labels
+    # back when it justifies a decision.
+    SELECTOR_PRESENCE_RULE,
+    SELECTOR_PRIORITY,
     companion_device_names as _companion_device_names,
     companion_service_name,
     friendly_name,
@@ -176,12 +183,6 @@ OPTION_LABEL_FALLBACKS: dict[str, str] = {
     "this_persons_device": FALLBACK_THIS_PERSONS_DEVICE,
     **OUTPUT_LABEL_FALLBACKS,
 }
-
-# The `SelectSelector` translation keys of the two coded choices
-# (`component.<domain>.selector.<key>.options.<value>`): the stored values stay
-# `info` / `home_only`, and only what the chip reads changes.
-SELECTOR_PRIORITY = "priority"
-SELECTOR_PRESENCE_RULE = "presence_rule"
 
 # The `alert:` block `target_saved` offers (ADR-0018 §7). `notifiers:` wants the
 # legacy service name without its `notify.` prefix, which is exactly what

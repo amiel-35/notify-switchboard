@@ -25,7 +25,12 @@
     "summary_line_untitled": "• {message}",
     "detail_expired": "A message kept back for {person} would be given up: it would have waited too long to still be worth delivering.",
     "detail_not_notified": "{person} heard nothing the last time {target} went off, so the back-to-normal message does not concern {person}.",
-    "detail_silenced_floor": "{person} is not to be disturbed right now — {entities}, and only messages of importance {floor} and above get through. A critical alert always does."
+    "detail_silenced_floor": "{person} is not to be disturbed right now — {entities}, and only messages marked “{floor}” or above get through. A critical alert always does.",
+    "detail_unknown_target": "“{target}” is no longer one of the messages this house knows how to send, so there is nowhere to deliver this one.",
+    "detail_delivery_failed": "This message was handed to the devices listed for {person} and none of them took it, so it did not arrive.",
+    "state_home": "at home",
+    "state_not_home": "away from home",
+    "state_unknown": "somewhere the house cannot name"
   },
   "entity": {
     "binary_sensor": {

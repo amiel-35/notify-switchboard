@@ -35,10 +35,13 @@ from homeassistant.const import (
     ATTR_FRIENDLY_NAME,
     ATTR_SUPPORTED_FEATURES,
     EVENT_HOMEASSISTANT_STOP,
+    STATE_HOME,
     STATE_IDLE,
+    STATE_NOT_HOME,
     STATE_OFF,
     STATE_ON,
     STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
 )
 from homeassistant.core import (
     CALLBACK_TYPE,
@@ -235,6 +238,40 @@ OUTPUT_LABEL_FALLBACKS: dict[str, str] = {
     LABEL_PERSISTENT_NOTIFICATION: "Home Assistant notifications",
 }
 
+# v0.7.1: the words a `detail` sentence names somebody's whereabouts with.
+# `home` and `not_home` are the state machine's words, and a sentence that
+# quotes them reads "Alice is currently not_home". A state that is neither --
+# a zone -- is already a name the household chose, and is passed through.
+LABEL_STATE_HOME = "state_home"
+LABEL_STATE_NOT_HOME = "state_not_home"
+LABEL_STATE_UNKNOWN = "state_unknown"
+PERSON_STATE_LABELS: dict[str, str] = {
+    STATE_HOME: LABEL_STATE_HOME,
+    STATE_NOT_HOME: LABEL_STATE_NOT_HOME,
+    # `unknown` and `unavailable` say the same thing to a household -- the
+    # house cannot tell -- and there is nothing to be gained from spelling the
+    # difference out on a screen.
+    STATE_UNKNOWN: LABEL_STATE_UNKNOWN,
+    STATE_UNAVAILABLE: LABEL_STATE_UNKNOWN,
+}
+PERSON_STATE_FALLBACKS: dict[str, str] = {
+    LABEL_STATE_HOME: "at home",
+    LABEL_STATE_NOT_HOME: "away from home",
+    LABEL_STATE_UNKNOWN: "somewhere the house cannot name",
+}
+
+# The `SelectSelector` translation keys of the two coded choices. They live
+# here, with the output labels, for the same reason: the options flow shows
+# them to pick a value and `explain` shows them to justify a decision, and the
+# two must be the same words. `SelectSelectorConfig(translation_key=...)` is
+# how Home Assistant labels a stored value, so there is exactly one place the
+# wording lives -- `component.<domain>.selector.<key>.options.<value>` --
+# rather than a second copy in `common` that would drift.
+SELECTOR_CATEGORY = "selector"
+SELECTOR_PRIORITY = "priority"
+SELECTOR_PRESENCE_RULE = "presence_rule"
+KEY_SELECTOR_PREFIX = f"component.{DOMAIN}.{SELECTOR_CATEGORY}."
+
 FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
 FALLBACK_BACK_TO_NORMAL = "Back to normal"
@@ -289,6 +326,7 @@ class Switchboard:
         self.failing_outputs: dict[str, int] = {}
         self._reported_unknown_targets: set[str] = set()
         self._labels: dict[str, str] | None = None
+        self._selector_labels: dict[str, str] | None = None
         # How many times a UI service was refused for the same unknown
         # target/person, keyed by `(field, value)` (brief item 7).
         self._invalid_service_calls: dict[tuple[str, str], int] = {}
@@ -1012,6 +1050,7 @@ class Switchboard:
         there.
         """
         translations = await self._async_translations()
+        selectors = await self._async_selector_translations()
         placeholders: dict[str, str] = {
             "target": target.name or target.slug,
             # v0.7.1: a sentence a household reads names people the way the
@@ -1019,8 +1058,18 @@ class Switchboard:
             # the id is the thing to go and fix.
             "person": friendly_name(self.hass, person_id),
             "reason": key,
-            "rule": target.presence_rule,
-            "state": context.person_states.get(person_id, "") or "unknown",
+            # ... and names a coded choice with the words the picker offered
+            # when it was made, rather than with the value the row stores:
+            # "its rule is home_only" is the router explaining itself to
+            # itself. Every reason now has a `detail_` sentence of its own, so
+            # `{reason}` reaches nobody; it stays for the day the contract adds
+            # one, which is the whole point of the `detail_dropped` fallback.
+            "rule": selector_label(
+                selectors, SELECTOR_PRESENCE_RULE, target.presence_rule
+            ),
+            "state": _presence_label(
+                translations, context.person_states.get(person_id, "") or STATE_UNKNOWN
+            ),
             # ... and names devices the way the outputs picker does, from the
             # same builder. The `outputs` key of the answer keeps the full
             # `notify.*` service names a script pastes into Developer tools
@@ -1053,9 +1102,13 @@ class Switchboard:
                 floors = [context.silenced[entity_id] for entity_id in catching]
                 if all(floor is not None for floor in floors):
                     key = DETAIL_SILENCED_FLOOR
-                    placeholders["floor"] = max(
-                        (floor for floor in floors if floor is not None),
-                        key=lambda floor: PRIORITY_RANK[floor],
+                    placeholders["floor"] = selector_label(
+                        selectors,
+                        SELECTOR_PRIORITY,
+                        max(
+                            (floor for floor in floors if floor is not None),
+                            key=lambda floor: PRIORITY_RANK[floor],
+                        ),
                     )
         elif key == DECISION_DEFERRED:
             placeholders["entities"] = ", ".join(
@@ -3119,6 +3172,20 @@ class Switchboard:
             )
         return self._labels
 
+    async def _async_selector_translations(self) -> dict[str, str]:
+        """Fetch and cache the option labels of the two coded selectors.
+
+        A second category, and therefore a second fetch: `async_get_translations`
+        takes one at a time. Cached exactly as `common` is, and read in the
+        instance language for the same reason -- `explain` answers into an
+        event and a card, not into one browser session.
+        """
+        if self._selector_labels is None:
+            self._selector_labels = await async_get_translations(
+                self.hass, self.hass.config.language, SELECTOR_CATEGORY, {DOMAIN}
+            )
+        return self._selector_labels
+
     async def _async_labels(self, target: TargetConfig) -> dict[str, str]:
         """Return the button labels for one row, in Home Assistant's language."""
         translations = await self._async_translations()
@@ -3615,6 +3682,44 @@ def next_wake_time(local_now: datetime, wake: Any) -> datetime:
             local_now.date() + timedelta(days=1), wake, tzinfo=tzinfo
         )
     return candidate
+
+
+def selector_label(translations: Mapping[str, str], selector: str, value: str) -> str:
+    """Return the words a picker shows for one stored value, value in brackets.
+
+    `SelectSelectorConfig(translation_key=...)` is Home Assistant's own
+    mechanism for labelling a coded choice, and the flow already uses it, so
+    the sentence reads the very string the user picked from rather than a
+    second copy in `common` that would drift.
+
+    The stored value stays in brackets for exactly the reason `output_label`
+    keeps a service name there (ADR-0018 §2): a presence rule and a priority
+    floor are configuration, and somebody sent to go and change one needs the
+    word the configuration uses. Where somebody *is* gets no brackets -- a
+    state is not a setting anybody can go and edit.
+
+    The raw value is the last resort, exactly as `FALLBACK_DETAIL` is: a
+    missing translation must degrade to something, never to an exception in a
+    diagnostic.
+    """
+    label = translations.get(f"{KEY_SELECTOR_PREFIX}{selector}.options.{value}")
+    return value if label is None else f"{label} ({value})"
+
+
+def _presence_label(translations: Mapping[str, str], state: str) -> str:
+    """Return where somebody is, in words.
+
+    Only the three states the state machine spells in its own words are
+    translated. Anything else is a zone, whose name the household chose
+    themselves -- "at work" is already the answer, and mapping it would be
+    replacing a real name with a worse one.
+    """
+    key = PERSON_STATE_LABELS.get(state)
+    if key is None:
+        return state
+    return translations.get(
+        f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.{key}", PERSON_STATE_FALLBACKS[key]
+    )
 
 
 def _fill(template: str, placeholders: Mapping[str, str]) -> str:
