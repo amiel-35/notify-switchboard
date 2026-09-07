@@ -570,7 +570,7 @@ suite S7 line that planned them.
 The router has its own sprint sequence inside those lines, numbered
 independently of the suite roadmap above: suite S3 is `notify-cast`, router S3
 is a router release, and the two S7 lines have nothing to do with each other.
-**Router S6 is done** and is what 0.6.0 ships.
+**Router S6 is done** and is what 0.6.0 ships; **router S7 is in progress** and is what 0.7.0 will ship.
 
 | Router # | Router increment | State |
 |---|---|---|
@@ -579,8 +579,8 @@ is a router release, and the two S7 lines have nothing to do with each other.
 | Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` target, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | Shipped (0.4.0) |
 | Router S5 | Night: time-to-live on a deferral, one wake-time summary, a full re-decision at the flush, an early flush when the silence really ends, episodes and cleared notifications (ADR-0019) | Shipped (0.5.0, 0.5.1) |
 | Router S6 | Consolidation: a five-field target editor and a two-field person editor with their advanced steps, `class` removed, an optional wake time with a documented meaning, one vocabulary, a glossary, a migration guide, and documents that match the code (ADR-0020) | **Done — 0.6.0** |
-| Router S7 | Escalation and places, reduced in scope: what happens when nobody acknowledges, and routing on where somebody is rather than only on whether they are home | Next — 0.7.0 |
-| Later | Unscheduled, each needing an ADR of its own: labels on a target (the successor of `class`), a per-target authentication override, intents, and the routing table as an entity | Not scheduled |
+| Router S7 | Escalation and places, reduced: one step up when nobody is home, a scheduled priority floor carried by a silence entity, `sensor.switchboard_routing_table`, acknowledgement authorship in the `acknowledged` event, audience entries and outputs that are not people, and a critical payload translated per OS (ADR-0021) | In progress — 0.7.0 |
+| Later | Unscheduled, each needing an ADR of its own: escalation after N minutes, a delivery cap, labels on a target (the successor of `class`), a per-target authentication override, and intents — the deferred list of ADR-0021 §9, each with the native answer that stands in for it today | Not scheduled |
 
 ## Engineering rules learned
 
@@ -651,3 +651,4 @@ for its own concurrent fixes — works in its own
 | [0018](ADR/0018-zero-config-and-explainability.md) | Zero-config and explainability — `explain`, discovered Companion outputs, a managed default target, consistency repairs |
 | [0019](ADR/0019-night-catch-up-and-closing-the-loop.md) | Night, catch-up and closing the loop — TTL, one wake-time summary, a full re-decision at flush, early flush, episode recipients, cleared notifications |
 | [0020](ADR/0020-consolidation.md) | Consolidation — a five-field target, an optional wake time, one vocabulary, and documents that tell the truth |
+| [0021](ADR/0021-escalation-and-places-reduced.md) | Escalation and places, reduced — one step when nobody is home, a scheduled priority floor, the routing table as an entity, acknowledgement authorship, bare and entity outputs, a critical payload per OS |

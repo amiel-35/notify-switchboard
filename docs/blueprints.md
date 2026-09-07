@@ -150,6 +150,70 @@ one has no episodes, so such a message routes to the whole audience like any
 other. Changing the blueprints themselves to use the key is a separate,
 smaller change.
 
+## Escalation after N minutes (v0.7, ADR-0021 §9)
+
+"Twenty minutes after the alert started, if nobody has acknowledged it, tell
+somebody else." The router deliberately does **not** do this: it owns no timer
+and no counter of its own, and a rule of that shape needs one. Home Assistant
+already ships the timer, in the one place where it is cancelled, restored and
+reconciled for you — a template `binary_sensor`'s `delay_on`.
+
+Three pieces, none of them a blueprint, all of them YAML you paste once:
+
+1. **A template `binary_sensor` that is `on` only once the alert has been
+   firing for N minutes.** `delay_on` is core's timer: it starts when the
+   condition becomes true, it is cancelled when the condition stops being true
+   before it elapses, and it is re-evaluated on restart.
+
+   ```yaml
+   template:
+     - binary_sensor:
+         - name: "Leak unacknowledged for 20 minutes"
+           unique_id: leak_unacknowledged_20m
+           # `alert.*` is `on` while it is firing and nobody has acknowledged
+           # it, and `off` once somebody has (core sets `_ack`), so "still on"
+           # is the acknowledgement check -- no bookkeeping of your own.
+           state: "{{ is_state('alert.leak', 'on') }}"
+           delay_on: "00:20:00"
+   ```
+
+2. **A second `alert:` watching that sensor**, with its own repeat and its own
+   notifier — the escalation's own alert, independent of the first one.
+
+   ```yaml
+   alert:
+     leak_escalated:
+       name: "Leak — still nobody"
+       entity_id: binary_sensor.leak_unacknowledged_for_20_minutes
+       state: "on"
+       repeat: [30]
+       can_acknowledge: true
+       skip_first: false
+       notifiers:
+         - switchboard_leak_escalated
+   ```
+
+3. **A second target**, `leak_escalated`, whose audience is the wider one and
+   whose `default_priority` is the louder one. It is an ordinary target: it
+   defers, snoozes, acknowledges and clears exactly like the first, and
+   `escalate_when_nobody_home` works on it too.
+
+What this buys over a router-side `escalation_after_minutes`, which is why the
+feature was deferred rather than shipped:
+
+- the delay is **punctual**, because core evaluates `delay_on` on its own
+  clock. A router-side rule could only be evaluated when the alert next called
+  the router, so `20` minutes would have rounded up to the alert's `repeat`
+  interval;
+- the escalation is a real entity you can see, graph and test in Developer
+  tools, instead of a field whose effect only shows up in a notification;
+- rolling it back is deleting three blocks, and the original alert never
+  knew about any of it.
+
+The one thing it does not give you is a single form to fill in. That is the
+trade ADR-0021 §9 made, and `docs/ADR/0021-escalation-and-places-reduced.md`
+records what would have to change for the router to take it back.
+
 ## How to import
 
 Click a badge above (needs the [My Home Assistant](https://my.home-assistant.io/)

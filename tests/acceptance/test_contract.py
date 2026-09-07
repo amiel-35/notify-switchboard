@@ -40,6 +40,16 @@ are reclassified as defaults a minor version may change, so what is pinned is
 the mechanism that makes them changeable and not the three numbers; and four
 options-flow step ids become public names, because documents and cards link to
 a step by its id. What each step *holds* is `test_s6_*_editor.py`'s business.
+
+Extended a sixth time for the v0.7 addendum (ADR-0021), which both adds and
+removes. It adds one frozen entity name (`sensor.switchboard_routing_table`),
+one global option (`critical_payload`), two `explain` top-level keys
+(`escalated`, `outputs`), two `acknowledged` payload keys (`user_id`,
+`person`), and two new kinds of thing a `notify.*` name may be (an audience
+entry, an output entity id). It removes one: `data.priority` no longer reaches
+a `mobile_app_*` output, which is the only breaking change of 0.7.0 and is
+pinned here rather than only in `test_s7_critical_payload.py`. What each rule
+*does* is `test_s7_*.py`'s business.
 """
 
 from __future__ import annotations
@@ -50,7 +60,7 @@ from pathlib import Path
 
 import homeassistant.util.dt as dt_util
 import pytest
-from homeassistant.core import SupportsResponse
+from homeassistant.core import Context, SupportsResponse
 from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
     async_mock_service,
@@ -154,6 +164,8 @@ FROZEN_ENTITY_IDS = (
     "sensor.switchboard_deferred_today",
     "sensor.switchboard_dropped_today",
     "sensor.switchboard_routed_today",
+    # v0.7 addendum (ADR-0021 §3): the routing table, for user interfaces.
+    "sensor.switchboard_routing_table",
 )
 
 
@@ -183,7 +195,9 @@ async def test_frozen_entity_ids_do_not_depend_on_the_instance_language(
 # v0.4 addendum (ADR-0018): the read-only service and its response keys
 # ---------------------------------------------------------------------------
 
-EXPLAIN_RESPONSE_KEYS = {"target", "priority", "persons"}
+# v0.7 addendum (ADR-0021 §8): `escalated` and `outputs` join the three keys
+# v0.4 froze. Each person's value keeps exactly the six keys it always had.
+EXPLAIN_RESPONSE_KEYS = {"target", "priority", "persons", "escalated", "outputs"}
 EXPLAIN_PERSON_KEYS = {
     "decision",
     "until",
@@ -532,3 +546,190 @@ async def test_the_ttl_defaults_are_defaults_a_household_can_change(
     )
     reasons = hass.states.get("sensor.switchboard_dropped_today").attributes["reasons"]
     assert "expired" in reasons
+
+
+# ---------------------------------------------------------------------------
+# v0.7 addendum (ADR-0021): one entity, one option, two payload keys — and one
+# key that stops reaching a Companion output
+# ---------------------------------------------------------------------------
+
+
+async def test_the_routing_table_entity_exists_after_setup(
+    hass, enable_custom_integrations, install, mock_outputs
+):
+    """v0.7 addendum: one more frozen global name, with its two closed lists."""
+    mock_outputs("mobile_app_alice")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    state = hass.states.get("sensor.switchboard_routing_table")
+    assert state is not None, (
+        "`sensor.switchboard_routing_table` is a frozen public name "
+        "(contract v0.7, ADR-0021 §3)"
+    )
+    assert set(state.attributes) >= {"targets", "persons"}
+
+
+async def test_data_priority_no_longer_reaches_a_mobile_app_output(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """The one breaking change of 0.7.0, pinned as such.
+
+    `data.priority` is the router's own input key — it selects the effective
+    priority — and has never been a Companion key. Android's Companion app
+    reads `data.priority` and understands exactly one value, `high`, which is
+    the value the router now writes itself on a critical message.
+    """
+    calls = mock_outputs("mobile_app_alice", "kitchen_speaker")
+    set_person("person.alice", "home")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice", "kitchen_speaker"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify",
+        "switchboard_leak",
+        {"message": "m", "data": {"priority": "high"}},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert "priority" not in calls["mobile_app_alice"][0].data.get("data", {}), (
+        "`data.priority` is stripped from a `mobile_app_*` output "
+        "(contract v0.7, §Breaking)"
+    )
+    assert calls["kitchen_speaker"][0].data["data"]["priority"] == "high", (
+        "every other output keeps receiving it: it is the caller's key and the "
+        "router is a proxy"
+    )
+
+
+async def test_critical_payload_is_a_global_option_defaulting_to_on(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """`entry.options["critical_payload"]`: absent means on, `false` means off."""
+    calls = mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[
+            make_target(
+                "leak", "Leak", audience=["person.alice"], default_priority="critical"
+            )
+        ],
+        default_target="leak",
+        # Absent on purpose: the default is on.
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    data = calls["mobile_app_alice"][0].data.get("data", {})
+    assert "push" in data or "channel" in data, (
+        "with no `critical_payload` key in the options, a critical message "
+        "carries the Companion critical keys (contract v0.7, ADR-0021 §7)"
+    )
+
+
+async def test_the_acknowledged_payload_carries_user_id_and_person(
+    hass, enable_custom_integrations, install, mock_outputs, real_alert
+):
+    """v0.7 addendum: two keys join the frozen `acknowledged` payload."""
+    mock_outputs("mobile_app_alice")
+    hass.states.async_set("person.alice", "home", {"user_id": "user-alice"})
+    await real_alert("leak")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[
+            make_target(
+                "leak",
+                "Leak",
+                alert_entity="alert.leak",
+                allow_acknowledge=True,
+                audience=["person.alice"],
+            )
+        ],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        DOMAIN,
+        "acknowledge",
+        {"target": "leak"},
+        blocking=True,
+        context=Context(user_id="user-alice"),
+    )
+    await hass.async_block_till_done()
+
+    payload = hass.states.get("event.switchboard_delivery").attributes
+    assert payload["event_type"] == "acknowledged"
+    assert payload["user_id"] == "user-alice"
+    assert payload["person"] == "person.alice"
+
+
+async def test_a_notify_service_may_be_an_audience_entry(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """v0.7 addendum: an audience entry in the `notify` domain is a bare output."""
+    calls = mock_outputs("kitchen_speaker")
+    set_person("person.alice", "home")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[
+            make_target("leak", "Leak", audience=["notify.kitchen_speaker"]),
+        ],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert len(calls["kitchen_speaker"]) == 1, (
+        "an `audience` entry that is a `notify.*` service name is a public "
+        "input shape from v0.7 (ADR-0021 §5)"
+    )
+
+
+async def test_a_notify_entity_id_may_be_an_output(
+    hass, enable_custom_integrations, install, set_person, notify_entity
+):
+    """v0.7 addendum: an output that is a `notify` entity id is a public input shape."""
+    set_person("person.alice", "home")
+    living_room = await notify_entity("living_room")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["notify.living_room"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert [message for message, _title, _extra in living_room.messages] == ["m"], (
+        "an output that is a `notify` entity id is delivered with "
+        "`notify.send_message` (contract v0.7, ADR-0021 §6)"
+    )

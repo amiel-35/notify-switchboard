@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -82,6 +83,7 @@ def make_target(
     default_title: str | None = None,
     managed: bool = False,
     clear_done: bool = False,
+    escalate_when_nobody_home: bool = False,
 ) -> dict[str, Any]:
     """Build one row of `entry.options["targets"]` (the routing table).
 
@@ -125,6 +127,10 @@ def make_target(
     if clear_done:
         # v0.5 addendum (ADR-0019 §6): same discipline, same reason.
         row["clear_done"] = True
+    if escalate_when_nobody_home:
+        # v0.7 addendum (ADR-0021 §1): same discipline again -- absent means
+        # false, so every S1-S6 target keeps the exact dict it had.
+        row["escalate_when_nobody_home"] = True
     return row
 
 
@@ -134,6 +140,7 @@ def make_options(
     targets: list[dict[str, Any]],
     default_target: str,
     ttl_minutes: dict[str, int | None] | None = None,
+    critical_payload: bool | None = None,
 ) -> dict[str, Any]:
     """Build the full `entry.options` dict.
 
@@ -151,6 +158,11 @@ def make_options(
     }
     if ttl_minutes is not None:
         options["ttl_minutes"] = dict(ttl_minutes)
+    if critical_payload is not None:
+        # v0.7 addendum (ADR-0021 §7): a global boolean whose default is
+        # **on**, written only when a test turns it off, so every S1-S6 options
+        # dict keeps the exact keys it always had.
+        options["critical_payload"] = critical_payload
     return options
 
 
@@ -162,6 +174,7 @@ def make_entry(
     default_target: str,
     entry_id: str = DEFAULT_ENTRY_ID,
     ttl_minutes: dict[str, int | None] | None = None,
+    critical_payload: bool | None = None,
 ) -> MockConfigEntry:
     """Create and register (add_to_hass) a MockConfigEntry with the given options."""
     entry = MockConfigEntry(
@@ -175,6 +188,7 @@ def make_entry(
             targets=targets,
             default_target=default_target,
             ttl_minutes=ttl_minutes,
+            critical_payload=critical_payload,
         ),
     )
     entry.add_to_hass(hass)
@@ -275,8 +289,16 @@ def make_mobile_app_entry(
     device_name: str,
     user_id: str,
     webhook_id: str | None = None,
+    os_name: str = "iOS",
 ) -> MockConfigEntry:
-    """Register one Companion registration as a `mobile_app` config entry."""
+    """Register one Companion registration as a `mobile_app` config entry.
+
+    `os_name` is the registration key ADR-0021 §7 reads to decide which
+    critical-notification keys a Companion output understands
+    (`$HA_CORE_SRC/homeassistant/components/mobile_app/const.py`,
+    `ATTR_OS_NAME`). It keeps the `iOS` the S4 discovery tests have always
+    written, so nothing before Sprint 7 changes shape.
+    """
     slug = device_name.lower().replace(" ", "_")
     entry = MockConfigEntry(
         domain=MOBILE_APP_DOMAIN,
@@ -294,7 +316,7 @@ def make_mobile_app_entry(
             "device_name": device_name,
             "manufacturer": "Home Assistant",
             "model": "mobile_app",
-            "os_name": "iOS",
+            "os_name": os_name,
             "os_version": "18.0",
             "secret": "123abc",
             "supports_encryption": False,
@@ -326,8 +348,11 @@ def mobile_app_registration(hass, device_registry, entity_registry):
         *,
         user_id: str,
         binary_sensors: dict[str, str | None] | None = None,
+        os_name: str = "iOS",
     ) -> MockConfigEntry:
-        entry = make_mobile_app_entry(hass, device_name=device_name, user_id=user_id)
+        entry = make_mobile_app_entry(
+            hass, device_name=device_name, user_id=user_id, os_name=os_name
+        )
         device = device_registry.async_get_or_create(
             config_entry_id=entry.entry_id,
             identifiers={(MOBILE_APP_DOMAIN, entry.data["device_id"])},
@@ -454,7 +479,7 @@ def dismissals(hass) -> list:
 
 
 @pytest.fixture
-def real_alert(hass):
+async def real_alert(hass):
     """Set up one real `alert.*` watching one `binary_sensor`, and drive it.
 
     Returns an object with `begin()` / `end()`, which move the watched binary
@@ -469,8 +494,12 @@ def real_alert(hass):
     also called `notify.switchboard_<slug>` itself would route every message
     twice. Ending the alert calls `end_alerting`, which cancels the repeat
     (unlike `alert.turn_off`, which only sets `_ack`), so these tests leave no
-    lingering timer behind and need no `expected_lingering_timers` override.
+    lingering timer behind and need no `expected_lingering_timers` override --
+    provided every test that calls `begin()` also calls `end()`, which the
+    teardown below guarantees even for a test that fails first.
     """
+
+    made: list[Any] = []
 
     async def _make(object_id: str, *, repeat: int = 60, can_ack: bool = True):
         watched = f"binary_sensor.{object_id}_source"
@@ -505,6 +534,171 @@ def real_alert(hass):
                 hass.states.async_set(watched, "off")
                 await hass.async_block_till_done()
 
-        return _Alert()
+        made.append(_Alert())
+        return made[-1]
+
+    yield _make
+
+    # Safety net: a test whose assertion fails before its own `end()` would
+    # otherwise leave core's repeat armed and turn one red into a red plus a
+    # teardown error -- which hides what the red was about. `end_alerting`
+    # cancels it; ending an alert that is already idle is a no-op, so a test
+    # that ends its own alert is unaffected.
+    for alert in made:
+        await alert.end()
+
+
+# ---------------------------------------------------------------------------
+# Sprint 7 fixtures: the routing-table entity, scheduled floors, notify
+# entities (ADR-0021)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def routing_table_sensor(hass):
+    """Return the current `sensor.switchboard_routing_table` state object."""
+
+    def _get():
+        return hass.states.get("sensor.switchboard_routing_table")
+
+    return _get
+
+
+@pytest.fixture
+async def schedule_silence(hass):
+    """Set up one real `schedule.*` that is `on` all week, carrying block `data`.
+
+    ADR-0021 §2 reads a `min_priority` **state attribute** off a silence entity
+    that is `on`, and core's `schedule` is the documented way to produce one:
+    `Schedule._update`
+    (`$HA_CORE_SRC/homeassistant/components/schedule/__init__.py`) does
+    `self._attr_extra_state_attributes.update(current_data)` with the active
+    time range's `data:` (`CONF_DATA` in `.../schedule/const.py`, validated by
+    `CUSTOM_DATA_SCHEMA = vol.Schema({str: vol.Any(bool, str, int, float)})`).
+
+    Every day of the week is covered from `00:00:00` to `24:00` — which
+    `deserialize_to_time` turns into `time.max`, the "any time in the day is
+    smaller" case — so the entity is `on` whatever day the suite runs on and
+    the test needs no frozen clock.
+    """
+
+    made: list[str] = []
+
+    async def _make(object_id: str, data: dict[str, Any] | None = None) -> str:
+        block: dict[str, Any] = {"from": "00:00:00", "to": "24:00"}
+        if data is not None:
+            block["data"] = dict(data)
+        assert await async_setup_component(
+            hass,
+            "schedule",
+            {
+                "schedule": {
+                    object_id: {
+                        "name": object_id,
+                        "monday": [block],
+                        "tuesday": [block],
+                        "wednesday": [block],
+                        "thursday": [block],
+                        "friday": [block],
+                        "saturday": [block],
+                        "sunday": [block],
+                    }
+                }
+            },
+        )
+        await hass.async_block_till_done()
+        entity_id = f"schedule.{object_id}"
+        state = hass.states.get(entity_id)
+        assert state is not None and state.state == "on", (
+            f"{entity_id} must be `on` for this fixture to mean anything; got {state!r}"
+        )
+        made.append(entity_id)
+        return entity_id
+
+    yield _make
+
+    # A `Schedule` always arms a timer for its next event
+    # (`Schedule._update` -> `async_track_point_in_utc_time`), and cancels it
+    # only through the `async_on_remove(self._clean_up_listener)` its
+    # `async_added_to_hass` registers. Removing the entity is therefore the
+    # supported way to leave no lingering timer behind.
+    component = hass.data.get(DATA_INSTANCES, {}).get("schedule")
+    if component is not None:
+        for entity_id in made:
+            await component.async_remove_entity(entity_id)
+    await hass.async_block_till_done()
+
+
+@pytest.fixture
+async def notify_entity(hass):
+    """Add one real `NotifyEntity` to core's `notify` entity component.
+
+    ADR-0021 §6 delivers an output that is a `notify` **entity id** through
+    `notify.send_message`, so the test needs a real entity behind that service
+    rather than a mocked one: what is being pinned is that the router reaches
+    core's entity platform at all, and that `message` and `title` are the only
+    things that survive the trip.
+
+    Built the short way rather than through a mock integration and a mock
+    platform (`$HA_CORE_SRC/tests/components/notify/test_init.py` does the
+    long version): `notify`'s own `async_setup`
+    (`$HA_CORE_SRC/homeassistant/components/notify/__init__.py`) creates the
+    `EntityComponent` and registers `SERVICE_SEND_MESSAGE` on it, and adding
+    an entity to that component is all a platform would have done.
+
+    Usage:
+        phone = await notify_entity("living_room")          # supports a title
+        chime = await notify_entity("chime", title=False)   # does not
+        phone.messages -> [(message, title, kwargs), ...]
+    """
+    from homeassistant.components.notify import (  # noqa: PLC0415
+        DATA_COMPONENT,
+        NotifyEntity,
+        NotifyEntityFeature,
+    )
+
+    class _RecordingNotifyEntity(NotifyEntity):
+        """A notify entity that remembers exactly what core handed it."""
+
+        _attr_should_poll = False
+
+        def __init__(self, object_id: str, *, title: bool) -> None:
+            self.entity_id = f"notify.{object_id}"
+            self._attr_name = object_id
+            self._attr_unique_id = f"acceptance-{object_id}"
+            self._attr_supported_features = (
+                NotifyEntityFeature.TITLE if title else NotifyEntityFeature(0)
+            )
+            self.messages: list[tuple[str, str | None, dict[str, Any]]] = []
+
+        async def async_send_message(
+            self, message: str, title: str | None = None, **kwargs: Any
+        ) -> None:
+            self.messages.append((message, title, dict(kwargs)))
+
+    async def _make(object_id: str, *, title: bool = True):
+        assert await async_setup_component(hass, "notify", {})
+        entity = _RecordingNotifyEntity(object_id, title=title)
+        await hass.data[DATA_COMPONENT].async_add_entities([entity])
+        await hass.async_block_till_done()
+        assert hass.states.get(entity.entity_id) is not None, (
+            f"{entity.entity_id} must be in the state machine for the router to "
+            "resolve it (ADR-0021 §6)"
+        )
+        return entity
 
     return _make
+
+
+async def explain(hass, **data):
+    """Call `notify_switchboard.explain` the way a caller has to.
+
+    Shared with `test_s4_explain.py`, which has its own copy; this one lives in
+    `conftest.py` because four S7 files need it.
+    """
+    assert hass.services.has_service(DOMAIN, "explain"), (
+        f"{DOMAIN}.explain must exist (contract v0.4, ADR-0018 §1)"
+    )
+    return await hass.services.async_call(
+        DOMAIN, "explain", data, blocking=True, return_response=True
+    )
