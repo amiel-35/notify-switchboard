@@ -617,7 +617,10 @@ class Switchboard:
             self._async_record_output_failure(output)
             return False
 
-        self.failing_outputs.pop(output, None)
+        # The output answered: whatever the repair said about it is no longer
+        # true, and nothing else would ever delete a persisted issue.
+        if self.failing_outputs.pop(output, 0) > MAX_CONSECUTIVE_OUTPUT_MISSES:
+            ir.async_delete_issue(self.hass, DOMAIN, f"missing_output_{output}")
         return True
 
     @callback
@@ -1323,16 +1326,43 @@ class Switchboard:
         every slug and person the new table now knows about. The in-memory
         counters do not survive that reload, so the aggregated issue goes too:
         it describes a burst this process never saw.
+
+        The issue registry is persisted, so a repair nobody deletes outlives
+        the change it asked for: creating the missing row, or dropping the dead
+        output, has to make the warning go away. `unknown_target_<slug>` is
+        cleared for every slug the new table knows, and `missing_output_<x>`
+        for every output no person routes to any more (an output that is still
+        configured is cleared instead by the first call that succeeds, in
+        `_async_call_output`).
         """
         for slug in self.table.targets:
             ir.async_delete_issue(
                 self.hass, DOMAIN, f"invalid_service_{ATTR_TARGET}_{slug}"
             )
+            ir.async_delete_issue(self.hass, DOMAIN, f"unknown_target_{slug}")
+            self._reported_unknown_targets.discard(slug)
         for person in self.table.persons:
             ir.async_delete_issue(
                 self.hass, DOMAIN, f"invalid_service_{ATTR_PERSON}_{person}"
             )
         ir.async_delete_issue(self.hass, DOMAIN, ISSUE_INVALID_SERVICE_CALLS_MANY)
+
+        configured = {
+            output
+            for person in self.table.persons.values()
+            for output in person.outputs
+        }
+        registry = ir.async_get(self.hass)
+        orphaned = [
+            issue_id
+            for (domain, issue_id), issue in registry.issues.items()
+            if domain == DOMAIN
+            and issue.translation_key == "missing_output"
+            and issue.translation_placeholders is not None
+            and issue.translation_placeholders["output"] not in configured
+        ]
+        for issue_id in orphaned:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
 
     # ------------------------------------------------------------------
     # Temporary silence expiry
