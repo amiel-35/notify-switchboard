@@ -1175,6 +1175,141 @@ async def test_a_successful_call_clears_the_failure_counter(
     assert entry.runtime_data.switchboard.failing_outputs == {}
 
 
+async def test_the_unknown_target_repair_is_cleared_once_the_row_exists(
+    hass: HomeAssistant,
+) -> None:
+    """Adding the missing row is the fix; the warning has to go with it.
+
+    The issue registry is persisted, so without this the `unknown_target`
+    repair stayed on the user's dashboard forever after they created the row
+    it asked for.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify",
+        "switchboard",
+        {"message": "m", "target": ["fontaine"]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    registry = ir.async_get(hass)
+    assert (DOMAIN, "unknown_target_fontaine") in registry.issues
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak"), make_target("fontaine")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "unknown_target_fontaine") not in registry.issues
+
+
+async def test_an_unknown_target_still_unknown_keeps_its_repair(
+    hass: HomeAssistant,
+) -> None:
+    """A reload that changed something else must not silence the warning."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify",
+        "switchboard",
+        {"message": "m", "target": ["fontaine"]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak"), make_target("porte")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "unknown_target_fontaine") in ir.async_get(hass).issues
+
+
+async def test_the_missing_output_repair_is_cleared_when_it_answers(
+    hass: HomeAssistant,
+) -> None:
+    """An output that delivers again is not missing any more."""
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    async_mock_service(hass, "notify", "mobile_app_ghost")
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
+async def test_the_missing_output_repair_is_cleared_when_it_is_removed(
+    hass: HomeAssistant,
+) -> None:
+    """Dropping the dead output from the person's row also fixes the cause."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
 async def test_one_working_output_out_of_two_is_still_a_delivery(
     hass: HomeAssistant,
 ) -> None:
