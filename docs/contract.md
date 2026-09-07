@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.4 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.5 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -17,6 +17,14 @@
 > with its response keys, one optional routing-table row key (`managed`), two
 > more `repairs` keys, and the tag carried by a test message. Everything above
 > and below stays the v0 / v0.2 / v0.3 text, unchanged.
+>
+> v0.5 addendum (ADR-0019): two more drop reasons (`expired`, `not_notified`),
+> one global option and `data` key (`ttl_minutes`), one optional per-person key
+> (`summary`), one optional routing-table row key (`clear_done`), one more
+> `data` key (`switchboard_done`), and the default `tag` / `notification_id` a
+> message carries when the caller supplies none. The four
+> `event.switchboard_delivery` event types are unchanged. Everything above and
+> below stays the v0 / v0.2 / v0.3 / v0.4 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -264,6 +272,133 @@ steps travels the normal routing path — it is counted, evented, deferred or
 dropped like any other message — and carries `data.tag: switchboard-test`.
 That value is public: a caller, an automation or a Companion channel may rely
 on it to tell a test from the real thing.
+
+## v0.5 addendum (ADR-0019)
+
+### Two more drop reasons
+
+The reason list of §"Routing decision" gains exactly two values. The four
+`event.switchboard_delivery` event types — `routed`, `dropped`,
+`acknowledged`, `snoozed` — are **unchanged**; both new reasons travel in the
+existing `dropped` event and in the `reasons` attribute of
+`sensor.switchboard_dropped_today`, and both count towards it.
+
+| Reason | Meaning |
+|---|---|
+| `expired` | a deferred message whose time-to-live had run out when its flush came (see below). It is removed from the queue and never delivered |
+| `not_notified` | a `done` message for a person who received no message at all during the episode it closes (see below) |
+
+### `ttl_minutes` — a global option and a `data` key
+
+`entry.options["ttl_minutes"]` is an optional mapping from priority to a
+number of minutes, or `null` for "never expires":
+
+```yaml
+ttl_minutes:
+  info: 120       # default
+  normal: 720     # default
+  high: null      # default
+```
+
+The mapping and each of its keys are optional; an absent value means the
+default above. `critical` has no entry: a critical message is never deferred,
+so it can never expire.
+
+`data.ttl_minutes` on a call overrides the mapping for that message. The value
+is a number of minutes; `0` means **this message never expires**.
+
+A time-to-live applies to a **deferred** message and to nothing else. It is
+evaluated at each flush (the wake-time flush, the early flush below, and the
+catch-up flush after a restart) against the instant the message was queued;
+when it has run out the message is dropped with reason `expired`.
+
+### The wake-time summary, and the `summary` per-person key
+
+A person row may carry `summary: false`; absent means `true`.
+
+When more than one deferred message survives for a person at a flush — after
+the expired ones and the ones the re-decision drops have been removed — and
+that person's `summary` is on, they are delivered **one** notification per
+output instead of one per message:
+
+- `title`: the translated `common.summary_title`, carrying the number of lines
+  as `{count}`;
+- `message`: one line per surviving message, newest last, `\n`-joined;
+- messages sharing a `tag` are collapsed to the last one, across rows;
+- `data`: only the switchboard's own keys — `tag: switchboard-summary`,
+  `notification_id: switchboard-summary` for the `persistent_notification`
+  output, and the union of any `switchboard_*` keys of the collapsed
+  survivors. No caller key, no row `default_data`, and **no Companion
+  buttons**: neither `actions` nor `authenticationRequired`.
+
+With `summary: false`, or with exactly one surviving message, the message is
+delivered exactly as before: its own text, title, merged `data` and buttons.
+
+### A deferred message is re-decided in full at its flush
+
+A flush re-runs the whole routing decision — audience, presence rule, snooze,
+silence — against the world as it is at that moment, using the message's
+**original** priority.
+
+- Still routed: delivered (alone, or as one line of the summary).
+- Dropped with reason `silenced`: kept queued and re-armed, as before.
+- Dropped with any other reason: dropped for real, with that reason.
+
+### An early flush when the silence ends
+
+When the last of a person's configured `silence_entities` turns `off` and no
+temporary `notify_switchboard.silence` is running for them, their deferred
+messages are flushed immediately. `wake_time` remains the upper bound: nothing
+waits longer than it did before.
+
+### Episodes and the `done` message
+
+An **episode** is one run of a routing-table row's `alert_entity`, from that
+entity's `idle → on` transition to its `→ idle` transition. Episodes exist for
+every row that names an `alert_entity`, in observer mode or not. For each one
+the router remembers which persons actually received at least one of its
+messages, and which outputs were called. The record survives a restart.
+
+A **`done` message** — observer mode's `on|off → idle` message, or any call
+carrying `data.switchboard_done: true` — reaches only the persons in that set.
+Every other person in the row's audience is dropped with reason
+`not_notified`. A row with no `alert_entity` has no episodes, so a
+`switchboard_done: true` message on it is routed to the whole audience like
+any other.
+
+### The default `tag` and `notification_id`
+
+Every outgoing message carries a deterministic identity when the caller gives
+none:
+
+| Message | default `data.tag` |
+|---|---|
+| any message on row `<slug>` | `switchboard-<slug>` |
+| the `done` message of row `<slug>` | `switchboard-<slug>-done` |
+| a wake-time summary | `switchboard-summary` |
+
+`data.notification_id` defaults to the message's effective `tag` and is added
+for the `persistent_notification` output only. A caller-supplied `tag` or
+`notification_id` always wins.
+
+### Closing an episode on the channels it used
+
+When a row's `alert_entity` returns to `idle`, after the `done` message has
+been routed:
+
+- every `mobile_app_*` output that received a message of the episode is called
+  with `message: clear_notification` and `data.tag` set to a tag the episode's
+  messages carried — one call per such tag, which is one call in the ordinary
+  case where nobody overrode `data.tag`;
+- if the `persistent_notification` output received one,
+  `persistent_notification.dismiss` is called with the matching
+  `notification_id`;
+- if the row carries the new optional key **`clear_done: true`** (absent means
+  false), the `done` message itself is cleared the same way, on the
+  `mobile_app_*` outputs that received it.
+
+A clear is **not a message**: it is not counted, it fires no
+`event.switchboard_delivery`, and it is subject to no routing rule.
 
 ## Observer mode (plan B, ADR-007)
 

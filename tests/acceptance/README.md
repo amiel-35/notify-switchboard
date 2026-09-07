@@ -456,3 +456,115 @@ routes to, or for an alert that is perfectly fine, is worse than no repair.
   it — the options flow refuses such an output at config time, so it can only
   be reached through a hand-edited `.storage` file.
 - Which step the `test_result` form returns to when it is submitted.
+
+---
+
+## Sprint 5 (`test_s5_*.py`, and the v0.5 additions to `test_contract.py`)
+
+Executable specification for the v0.5 addendum, against `docs/contract.md`
+§"v0.5 addendum (ADR-0019)",
+`docs/ADR/0019-night-catch-up-and-closing-the-loop.md` and
+`docs/sprints/sprint-5-brief.md`. Same discipline as S1-S4: written before the
+implementation, and the coding agent must make them pass without modifying
+them. Every S1-S4 file keeps passing unmodified — Sprint 5 adds three optional
+options keys (`ttl_minutes`, `summary`, `clear_done`), two drop reasons and two
+`data` keys, and changes no routing rule for a message that is not deferred.
+
+| File | What it pins |
+|---|---|
+| `test_s5_ttl.py` | The per-priority defaults (`info` 120, `normal` 720, `high` none), the global `ttl_minutes` option, the per-call `data.ttl_minutes` override and its `0` opt-out, the new reason `expired`, and the fact that an expired deferral leaves the queue instead of waiting for the next night. |
+| `test_s5_summary.py` | Three deferrals, two sharing a `tag`, become one two-line notification whose title carries the line count and whose `data` is `{"tag": "switchboard-summary"}` and nothing else; `summary: false` delivers three; a single survivor is delivered plainly, with its own tag and its own buttons; `common.summary_title` exists in en/fr/es with a `{count}` placeholder. |
+| `test_s5_redecision.py` | A flush re-runs the whole decision: `presence` for somebody who left under a `home_only` row, `snoozed` for a row snoozed overnight, and — the half that must not change — `silenced` still holds the message instead of dropping it. The re-decision uses the message's original priority, not the row's current default. |
+| `test_s5_early_flush.py` | The last active silence entity turning `off` at 05:00 flushes before the 07:00 wake time, with **no timer fired**; it does not deliver twice at the wake time; a running temporary silence, or a second silence entity still `on`, holds the queue. |
+| `test_s5_episode.py` | A `done` message reaches only the persons the episode reached, through observer mode and through `data.switchboard_done: true`; the others are dropped with `not_notified`; the recipients survive a config-entry reload; an ordinary message is not filtered by the episode; a row with no `alert_entity` has no episodes at all. |
+| `test_s5_clear.py` | The default `data.tag` `switchboard-<slug>` and the `data.notification_id` that mirrors it on the `persistent_notification` output (and only there); a caller's own values winning; `clear_notification` sent to the `mobile_app_*` outputs the episode reached and `persistent_notification.dismiss` for the matching id when the episode ends; the done message's own `-done` tag; `clear_done`; and the fact that a clear is not counted as a routed message. |
+| `test_contract.py` | `expired` and `not_notified` as public drop reasons, `data.ttl_minutes` and `data.switchboard_done` as public input keys, and the default tag / notification id / summary tag values. |
+
+### Fixtures and helpers added in `conftest.py`
+
+- **`make_person(..., summary=False)`**, **`make_target(..., clear_done=True)`**
+  and **`make_options(..., ttl_minutes={...})`** write the three v0.5 options
+  keys. Each is only written when it differs from its default — `summary`
+  defaults to **on** so it is written only when `False`; `clear_done` defaults
+  to off and `ttl_minutes` is absent by default — so every S1-S4 row and every
+  S1-S4 options dict keeps the exact dict it had.
+- **`real_alert`** sets up one real `alert.*` watching one `binary_sensor` and
+  returns an object with `begin()` / `end()`. Those move the watched sensor,
+  so the alert goes through its own `idle → on` and `→ idle` transitions,
+  which is what an episode *is* (ADR-0019 §5). The alert carries no
+  `notifiers:` — the episode tests drive the router through observer mode or
+  through `data.switchboard_done`, and an alert that also called
+  `notify.switchboard_<slug>` would route everything twice — and `repeat` is
+  long enough never to fire inside a test.
+- **`drop_reasons`** returns the `reasons` attribute of
+  `sensor.switchboard_dropped_today` (assumption 2 of Sprint 1 still applies:
+  only `in`, never a container type or a count).
+- **`deferred_sensor`** mirrors `routed_sensor` / `dropped_sensor` for
+  `sensor.switchboard_deferred_today`.
+- **`dismissals`** captures `persistent_notification.dismiss` calls, which is
+  how the UI half of an episode is closed
+  (`$HA_CORE_SRC/homeassistant/components/persistent_notification/__init__.py`).
+
+### Moving time
+
+Exactly as the S1 deferral tests do it (`test_s1_observer.py`): the instance is
+pinned to `Europe/Paris` with `hass.config.async_set_time_zone`, the clock is
+moved with `freezer.move_to` to an **absolute UTC instant** whose local
+equivalent is written in a comment, and the wake-time timer is released with
+`async_fire_time_changed(hass, dt_util.utcnow())`. Nothing patches a constant:
+the 120 / 720 minute defaults are reached by waiting, so a red in
+`test_s5_ttl.py` is always behavioural.
+
+`test_s5_early_flush.py` deliberately does **not** fire a timer in its first
+test. The delivery there must be caused by the silence entity's state change
+alone; firing a timer as well would let an implementation that only reacts to
+`wake_time` look correct.
+
+### Assumptions added by Sprint 5
+
+15. **The summary's line format is structural, its title is translated.** The
+    tests assert how many lines there are, which messages and titles are in
+    them and in what order — never the bullet, the dash or the wording. The
+    title is asserted to exist and to carry the count; that
+    `common.summary_title` exists in en/fr/es with a `{count}` placeholder is
+    asserted separately, through
+    `homeassistant.helpers.translation.async_get_translations` on the `common`
+    category, the same way S3 reads entity names back.
+16. **`persistent_notification` is an output like any other**, named by its
+    bare legacy service name (`notify.persistent_notification`). It is what
+    the `notification_id` rule keys on, and the tests mock it with
+    `async_mock_service` exactly as they mock a Companion output.
+17. **The episode's tags are a set, normally of one.** ADR-0019 §6 gives every
+    message a default `data.tag`, so an episode has exactly one tag unless a
+    caller varied it; the clear is specified as one call per tag, and the
+    tests only ever exercise the one-tag case.
+18. **An episode ends when the `alert.*` reaches `idle`**, which for a real
+    alert means the watched entity left the alert state (`end_alerting`), not
+    an acknowledgement (`alert.turn_off`, which only sets `_ack` and leaves
+    the state at `off`). That is why these tests need no
+    `expected_lingering_timers` override: `end_alerting` cancels the repeat,
+    and the S1/S2 acknowledge tests are still the only three that cannot.
+19. **A clear is invisible to the counters.** `test_s5_clear.py` asserts
+    `sensor.switchboard_routed_today` counts the two real messages of an
+    episode and not the clears; nothing asserts a new event type, because
+    ADR-0019 adds none.
+
+### Tests that are green from the start, on purpose
+
+Following `test_s3_done_message.py` and the two S4 repairs tests: the negative
+half of a rule is worth pinning even when today's code already satisfies it.
+
+- `test_s5_summary.py::test_summary_off_delivers_every_message_one_by_one` —
+  a summary that cannot be turned off is worse than no summary.
+- `test_s5_redecision.py::test_a_deferral_still_silenced_at_the_flush_is_kept_not_dropped`
+  — a full re-decision must not start dropping messages because the night ran
+  late.
+- `test_s5_redecision.py::test_the_re_decision_uses_the_priority_the_message_was_queued_with`
+  — 0.4.0 has no TTL to fall into, but re-deciding with the row's current
+  default instead of the message's own priority is the most natural way to get
+  §3 wrong.
+- `test_s5_early_flush.py::test_no_early_flush_while_another_silence_entity_is_still_on`
+  — the line an over-eager §4 crosses first.
+- `test_s5_episode.py::test_a_row_without_an_alert_entity_has_no_episodes` —
+  `not_notified` must be unreachable for a household that never wrote an
+  `alert:` block.

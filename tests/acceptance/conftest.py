@@ -17,6 +17,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -43,14 +44,24 @@ def make_person(
     *,
     silence_entities: list[str] | None = None,
     wake_time: str | None = None,
+    summary: bool = True,
 ) -> dict[str, Any]:
-    """Build one row of `entry.options["persons"]`."""
-    return {
+    """Build one row of `entry.options["persons"]`.
+
+    `summary` is the v0.5 addendum (ADR-0019 §2): an optional per-person key
+    whose default is **on**, so it is only written when it is `False`. Every
+    S1-S4 person row therefore keeps the exact dict it always had, and an
+    absent key means "summarise".
+    """
+    row: dict[str, Any] = {
         "entity_id": entity_id,
         "outputs": list(outputs),
         "silence_entities": list(silence_entities or []),
         "wake_time": wake_time,
     }
+    if not summary:
+        row["summary"] = False
+    return row
 
 
 def make_target(
@@ -70,6 +81,7 @@ def make_target(
     done_message: str | None = None,
     default_title: str | None = None,
     managed: bool = False,
+    clear_done: bool = False,
 ) -> dict[str, Any]:
     """Build one row of `entry.options["targets"]` (the routing table).
 
@@ -77,7 +89,8 @@ def make_target(
     (ADR-0016, `docs/contract.md` "Per-row texts"): optional per-row texts,
     `None` by default so every Sprint 1 target keeps building the exact same
     row it always has. `managed` is the v0.4 addendum (ADR-0018) and is only
-    written when true, for the same reason.
+    written when true, for the same reason; so is `clear_done`, the v0.5
+    addendum (ADR-0019 §6), whose default is off.
     """
     row: dict[str, Any] = {
         "slug": slug,
@@ -100,6 +113,9 @@ def make_target(
         # written before 0.4.0 -- which is why it is only added when asked for.
         # Absent means false, so every S1-S3 row keeps the exact dict it had.
         row["managed"] = True
+    if clear_done:
+        # v0.5 addendum (ADR-0019 §6): same discipline, same reason.
+        row["clear_done"] = True
     return row
 
 
@@ -108,13 +124,25 @@ def make_options(
     persons: list[dict[str, Any]],
     targets: list[dict[str, Any]],
     default_target: str,
+    ttl_minutes: dict[str, int | None] | None = None,
 ) -> dict[str, Any]:
-    """Build the full `entry.options` dict."""
-    return {
+    """Build the full `entry.options` dict.
+
+    `ttl_minutes` is the v0.5 addendum (ADR-0019 §1): an optional *global*
+    mapping from priority to a number of minutes (or `None` for "never
+    expires"). It is only written when a test asks for one, so every S1-S4
+    options dict keeps the exact three keys it always had, and an absent
+    mapping means the documented defaults (`info` 120, `normal` 720,
+    `high` none).
+    """
+    options: dict[str, Any] = {
         "persons": persons,
         "targets": targets,
         "default_target": default_target,
     }
+    if ttl_minutes is not None:
+        options["ttl_minutes"] = dict(ttl_minutes)
+    return options
 
 
 def make_entry(
@@ -124,6 +152,7 @@ def make_entry(
     targets: list[dict[str, Any]],
     default_target: str,
     entry_id: str = DEFAULT_ENTRY_ID,
+    ttl_minutes: dict[str, int | None] | None = None,
 ) -> MockConfigEntry:
     """Create and register (add_to_hass) a MockConfigEntry with the given options."""
     entry = MockConfigEntry(
@@ -133,7 +162,10 @@ def make_entry(
         version=1,
         minor_version=1,
         options=make_options(
-            persons=persons, targets=targets, default_target=default_target
+            persons=persons,
+            targets=targets,
+            default_target=default_target,
+            ttl_minutes=ttl_minutes,
         ),
     )
     entry.add_to_hass(hass)
@@ -367,3 +399,103 @@ def selector_options(result, key: str) -> list[dict[str, str]]:
         option if isinstance(option, dict) else {"value": option, "label": option}
         for option in options
     ]
+
+
+# ---------------------------------------------------------------------------
+# Sprint 5 fixtures: the night, and closing an episode (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def deferred_sensor(hass):
+    """Return the current `sensor.switchboard_deferred_today` state object."""
+
+    def _get():
+        return hass.states.get("sensor.switchboard_deferred_today")
+
+    return _get
+
+
+@pytest.fixture
+def drop_reasons(hass):
+    """Return the `reasons` attribute of `sensor.switchboard_dropped_today`.
+
+    Assumption 2 of the Sprint 1 README applies: the container is only ever
+    tested with `in`, never for its type or its counts.
+    """
+
+    def _get():
+        state = hass.states.get("sensor.switchboard_dropped_today")
+        assert state is not None
+        return state.attributes["reasons"]
+
+    return _get
+
+
+@pytest.fixture
+def dismissals(hass) -> list:
+    """Capture `persistent_notification.dismiss` calls.
+
+    ADR-0019 §6 closes the UI half of an episode through core's own service
+    (`homeassistant/components/persistent_notification/__init__.py`: the
+    `dismiss` service, `SCHEMA_SERVICE_NOTIFICATION`, `async_dismiss`), so the
+    test watches that service rather than the notification store.
+    """
+    return async_mock_service(hass, "persistent_notification", "dismiss")
+
+
+@pytest.fixture
+def real_alert(hass):
+    """Set up one real `alert.*` watching one `binary_sensor`, and drive it.
+
+    Returns an object with `begin()` / `end()`, which move the watched binary
+    sensor and therefore the alert through the real transitions the router
+    subscribes to: `idle -> on` opens an episode, `-> idle` closes it
+    (`$HA_CORE_SRC/homeassistant/components/alert/entity.py`,
+    `begin_alerting` / `end_alerting`).
+
+    `repeat` is deliberately long enough never to fire during a test, and the
+    alert carries **no** `notifiers`: the episode tests drive the router
+    through observer mode or through `data.switchboard_done`, and an alert that
+    also called `notify.switchboard_<slug>` itself would route every message
+    twice. Ending the alert calls `end_alerting`, which cancels the repeat
+    (unlike `alert.turn_off`, which only sets `_ack`), so these tests leave no
+    lingering timer behind and need no `expected_lingering_timers` override.
+    """
+
+    async def _make(object_id: str, *, repeat: int = 60, can_ack: bool = True):
+        watched = f"binary_sensor.{object_id}_source"
+        hass.states.async_set(watched, "off")
+        assert await async_setup_component(
+            hass,
+            "alert",
+            {
+                "alert": {
+                    object_id: {
+                        "name": object_id,
+                        "entity_id": watched,
+                        "state": "on",
+                        "repeat": [repeat],
+                        "can_acknowledge": can_ack,
+                        "skip_first": True,
+                        "notifiers": [],
+                    }
+                }
+            },
+        )
+        await hass.async_block_till_done()
+
+        class _Alert:
+            entity_id = f"alert.{object_id}"
+
+            async def begin(self) -> None:
+                hass.states.async_set(watched, "on")
+                await hass.async_block_till_done()
+
+            async def end(self) -> None:
+                hass.states.async_set(watched, "off")
+                await hass.async_block_till_done()
+
+        return _Alert()
+
+    return _make
