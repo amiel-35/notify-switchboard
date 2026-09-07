@@ -21,11 +21,12 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import deque
 from collections.abc import Mapping
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol
 from homeassistant.const import (
@@ -88,6 +89,7 @@ from .const import (
     EVENT_TYPE_ROUTED,
     EVENT_TYPE_SNOOZED,
     ISSUE_INVALID_SERVICE_CALLS_MANY,
+    ISSUE_PERSON_WITHOUT_USER_ID,
     MAX_CONSECUTIVE_OUTPUT_MISSES,
     MAX_INVALID_SERVICE_CALLS,
     MAX_SILENCE_MINUTES,
@@ -120,6 +122,12 @@ if TYPE_CHECKING:
     from homeassistant.config_entries import ConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
+
+# How long one `notify.<output>` call may take before the router abandons it
+# (contract v0.3, ADR-0017 §3). Deliberately a plain module constant: it is a
+# backstop against a hung push service, not a tuning knob, and the acceptance
+# suite patches it here rather than waiting half a minute for a timeout.
+OUTPUT_TIMEOUT_SECONDS: Final = 30
 
 NOTIFY_DOMAIN = "notify"
 ALERT_DOMAIN = "alert"
@@ -192,6 +200,11 @@ class Switchboard:
         # slug or a person the user has just added stops being "invalid".
         self._async_clear_fixed_service_issues()
 
+        # Same moment, same reason: linking a `person.*` to a Home Assistant
+        # user is a deliberate change the user makes in Settings > People, not
+        # a routing event, so the repair is (re)evaluated on reload.
+        self._async_review_person_user_ids()
+
         self._unsubs.append(
             self.hass.bus.async_listen(
                 EVENT_MOBILE_APP_NOTIFICATION_ACTION, self._async_handle_action_event
@@ -257,8 +270,14 @@ class Switchboard:
 
     @callback
     def _async_stop_event(self, _event: Event) -> None:
-        """Cancel timers when Home Assistant shuts down."""
-        self.async_cancel_timers()
+        """Detach everything when Home Assistant shuts down.
+
+        Config entries are not unloaded on shutdown, so nothing else runs
+        `async_shutdown`: without this, the midnight counter reset armed by
+        `async_track_time_change`, the bus listener and the state trackers all
+        outlive the event loop they were scheduled on.
+        """
+        self.async_shutdown()
 
     @callback
     def async_cancel_timers(self) -> None:
@@ -400,8 +419,7 @@ class Switchboard:
 
             self._async_count_drop(drop.reason, drop.person, drop.slug)
 
-        for routed in decision.routed:
-            await self._async_deliver(routed, request.message, request.title)
+        await self._async_deliver_all(decision, request.message, request.title)
 
         if store_dirty:
             await self.store.async_save()
@@ -411,6 +429,41 @@ class Switchboard:
     # ------------------------------------------------------------------
     # Delivery
     # ------------------------------------------------------------------
+
+    async def _async_deliver_all(
+        self, decision: RoutingDecision, message: str, title: str | None
+    ) -> None:
+        """Deliver every routed message of one decision, concurrently.
+
+        Contract v0.3 §"Fan-out guarantees" (ADR-0017 §3): the persons of one
+        decision are served at the same time, so the wall time of a decision is
+        bounded by its slowest single output rather than by the sum of them all.
+        `return_exceptions=True` is the shape core itself uses when one member
+        of a fan-out must not abort the others
+        (`homeassistant/helpers/entity_platform.py`, `async_add_entities`;
+        `homeassistant/core.py`, the shutdown-jobs gather).
+
+        Counts and per-person outcomes are promised; the order of the resulting
+        `event.switchboard_delivery` events is explicitly not.
+        """
+        if not decision.routed:
+            return
+
+        results = await asyncio.gather(
+            *(
+                self._async_deliver(routed, message, title)
+                for routed in decision.routed
+            ),
+            return_exceptions=True,
+        )
+        for routed, result in zip(decision.routed, results, strict=True):
+            if isinstance(result, BaseException):  # pragma: no cover - guard
+                _LOGGER.exception(
+                    "Unexpected error while delivering %s to %s",
+                    routed.slug,
+                    routed.person,
+                    exc_info=result,
+                )
 
     async def _async_deliver(
         self, routed: RoutedDelivery, message: str, title: str | None
@@ -428,12 +481,16 @@ class Switchboard:
             title = target.default_title
 
         payload = await self._async_build_payload(target, routed)
-        delivered = False
-        for output in routed.outputs:
-            if await self._async_call_output(
-                output, message, title, payload, target.slug
-            ):
-                delivered = True
+        # Every output of this person at once, each bounded by its own timeout:
+        # a phone off the network must not hold back the tablet next to it.
+        outcomes = await asyncio.gather(
+            *(
+                self._async_call_output(output, message, title, payload, target.slug)
+                for output in routed.outputs
+            ),
+            return_exceptions=True,
+        )
+        delivered = any(outcome is True for outcome in outcomes)
 
         if not delivered:
             # Every output of this person failed or does not exist: the
@@ -510,9 +567,27 @@ class Switchboard:
             service_data["data"] = data
 
         try:
-            await self.hass.services.async_call(
-                domain, service, service_data, blocking=True
+            # `blocking=True` is a direct `await` of the handler's coroutine
+            # (`homeassistant/core.py`, `ServiceRegistry.async_call`: "response_data
+            # = await coro"), so cancelling here really does abandon the call
+            # instead of leaving a detached task running behind it.
+            async with asyncio.timeout(OUTPUT_TIMEOUT_SECONDS):
+                await self.hass.services.async_call(
+                    domain, service, service_data, blocking=True
+                )
+        except TimeoutError:
+            # ADR-0017 §3: a timeout is recorded exactly like any other failed
+            # output -- same counter, same repair, same `delivery_failed` drop
+            # when every output of the person failed. No new drop reason.
+            _LOGGER.warning(
+                "Output %s.%s did not answer within %s s for target %s; abandoned",
+                domain,
+                service,
+                OUTPUT_TIMEOUT_SECONDS,
+                slug,
             )
+            self._async_record_output_failure(output)
+            return False
         except (HomeAssistantError, vol.Invalid) as err:
             _LOGGER.error(
                 "Output %s.%s failed for target %s: %s", domain, service, slug, err
@@ -777,8 +852,7 @@ class Switchboard:
         if not user_id:
             return None
         for entity_id in self.table.persons:
-            state = self.hass.states.get(entity_id)
-            if state is not None and state.attributes.get(ATTR_USER_ID) == user_id:
+            if self._person_user_id(entity_id) == user_id:
                 return entity_id
         return None
 
@@ -940,6 +1014,19 @@ class Switchboard:
         if not isinstance(device_id, str) or not device_id:
             return known
 
+        # ADR-0017 §4: from here on we are on the fallback path. It has never
+        # been verified against a real Companion device
+        # (`docs/known-issues.md`), so it is reached only because the canonical
+        # `person.user_id` link did not resolve -- which is itself reported as
+        # a `person_without_user_id` repair.
+        _LOGGER.debug(
+            "No person.user_id matched context user_id=%s for target %s; "
+            "falling back to the device_id %s",
+            user_id,
+            target.slug,
+            device_id,
+        )
+
         registry = dr.async_get(self.hass)
         device = registry.async_get(device_id) or registry.async_get_device(
             identifiers={(MOBILE_APP_DOMAIN, device_id)}
@@ -962,6 +1049,11 @@ class Switchboard:
         for candidate in candidates:
             person = self.table.person_for_output(candidate)
             if person is not None and person.entity_id in known:
+                _LOGGER.debug(
+                    "Resolved %s from the device_id fallback (output %s)",
+                    person.entity_id,
+                    candidate,
+                )
                 return [person.entity_id]
 
         return known
@@ -1456,6 +1548,81 @@ class Switchboard:
             attributes,
             context,
         )
+
+    @callback
+    def _async_review_person_user_ids(self) -> None:
+        """Raise (or clear) one `person_without_user_id` repair per person.
+
+        ADR-0017 §4: `context.user_id` -> `person.user_id` is the canonical way
+        to tell *who* tapped a Companion button, and it simply cannot work for a
+        `person.*` that is not linked to a Home Assistant user. Such a person
+        silently gets the documented "act on the whole audience" fallback
+        instead, which is a configuration gap the user can close in
+        Settings > People -- so it is a repair (`is_fixable=False`: there is
+        nothing this integration can do about it), not a log line.
+
+        Only persons in the audience of a row that actually adds buttons
+        (`allow_acknowledge`, or a non-empty `snooze_minutes`) are concerned:
+        without a button there is no callback to resolve. One issue per person,
+        not per (person, row).
+
+        Issues whose cause is gone are deleted, including those raised for a
+        person the routing table no longer knows -- the issue registry is
+        persisted, so nothing else would ever clear them.
+        """
+        unlinked = {
+            person_id: self._person_issue_id(person_id)
+            for person_id in self._persons_needing_a_user_id()
+            if not self._person_user_id(person_id)
+        }
+
+        wanted = set(unlinked.values())
+        registry = ir.async_get(self.hass)
+        stale = [
+            issue_id
+            for (domain, issue_id), issue in registry.issues.items()
+            if domain == DOMAIN
+            and issue.translation_key == ISSUE_PERSON_WITHOUT_USER_ID
+            and issue_id not in wanted
+        ]
+        for issue_id in stale:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
+        for person_id, issue_id in unlinked.items():
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_PERSON_WITHOUT_USER_ID,
+                translation_placeholders={"person": person_id},
+            )
+
+    @staticmethod
+    def _person_issue_id(person_id: str) -> str:
+        """Return the `repairs` issue id used for one person."""
+        return f"{ISSUE_PERSON_WITHOUT_USER_ID}_{person_id}"
+
+    def _persons_needing_a_user_id(self) -> list[str]:
+        """Return the persons a Companion callback may have to resolve."""
+        concerned: list[str] = []
+        for person_id in self.table.persons:
+            if any(
+                person_id in target.audience
+                and (target.allow_acknowledge or target.snooze_minutes)
+                for target in self.table.targets.values()
+            ):
+                concerned.append(person_id)
+        return concerned
+
+    def _person_user_id(self, person_id: str) -> str | None:
+        """Return the Home Assistant user a `person.*` is linked to, if any."""
+        state = self.hass.states.get(person_id)
+        if state is None:
+            return None
+        user_id = state.attributes.get(ATTR_USER_ID)
+        return str(user_id) if user_id else None
 
     @callback
     def _async_report_unknown_target(self, slug: str) -> None:

@@ -206,6 +206,9 @@ ERROR_UNKNOWN_PERSON: Final = "unknown_person"
 ERROR_PERSON_NOT_IN_AUDIENCE: Final = "person_not_in_audience"
 ERROR_INVALID_SILENCE_MINUTES: Final = "invalid_silence_minutes"
 ERROR_NO_AUDIENCE: Final = "no_audience"
+# Raised by every UI service when the integration is set up but no config entry
+# is loaded (v0.3, ADR-0017 §5: the services live in `async_setup`).
+ERROR_NO_LOADED_ENTRY: Final = "no_loaded_entry"
 
 # The smallest temporary silence that has a defined meaning (ADR-0016:
 # `silence(minutes: 0)` is refused, zero has no meaning).
@@ -250,6 +253,15 @@ MAX_TRACKED_INVALID_SERVICE_CALLS: Final = 20
 
 # The aggregated `repairs` issue id/translation key used past that bound.
 ISSUE_INVALID_SERVICE_CALLS_MANY: Final = "invalid_service_calls_many"
+
+# The per-output fan-out timeout lives in `dispatcher.OUTPUT_TIMEOUT_SECONDS`,
+# not here: ADR-0017 §3 fixes that module and that name so the acceptance suite
+# can patch it instead of waiting 30 seconds.
+
+# The `repairs` issue raised for a person who is in the audience of a row that
+# adds Companion buttons but whose `person.*` is not linked to a Home Assistant
+# user, so `context.user_id` can never resolve them (v0.3, ADR-0017 §4).
+ISSUE_PERSON_WITHOUT_USER_ID: Final = "person_without_user_id"
 
 # Number of decisions kept in memory for diagnostics.
 DIAGNOSTICS_DECISION_LOG_SIZE: Final = 20
