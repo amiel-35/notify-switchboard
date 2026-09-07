@@ -31,6 +31,7 @@ from .const import (
     CONF_DEFAULT_TARGET,
     CONF_DEFAULT_TITLE,
     CONF_DONE_MESSAGE,
+    CONF_MANAGED,
     CONF_MESSAGE,
     CONF_OBSERVER_MODE,
     CONF_OUTPUTS,
@@ -113,6 +114,11 @@ class TargetConfig:
     message: str | None = None
     done_message: str | None = None
     default_title: str | None = None
+    # v0.4 addendum (ADR-0018 §4). Absent in the options means False, so every
+    # row written before 0.4.0 keeps behaving exactly as it does today. It
+    # changes nothing about routing: it only tells the options flow that this
+    # row's audience is the router's to keep in sync.
+    managed: bool = False
 
     @property
     def service_name(self) -> str:
@@ -265,6 +271,7 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
         message=_optional_text(raw.get(CONF_MESSAGE)),
         done_message=_optional_text(raw.get(CONF_DONE_MESSAGE)),
         default_title=_optional_text(raw.get(CONF_DEFAULT_TITLE)),
+        managed=bool(raw.get(CONF_MANAGED)),
     )
 
 

@@ -1,4 +1,4 @@
-# Quality scale self-assessment for Notify Switchboard (router 0.3.0).
+# Quality scale self-assessment for Notify Switchboard (router 0.4.0).
 #
 # Every rule of every tier is assessed: `done`, `todo` with a one-line reason,
 # or `exempt` with a one-line reason. Nothing is left "not assessed yet"
@@ -11,7 +11,8 @@ rules:
   action-setup:
     status: done
     comment: >-
-      The five notify_switchboard.* actions are registered in async_setup
+      The six notify_switchboard.* actions -- the five of v0.2 plus the
+      read-only explain of v0.4 -- are registered in async_setup
       (__init__.async_setup); a call made while no config entry is loaded
       raises a translated ServiceValidationError (no_loaded_entry).
   appropriate-polling:
@@ -29,8 +30,11 @@ rules:
   docs-actions:
     status: done
     comment: >-
-      services.yaml describes the five actions and their fields; README.md
-      "Services" and docs/contract.md document what each one refuses and why.
+      services.yaml describes the five acting actions and their fields, and
+      strings.json documents explain as well; README.md "Services" and
+      docs/contract.md document what each one refuses and why. explain has no
+      services.yaml block yet, and only for the reason recorded in
+      docs/known-issues.md.
   docs-conditions:
     status: exempt
     comment: This integration does not have any conditions.
@@ -101,9 +105,9 @@ rules:
     comment: >-
       99% overall and at or above the 95% bar on every module, with an
       acceptance suite that is written before the code and never modified to
-      make it pass. The routing modules (router, validation) and the two that
-      were previously under the bar (store, diagnostics) are at 100%; the
-      lowest are config_flow.py and legacy.py at 97%.
+      make it pass. The routing modules (router, validation) and most of the
+      rest are at 100%; the lowest is legacy.py at 97%, with config_flow.py and
+      dispatcher.py at 99% after the Sprint 4 additions.
 
   # -------------------------------------------------------------------- Gold
   devices:
@@ -114,7 +118,11 @@ rules:
   diagnostics: done
   discovery:
     status: exempt
-    comment: A helper integration with nothing on the network to discover.
+    comment: >-
+      A helper integration with nothing on the network to discover. What v0.4
+      discovers -- a person's Companion push services and their Focus sensors --
+      is read out of existing config entries inside the options flow, which is
+      not what this rule means.
   discovery-update-info:
     status: exempt
     comment: Same reasoning as discovery.
@@ -189,16 +197,18 @@ rules:
   repair-issues:
     status: done
     comment: >-
-      Six translated repairs (unknown_target, missing_output,
+      Eight translated repairs (unknown_target, missing_output,
       invalid_service_target/person, invalid_service_calls_many,
-      person_without_user_id), each deleted when its cause is gone -- the two
+      person_without_user_id, and the v0.4 person_without_outputs and
+      alert_entity_missing), each deleted when its cause is gone -- the two
       that cannot know their own cause is gone are listed in
       docs/known-issues.md.
   stale-devices:
     status: todo
     comment: >-
-      Removing a person from the routing table leaves their virtual device in
-      the registry; the cleanup belongs with the zero-config sprint (S4).
+      Removing a person from the routing table still leaves their virtual
+      device in the registry. Router S4 was scoped to discovery, defaults and
+      diagnosis and did not take it up; it stays open for a later sprint.
 
   # ---------------------------------------------------------------- Platinum
   async-dependency:

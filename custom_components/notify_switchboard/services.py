@@ -41,17 +41,25 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import voluptuous as vol
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
     ATTR_MINUTES,
     ATTR_PERSON,
+    ATTR_PRIORITY,
     ATTR_TARGET,
     DOMAIN,
     ERROR_NO_LOADED_ENTRY,
     SERVICE_ACKNOWLEDGE,
+    SERVICE_EXPLAIN,
     SERVICE_SILENCE,
     SERVICE_SNOOZE,
     SERVICE_UNSILENCE,
@@ -87,6 +95,19 @@ SILENCE_SCHEMA = vol.Schema(
 
 UNSILENCE_SCHEMA = vol.Schema({vol.Required(ATTR_PERSON): cv.entity_id})
 
+# `priority` is deliberately `cv.string` rather than `vol.In(VALID_PRIORITIES)`:
+# ADR-0018 §1 says it "defaults to the row's `default_priority`, exactly as
+# `data.priority` does on a real call", and `router.resolve_priority` already
+# falls back to the row for anything it does not recognise. Refusing here would
+# make `explain` stricter than the call it is explaining.
+EXPLAIN_SCHEMA = vol.Schema(
+    {
+        vol.Required(ATTR_TARGET): cv.string,
+        vol.Optional(ATTR_PRIORITY): cv.string,
+        vol.Optional(ATTR_PERSON): cv.entity_id,
+    }
+)
+
 
 @callback
 def async_loaded_switchboard(hass: HomeAssistant) -> Switchboard:
@@ -108,11 +129,13 @@ def async_loaded_switchboard(hass: HomeAssistant) -> Switchboard:
 
 @callback
 def async_register_services(hass: HomeAssistant) -> None:
-    """Register the five UI services, once, for the integration.
+    """Register the six `notify_switchboard.*` actions, once, for the integration.
 
     Called from `async_setup`, so an automation referencing one of them
     validates at startup whether or not a config entry is loaded
-    (quality-scale rule `action-setup`).
+    (quality-scale rule `action-setup`). `explain` (v0.4, ADR-0018 §1) is
+    registered here too and obeys the same rule: with no loaded entry it raises
+    `no_loaded_entry` like the other five.
     """
 
     async def _acknowledge(call: ServiceCall) -> None:
@@ -158,6 +181,26 @@ def async_register_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_SILENCE, _silence, schema=SILENCE_SCHEMA
     )
+
+    async def _explain(call: ServiceCall) -> ServiceResponse:
+        return await async_loaded_switchboard(hass).async_explain(
+            call.data[ATTR_TARGET],
+            call.data.get(ATTR_PRIORITY),
+            call.data.get(ATTR_PERSON),
+        )
+
     hass.services.async_register(
         DOMAIN, SERVICE_UNSILENCE, _unsilence, schema=UNSILENCE_SCHEMA
+    )
+    # `SupportsResponse.ONLY` (`homeassistant/core.py`, SupportsResponse line
+    # 2539, async_register line 2725): there is nothing to do with a call that
+    # discards the answer, and core turns that into a loud refusal
+    # (`service_lacks_response_request`, lines 2914-2918) instead of a silent
+    # no-op.
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_EXPLAIN,
+        _explain,
+        schema=EXPLAIN_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
     )

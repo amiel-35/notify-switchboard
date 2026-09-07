@@ -51,6 +51,12 @@ CONF_SNOOZE_MINUTES: Final = "snooze_minutes"
 CONF_DEFAULT_DATA: Final = "default_data"
 CONF_OBSERVER_MODE: Final = "observer_mode"
 
+# v0.4 addendum (ADR-0018 §4): the only new options key of 0.4.0. Optional on
+# every row, absent means false, so no storage migration is needed. While it is
+# true the router keeps the row's audience in sync with the configured persons;
+# submitting the row editor clears it, permanently.
+CONF_MANAGED: Final = "managed"
+
 # Per-row optional texts (v0.2 addendum, ADR-0016). All three default to None,
 # so a Sprint 1 row keeps behaving exactly as it did.
 CONF_MESSAGE: Final = "message"
@@ -78,6 +84,19 @@ ATTR_REASONS: Final = "reasons"
 # `PersonEntityStateAttribute.USER_ID`). Spelled out here rather than imported
 # so the integration keeps no dependency on the `person` component.
 ATTR_USER_ID: Final = "user_id"
+
+# The tag every message sent by the options flow's "test this person" /
+# "test this target" steps carries under `data.tag` (contract v0.4,
+# ADR-0018 §6). Public: a caller, an automation or a Companion channel may
+# rely on it to tell a test from the real thing.
+TEST_MESSAGE_TAG: Final = "switchboard-test"
+
+# The routing-table row the first person creates on an empty table
+# (ADR-0018 §4). Its name is translated (`common.default_target_name`); its
+# slug and class are not, because the slug is a public service name and the
+# class is free text the user groups rows by.
+DEFAULT_TARGET_SLUG: Final = "default"
+DEFAULT_TARGET_CLASS: Final = "general"
 
 # ---------------------------------------------------------------------------
 # Priorities
@@ -192,6 +211,25 @@ UI_SERVICES: Final[tuple[str, ...]] = (
     SERVICE_UNSILENCE,
 )
 
+# The read-only sixth service (contract v0.4, ADR-0018 §1). It is registered
+# next to the five above, with `SupportsResponse.ONLY`, and it acts on nothing.
+SERVICE_EXPLAIN: Final = "explain"
+
+# Keys of an `explain` response (contract v0.4: "the response is a mapping with
+# three keys ... Each person's value has exactly these keys").
+ATTR_PERSONS: Final = "persons"
+ATTR_DECISION: Final = "decision"
+ATTR_UNTIL: Final = "until"
+ATTR_REASON: Final = "reason"
+ATTR_DETAIL: Final = "detail"
+ATTR_OUTPUTS: Final = "outputs"
+ATTR_MISSING_OUTPUTS: Final = "missing_outputs"
+
+# The three values `decision` can take. No fourth one without an ADR.
+DECISION_ROUTED: Final = "routed"
+DECISION_DEFERRED: Final = "deferred"
+DECISION_DROPPED: Final = "dropped"
+
 # Service call fields.
 ATTR_TARGET: Final = "target"
 ATTR_MINUTES: Final = "minutes"
@@ -262,6 +300,12 @@ ISSUE_INVALID_SERVICE_CALLS_MANY: Final = "invalid_service_calls_many"
 # adds Companion buttons but whose `person.*` is not linked to a Home Assistant
 # user, so `context.user_id` can never resolve them (v0.3, ADR-0017 §4).
 ISSUE_PERSON_WITHOUT_USER_ID: Final = "person_without_user_id"
+
+# The two consistency repairs of v0.4 (ADR-0018 §5). Both are `is_fixable=False`
+# -- the fix is in the user's configuration, not in this integration -- raised
+# once and deleted when their cause disappears on the next reload.
+ISSUE_PERSON_WITHOUT_OUTPUTS: Final = "person_without_outputs"
+ISSUE_ALERT_ENTITY_MISSING: Final = "alert_entity_missing"
 
 # Number of decisions kept in memory for diagnostics.
 DIAGNOSTICS_DECISION_LOG_SIZE: Final = 20

@@ -3,7 +3,21 @@
   "common": {
     "acknowledge": "Acknowledge",
     "snooze_minutes": "Snooze {minutes} min",
-    "back_to_normal": "Back to normal"
+    "back_to_normal": "Back to normal",
+    "this_persons_device": "this person's device",
+    "default_target_name": "Everybody",
+    "test_message": "Notify Switchboard test message.",
+    "detail_routed": "This message would be handed to {outputs}.",
+    "detail_deferred": "{person} is silenced by {entities} and has a wake time, so this message would be queued and delivered at {until}.",
+    "detail_dropped": "This message would be dropped for {person}, reason {reason}.",
+    "detail_presence": "The presence rule of this target is {rule}, and {person} is currently {state}.",
+    "detail_silenced": "{person} is silenced by {entities}. Only a critical message would get through.",
+    "detail_silenced_temporary": "{person} is silenced by notify_switchboard.silence until {until}. Only a critical message would get through.",
+    "detail_snoozed": "{person} has snoozed the target {target} until {until}.",
+    "detail_no_outputs": "No notify service is configured for {person}, so there is nowhere to send this.",
+    "detail_not_in_audience": "{person} is not in the audience of the target {target}.",
+    "detail_unknown_person": "The target {target} names {person}, who is not in the Notify Switchboard table.",
+    "detail_recursion": "Every notify service configured for {person} points back at Notify Switchboard, which would recurse."
   },
   "entity": {
     "binary_sensor": {
@@ -57,23 +71,19 @@
           "target": "Add or update a target",
           "edit_target": "Edit a target",
           "remove_target": "Remove a target",
-          "general": "Default target"
+          "general": "Default target",
+          "test_person": "Test a person",
+          "test_target": "Test a target"
         }
       },
       "person": {
         "title": "Person",
-        "description": "Which notify services reach this person, and when they are silent.",
+        "description": "Pick the person to add or edit. The next step offers the notify services and the Focus sensors that belong to their phones.",
         "data": {
-          "entity_id": "Person",
-          "outputs": "Notify services",
-          "silence_entities": "Silence entities",
-          "wake_time": "Wake time"
+          "entity_id": "Person"
         },
         "data_description": {
-          "entity_id": "The person.* entity whose presence decides whether this person is notified.",
-          "outputs": "Notify service names without the notify. prefix, for example mobile_app_alice. A service that does not exist yet is tolerated and retried.",
-          "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor.",
-          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+          "entity_id": "The person.* entity whose presence decides whether this person is notified."
         }
       },
       "edit_person": {
@@ -152,6 +162,48 @@
         "data_description": {
           "default_target": "Used by notify.switchboard when no target is given, and by the notify entity."
         }
+      },
+      "person_outputs": {
+        "title": "Notify services and silence",
+        "description": "Which notify services reach this person, and when they are silent. The services of the phones registered to this person's Home Assistant user are listed first and already selected.",
+        "data": {
+          "outputs": "Notify services",
+          "silence_entities": "Silence entities",
+          "wake_time": "Wake time"
+        },
+        "data_description": {
+          "outputs": "Pick from the notify services this instance has, or type one that does not exist yet: it is tolerated and retried.",
+          "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor. An iPhone Focus sensor is proposed automatically.",
+          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+        }
+      },
+      "target_saved": {
+        "title": "Target saved",
+        "description": "Here is the alert: block this row expects. Copy it into your YAML configuration, point entity_id at the entity to watch, then reload the YAML configuration.\n\n{snippet}"
+      },
+      "test_target": {
+        "title": "Test a target",
+        "description": "Send one real test message through this row, to everybody its audience reaches.",
+        "data": {
+          "slug": "Target"
+        },
+        "data_description": {
+          "slug": "The routing-table row to test. The message is counted and evented like any other."
+        }
+      },
+      "test_person": {
+        "title": "Test a person",
+        "description": "Send one real test message to this person, through the row that reaches them.",
+        "data": {
+          "entity_id": "Person"
+        },
+        "data_description": {
+          "entity_id": "The default target is used when it reaches this person, otherwise the first row whose audience contains them."
+        }
+      },
+      "test_result": {
+        "title": "Test result",
+        "description": "The message has been sent. Here is what the router decided for each person:\n\n{result}"
       }
     },
     "error": {
@@ -175,7 +227,8 @@
     "abort": {
       "nothing_to_remove": "There is nothing to remove yet.",
       "nothing_to_edit": "There is nothing to edit yet.",
-      "nothing_to_configure": "Add a target first."
+      "nothing_to_configure": "Add a target first.",
+      "nothing_to_test": "No routing-table row has this person in its audience, so there is nothing to send them. Add them to a target's audience first."
     }
   },
   "issues": {
@@ -202,6 +255,14 @@
     "person_without_user_id": {
       "title": "A person is not linked to a Home Assistant user",
       "description": "{person} receives notifications with Acknowledge or Snooze buttons, but their person entity is not linked to a Home Assistant user. Notify Switchboard therefore cannot tell who pressed a button, and applies the action to everybody in the target's audience instead. Link them under Settings > People, then reload Notify Switchboard."
+    },
+    "person_without_outputs": {
+      "title": "A person has no notify service",
+      "description": "{person} is in the audience of at least one routing-table row but has no notify service at all, so every message meant for them is dropped with reason no_outputs. Open the Notify Switchboard options, edit that person and give them at least one notify service."
+    },
+    "alert_entity_missing": {
+      "title": "A target points at an alert that does not exist",
+      "description": "The routing-table row {slug} is tied to {entity_id}, which is not in the state machine. The row acknowledges nothing and observes nothing. Write that alert: block, or clear the alert field of the row, then reload Notify Switchboard."
     }
   },
   "exceptions": {
@@ -294,6 +355,24 @@
         "person": {
           "name": "Person",
           "description": "The person whose silence to lift."
+        }
+      }
+    },
+    "explain": {
+      "name": "Explain",
+      "description": "Answers what would happen to a message sent to a routing-table row right now, per person, without sending anything. Call it with return_response.",
+      "fields": {
+        "target": {
+          "name": "Target",
+          "description": "The slug of the routing-table row to evaluate."
+        },
+        "priority": {
+          "name": "Priority",
+          "description": "The priority to evaluate with. Leave empty to use the row's default priority, exactly as a real call does."
+        },
+        "person": {
+          "name": "Person",
+          "description": "Whom to answer about. Leave empty for every person in the row's audience."
         }
       }
     }

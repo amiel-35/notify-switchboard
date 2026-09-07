@@ -53,6 +53,7 @@ from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import (
     EventStateChangedData,
+    async_call_later,
     async_track_point_in_time,
     async_track_state_change_event,
     async_track_time_change,
@@ -65,16 +66,30 @@ from .const import (
     ACTION_ACKNOWLEDGE,
     ATTR_ACTIONS,
     ATTR_AUTHENTICATION_REQUIRED,
+    ATTR_DECISION,
+    ATTR_DETAIL,
+    ATTR_MISSING_OUTPUTS,
+    ATTR_OUTPUTS,
     ATTR_PERSON,
+    ATTR_PERSONS,
+    ATTR_PRIORITY,
+    ATTR_REASON,
+    ATTR_TAG,
     ATTR_TARGET,
+    ATTR_UNTIL,
     ATTR_USER_ID,
     AUTHENTICATED_PRIORITIES,
     COMPANION_OUTPUT_PREFIX,
+    DECISION_DEFERRED,
+    DECISION_DROPPED,
+    DECISION_ROUTED,
     DELIVERY_EVENT_TYPES,
     DIAGNOSTICS_DECISION_LOG_SIZE,
     DOMAIN,
     DROP_DELIVERY_FAILED,
+    DROP_NOT_IN_AUDIENCE,
     DROP_SILENCED,
+    DROP_SNOOZED,
     DROP_UNKNOWN_TARGET,
     ERROR_ACKNOWLEDGE_NOT_ALLOWED,
     ERROR_INVALID_SILENCE_MINUTES,
@@ -88,7 +103,9 @@ from .const import (
     EVENT_TYPE_DROPPED,
     EVENT_TYPE_ROUTED,
     EVENT_TYPE_SNOOZED,
+    ISSUE_ALERT_ENTITY_MISSING,
     ISSUE_INVALID_SERVICE_CALLS_MANY,
+    ISSUE_PERSON_WITHOUT_OUTPUTS,
     ISSUE_PERSON_WITHOUT_USER_ID,
     MAX_CONSECUTIVE_OUTPUT_MISSES,
     MAX_INVALID_SERVICE_CALLS,
@@ -97,6 +114,7 @@ from .const import (
     MIN_SILENCE_MINUTES,
     PRIORITY_CRITICAL,
     SIGNAL_STATE_UPDATED,
+    TEST_MESSAGE_TAG,
     UNCOUNTED_DROP_REASONS,
 )
 from .router import (
@@ -129,6 +147,15 @@ _LOGGER = logging.getLogger(__name__)
 # suite patches it here rather than waiting half a minute for a timeout.
 OUTPUT_TIMEOUT_SECONDS: Final = 30
 
+# How long after an entry is set up the router waits before complaining that a
+# row's `alert_entity` is not in the state machine (contract v0.4, ADR-0018 §5).
+# At setup the `alert` component may simply not have been set up yet, and a
+# router that shouts about every alert during startup trains its user to ignore
+# it. Like `OUTPUT_TIMEOUT_SECONDS` this is a plain module constant on purpose:
+# it is a backstop, not a tuning knob, and the acceptance suite must be able to
+# reach past it without waiting a minute.
+ALERT_ENTITY_GRACE_SECONDS: Final = 60
+
 NOTIFY_DOMAIN = "notify"
 ALERT_DOMAIN = "alert"
 SERVICE_TURN_OFF = "turn_off"
@@ -138,10 +165,22 @@ TRANSLATION_CATEGORY = "common"
 KEY_ACKNOWLEDGE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.acknowledge"
 KEY_SNOOZE_MINUTES = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.snooze_minutes"
 KEY_BACK_TO_NORMAL = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.back_to_normal"
+KEY_TEST_MESSAGE = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.test_message"
+
+# One `common.detail_*` string per thing `explain` can have to say (ADR-0018
+# §1: "`detail` is always a non-empty translated sentence ... naming the thing
+# the user has to look at"). Keyed by the drop reason where there is one, so a
+# reason added to the contract cannot silently lose its sentence.
+KEY_DETAIL_PREFIX = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.detail_"
+DETAIL_SILENCED_TEMPORARY = "silenced_temporary"
 
 FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
 FALLBACK_BACK_TO_NORMAL = "Back to normal"
+FALLBACK_TEST_MESSAGE = "Notify Switchboard test message"
+# `detail` is promised non-empty even if a translation file is somehow missing
+# the key, so every lookup falls back to something a human can still read.
+FALLBACK_DETAIL = "No explanation is available for this decision."
 
 # The name a row's `message`/`done_message` template sees the alert under
 # (contract §"Per-row texts": "rendered with the row's alert's current state
@@ -207,6 +246,18 @@ class Switchboard:
         # a routing event, so the repair is (re)evaluated on reload.
         self._async_review_person_user_ids()
 
+        # ADR-0018 §5: a person with no outputs is dropped with `no_outputs` on
+        # every single message, for ever, and nothing says so. Evaluated here
+        # because an options change reloads the entry, which is exactly the
+        # moment the gap is closed.
+        self._async_review_person_outputs()
+
+        # The alert check cannot run now -- `alert` may not be set up yet -- but
+        # issues for a slug the table no longer has, or for a row that no longer
+        # names an alert, are pruned at once: the issue registry is persisted, so
+        # nothing else would ever clear them.
+        self._async_review_alert_entities(create=False)
+
         self._unsubs.append(
             self.hass.bus.async_listen(
                 EVENT_MOBILE_APP_NOTIFICATION_ACTION, self._async_handle_action_event
@@ -258,6 +309,16 @@ class Switchboard:
 
         for person in self.table.persons:
             self._async_schedule_deferral(person)
+
+        # ADR-0018 §5: the alert-entity check runs once, ALERT_ENTITY_GRACE_SECONDS
+        # after this entry's own setup. The handle joins `_unsubs` so unloading
+        # the entry -- or Home Assistant stopping -- cancels a grace check that
+        # has not fired yet, instead of leaving a live timer behind.
+        self._unsubs.append(
+            async_call_later(
+                self.hass, ALERT_ENTITY_GRACE_SECONDS, self._async_alert_grace_elapsed
+            )
+        )
 
         # A restart may also have spanned the end of a temporary silence.
         # Persist the purge: without the save, the lifted silence is still on
@@ -438,6 +499,277 @@ class Switchboard:
             await self.store.async_save()
 
         self._async_notify_entities()
+
+    async def async_send_test_message(self, slug: str) -> None:
+        """Route one translated test message through the real routing path.
+
+        ADR-0018 §6: a dry run proves nothing about an output. This is an
+        ordinary request -- counted, evented, deferred or dropped like any
+        other -- distinguished only by the public `data.tag` the contract
+        freezes, which is what lets a user, an automation or a Companion
+        channel tell a test from the real thing. The title is left to the
+        row's `default_title`, exactly as for any caller that supplies none.
+        """
+        await self.async_handle_request(
+            await self._async_test_message(),
+            targets=[slug],
+            data={ATTR_TAG: TEST_MESSAGE_TAG},
+        )
+
+    def target_for_person(self, person_id: str) -> str | None:
+        """Return the slug of the row that would reach `person_id`, if any.
+
+        ADR-0018 §6: the default target first, when that person is in its
+        audience, otherwise the first row in stored order whose audience
+        contains them. `None` means no row reaches this person at all, which is
+        what the `test_person` step aborts on.
+        """
+        default = self.table.default_target
+        if default is not None:
+            target = self.table.targets.get(default)
+            if target is not None and person_id in target.audience:
+                return default
+        for slug, target in self.table.targets.items():
+            if person_id in target.audience:
+                return slug
+        return None
+
+    # ------------------------------------------------------------------
+    # `explain` -- a read-only answer (contract v0.4, ADR-0018 §1)
+    # ------------------------------------------------------------------
+
+    async def async_explain(
+        self, slug: str, priority: str | None = None, person: str | None = None
+    ) -> dict[str, Any]:
+        """Answer what would happen to a message sent right now.
+
+        A pure evaluation: `build_context()` and `router.decide`, and nothing
+        else. No `notify.*` call, no counter, no `event.switchboard_delivery`,
+        no queued deferral, no stored snooze, no `Store.async_save`. A card that
+        calls this on every render must not inflate the day's figures, and
+        somebody running it to *understand* their configuration must not change
+        it.
+
+        The refusals are the ones every other service raises (ADR-0015), with
+        one deliberate difference from `_require_target` / `_require_person`:
+        nothing here feeds the `invalid_service_*` counters. Asking a question
+        with a stale slug is a question, not an attempt to act.
+        """
+        target = self.table.targets.get(slug)
+        if target is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_UNKNOWN_TARGET,
+                translation_placeholders={"target": slug},
+            )
+        if person is not None and person not in self.table.persons:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=ERROR_UNKNOWN_PERSON,
+                translation_placeholders={"person": person},
+            )
+
+        data: dict[str, Any] = {} if priority is None else {ATTR_PRIORITY: priority}
+        effective = resolve_priority(target, data)
+        context = self.build_context()
+        # The message is never sent and never read: `decide` does not look at it.
+        decision = decide(
+            self.table,
+            NotificationRequest(message="", targets=(slug,), data=data),
+            context,
+        )
+
+        routed = {item.person: item for item in decision.routed}
+        dropped: dict[str | None, str] = {}
+        for drop in decision.dropped:
+            dropped.setdefault(drop.person, drop.reason)
+
+        wanted = [person] if person is not None else list(target.audience)
+        persons: dict[str, Any] = {}
+        for person_id in wanted:
+            persons[person_id] = await self._async_explain_person(
+                target,
+                person_id,
+                routed.get(person_id),
+                dropped.get(person_id),
+                context,
+            )
+
+        return {
+            ATTR_TARGET: slug,
+            ATTR_PRIORITY: effective,
+            ATTR_PERSONS: persons,
+        }
+
+    async def _async_explain_person(
+        self,
+        target: TargetConfig,
+        person_id: str,
+        routed: RoutedDelivery | None,
+        reason: str | None,
+        context: RoutingContext,
+    ) -> dict[str, Any]:
+        """Turn one person's outcome into the frozen six-key answer."""
+        person = self.table.persons.get(person_id)
+        reachable, missing = self._split_registered_outputs(person)
+
+        if routed is not None:
+            return {
+                ATTR_DECISION: DECISION_ROUTED,
+                ATTR_UNTIL: None,
+                ATTR_REASON: None,
+                ATTR_DETAIL: await self._async_detail(
+                    DECISION_ROUTED, target, person, context, outputs=reachable
+                ),
+                ATTR_OUTPUTS: reachable,
+                ATTR_MISSING_OUTPUTS: missing,
+            }
+
+        # A person the answer was asked about but who is neither routed nor
+        # dropped is not in this row's audience -- `decide` only walks the
+        # persons it knows, and an explicit `person` may be one of those.
+        reason = reason or DROP_NOT_IN_AUDIENCE
+
+        if reason == DROP_SILENCED and self._would_defer(person):
+            until = next_wake_time(dt_util.now(), person.wake_time)  # type: ignore[union-attr]
+            return {
+                ATTR_DECISION: DECISION_DEFERRED,
+                ATTR_UNTIL: until.isoformat(),
+                ATTR_REASON: None,
+                ATTR_DETAIL: await self._async_detail(
+                    DECISION_DEFERRED, target, person, context, until=until
+                ),
+                ATTR_OUTPUTS: reachable,
+                ATTR_MISSING_OUTPUTS: missing,
+            }
+
+        return {
+            ATTR_DECISION: DECISION_DROPPED,
+            ATTR_UNTIL: None,
+            ATTR_REASON: reason,
+            ATTR_DETAIL: await self._async_detail(reason, target, person, context),
+            # Nothing would be called, so there is nothing to list (ADR-0018
+            # §1). `missing_outputs` is still reported: a broken output is worth
+            # knowing about even for somebody who is currently snoozed.
+            ATTR_OUTPUTS: [],
+            ATTR_MISSING_OUTPUTS: missing,
+        }
+
+    def _would_defer(self, person: PersonConfig | None) -> bool:
+        """Return True when `_async_defer` would queue rather than drop.
+
+        Deliberately the same three conditions the dispatcher applies, so
+        `explain` can never promise a deferral the router would not make: the
+        person has a `wake_time`, one of their *configured* silence entities is
+        on (a temporary `notify_switchboard.silence` is not a night), and the
+        priority is not `critical` -- which is implied here, since a critical
+        message is never dropped for silence in the first place.
+        """
+        return (
+            person is not None
+            and person.wake_time is not None
+            and self.has_configured_silence(person)
+        )
+
+    def _split_registered_outputs(
+        self, person: PersonConfig | None
+    ) -> tuple[list[str], list[str]]:
+        """Split a person's usable outputs into (registered, missing).
+
+        Both lists carry **full** `notify.*` service names: everywhere else an
+        output is stored bare because that is what the router compares, but
+        `explain` is read by a human or by a card and the useful answer to
+        "where would this go" is something you can paste into Developer tools
+        (ADR-0018 §1). Recursive outputs appear in neither: they are refused,
+        not absent.
+        """
+        if person is None:
+            return [], []
+        usable, _recursive = split_outputs(person.outputs)
+        registered: list[str] = []
+        missing: list[str] = []
+        for output in usable:
+            domain, _, service = output.rpartition(".")
+            domain = domain or NOTIFY_DOMAIN
+            full = f"{domain}.{service}"
+            if self.hass.services.has_service(domain, service):
+                registered.append(full)
+            else:
+                missing.append(full)
+        return registered, missing
+
+    async def _async_detail(
+        self,
+        key: str,
+        target: TargetConfig,
+        person: PersonConfig | None,
+        context: RoutingContext,
+        *,
+        outputs: list[str] | None = None,
+        until: datetime | None = None,
+    ) -> str:
+        """Return the translated sentence that names what decided.
+
+        `key` is either a decision (`routed`, `deferred`) or a drop reason, so a
+        reason the contract adds cannot silently lose its sentence: it falls
+        back to the generic `detail_dropped` and stays non-empty.
+        """
+        placeholders: dict[str, str] = {
+            "target": target.slug,
+            "person": person.entity_id if person is not None else "",
+            "reason": key,
+            "rule": target.presence_rule,
+            "state": context.person_states.get(
+                person.entity_id if person is not None else "", ""
+            )
+            or "unknown",
+            "outputs": ", ".join(outputs or ()),
+            "until": _local_text(until),
+        }
+
+        if key == DROP_SILENCED:
+            on_entities = self._silence_entities_on(person, context)
+            if not on_entities:
+                # No configured entity is on, so what silences this person is a
+                # temporary `notify_switchboard.silence`: name when it lifts
+                # rather than a switch they would look for and not find.
+                key = DETAIL_SILENCED_TEMPORARY
+                placeholders["until"] = _local_text(
+                    self.temporary_silence_until(person) if person else None
+                )
+            else:
+                placeholders["entities"] = ", ".join(on_entities)
+        elif key == DECISION_DEFERRED:
+            placeholders["entities"] = ", ".join(
+                self._silence_entities_on(person, context)
+            )
+        elif key == DROP_SNOOZED and person is not None:
+            placeholders["until"] = _local_text(
+                context.snoozes.get((person.entity_id, target.slug))
+            )
+
+        translations = await self._async_translations()
+        template = translations.get(
+            f"{KEY_DETAIL_PREFIX}{key}",
+            translations.get(f"{KEY_DETAIL_PREFIX}dropped", FALLBACK_DETAIL),
+        )
+        return _fill(template, placeholders)
+
+    def _silence_entities_on(
+        self, person: PersonConfig | None, context: RoutingContext
+    ) -> list[str]:
+        """Return the person's configured silence entities that are `on`.
+
+        Only those: naming a silence entity that is `off` sends the user to the
+        wrong switch, which is the one thing this sentence exists to avoid.
+        """
+        if person is None:
+            return []
+        return [
+            entity_id
+            for entity_id in person.silence_entities
+            if context.silenced.get(entity_id, False)
+        ]
 
     # ------------------------------------------------------------------
     # Delivery
@@ -1551,6 +1883,11 @@ class Switchboard:
         translations = await self._async_translations()
         return translations.get(KEY_BACK_TO_NORMAL, FALLBACK_BACK_TO_NORMAL)
 
+    async def _async_test_message(self) -> str:
+        """Return the translated body of an options-flow test message."""
+        translations = await self._async_translations()
+        return translations.get(KEY_TEST_MESSAGE, FALLBACK_TEST_MESSAGE)
+
     # ------------------------------------------------------------------
     # Counters, events and repairs
     # ------------------------------------------------------------------
@@ -1667,6 +2004,95 @@ class Switchboard:
         """Return the `repairs` issue id used for one person."""
         return f"{ISSUE_PERSON_WITHOUT_USER_ID}_{person_id}"
 
+    @callback
+    def _async_review_person_outputs(self) -> None:
+        """Raise (or clear) one `person_without_outputs` repair per person.
+
+        ADR-0018 §5: a person with an empty `outputs` list who sits in the
+        audience of at least one row is dropped with `no_outputs` on every
+        single message, silently and for ever. That is a configuration gap the
+        user can close, so it is a repair (`is_fixable=False`) rather than a log
+        line nobody reads.
+
+        A person in **no** audience raises nothing: without a row there is
+        nothing to fail, and a repair that fires for somebody nobody routes to
+        is worse than no repair at all.
+        """
+        in_an_audience = {
+            person_id
+            for target in self.table.targets.values()
+            for person_id in target.audience
+        }
+        gaps = {
+            f"{ISSUE_PERSON_WITHOUT_OUTPUTS}_{person_id}": person_id
+            for person_id, person in self.table.persons.items()
+            if not person.outputs and person_id in in_an_audience
+        }
+        self._async_prune_issues(ISSUE_PERSON_WITHOUT_OUTPUTS, set(gaps))
+        for issue_id, person_id in gaps.items():
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_PERSON_WITHOUT_OUTPUTS,
+                translation_placeholders={"person": person_id},
+            )
+
+    @callback
+    def _async_alert_grace_elapsed(self, _now: datetime) -> None:
+        """Run the alert-entity check once the grace period is over."""
+        self._async_review_alert_entities(create=True)
+
+    @callback
+    def _async_review_alert_entities(self, *, create: bool) -> None:
+        """Raise (or clear) one `alert_entity_missing` repair per row.
+
+        A row whose `alert_entity` names an `alert.*` that does not exist
+        acknowledges nothing and observes nothing, and nothing says so
+        (ADR-0018 §5). The check itself is only meaningful once the rest of the
+        configuration has had time to load, which is why `create` is False at
+        setup: the stale issues are pruned there and the raising is left to the
+        grace check armed by `async_setup`.
+        """
+        broken = {
+            f"{ISSUE_ALERT_ENTITY_MISSING}_{slug}": (slug, target.alert_entity)
+            for slug, target in self.table.targets.items()
+            if target.alert_entity and self.hass.states.get(target.alert_entity) is None
+        }
+        self._async_prune_issues(ISSUE_ALERT_ENTITY_MISSING, set(broken))
+        if not create:
+            return
+        for issue_id, (slug, entity_id) in broken.items():
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=ISSUE_ALERT_ENTITY_MISSING,
+                translation_placeholders={"slug": slug, "entity_id": str(entity_id)},
+            )
+
+    @callback
+    def _async_prune_issues(self, translation_key: str, wanted: set[str]) -> None:
+        """Delete every issue of one kind whose cause is gone.
+
+        The issue registry is persisted, so a repair nobody deletes outlives the
+        change it asked for.
+        """
+        registry = ir.async_get(self.hass)
+        stale = [
+            issue_id
+            for (domain, issue_id), issue in registry.issues.items()
+            if domain == DOMAIN
+            and issue.translation_key == translation_key
+            and issue_id not in wanted
+        ]
+        for issue_id in stale:
+            ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+
     def _persons_needing_a_user_id(self) -> list[str]:
         """Return the persons a Companion callback may have to resolve."""
         concerned: list[str] = []
@@ -1745,3 +2171,23 @@ def next_wake_time(local_now: datetime, wake: Any) -> datetime:
             local_now.date() + timedelta(days=1), wake, tzinfo=tzinfo
         )
     return candidate
+
+
+def _fill(template: str, placeholders: Mapping[str, str]) -> str:
+    """Substitute `{name}` placeholders without going through `str.format`.
+
+    `str.format` would raise on a translation that legitimately contains a
+    brace, and a `KeyError` in a diagnostic sentence is the last thing somebody
+    debugging a notification needs.
+    """
+    text = template
+    for name, value in placeholders.items():
+        text = text.replace(f"{{{name}}}", value)
+    return text
+
+
+def _local_text(when: datetime | None) -> str:
+    """Render an instant for a human, in the instance's local time."""
+    if when is None:
+        return ""
+    return dt_util.as_local(when).isoformat(timespec="minutes")

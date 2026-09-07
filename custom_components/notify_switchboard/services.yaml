@@ -76,3 +76,39 @@ unsilence:
         entity:
           filter:
             domain: person
+
+# `notify_switchboard.explain` (contract v0.4 addendum, ADR-0018 §1) is
+# deliberately **not** declared here, and this is a documented conflict rather
+# than an oversight: `tests/acceptance/test_s2_services.py::
+# test_services_yaml_declares_all_five_services_with_their_fields` is a frozen
+# acceptance test that asserts this file declares exactly the five services of
+# v0.2, and the coding agent may not modify it. The service is still fully
+# usable -- it is registered with `SupportsResponse.ONLY` in `services.py`, it
+# appears in Developer tools > Actions, and its name, description and field
+# descriptions are translated through the `services.explain` block of
+# `strings.json` and `translations/{en,fr,es}.json`. What it does not get until
+# that test is amended is the generated field editor. See
+# `docs/known-issues.md`.
+#
+# explain:
+#   fields:
+#     target:
+#       required: true
+#       example: leak
+#       selector:
+#         text:
+#     priority:
+#       example: high
+#       selector:
+#         select:
+#           options:
+#             - info
+#             - normal
+#             - high
+#             - critical
+#     person:
+#       example: person.alice
+#       selector:
+#         entity:
+#           filter:
+#             domain: person
