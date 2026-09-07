@@ -3136,4 +3136,18 @@ async def test_a_silence_going_on_again_re_arms_a_queue_that_lost_its_timer(
     hass.states.async_set("schedule.night", "on", {"next_event": EIGHT_UTC.isoformat()})
     await hass.async_block_till_done()
 
-    assert "person.alice" in switchboard._deferral_unsubs
+    armed = switchboard._deferral_unsubs.get("person.alice")
+    assert armed is not None
+
+    # And a further `on` write leaves that timer where it is: the re-arm is for
+    # a queue with nothing waiting on it, not for every state write of every
+    # silence a person owns. The flush the armed timer runs re-reads the end
+    # anyway, so nothing is lost by not rebuilding it here.
+    hass.states.async_set(
+        "schedule.night",
+        "on",
+        {"next_event": (EIGHT_UTC + timedelta(minutes=5)).isoformat()},
+    )
+    await hass.async_block_till_done()
+
+    assert switchboard._deferral_unsubs["person.alice"] is armed

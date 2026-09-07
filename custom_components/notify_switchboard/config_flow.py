@@ -1152,9 +1152,12 @@ class SwitchboardOptionsFlow(OptionsFlow):
         """Confirm a validated target, showing the `alert:` block to paste.
 
         A target has just been described in the UI; the `alert:` that feeds it
-        still has to be written by hand against a `notifiers:` name the user
-        would otherwise have to derive (`switchboard_<slug>`). Showing it here
-        is the cheapest possible answer to "and now what?".
+        still has to be written by hand, and what goes in it depends on the row
+        -- `_alert_snippet` names `switchboard_<slug>` under `notifiers:` for
+        an ordinary row and emits no `notifiers:` at all for an observer one,
+        which is a distinction the user should not have to know to make.
+        Showing the finished block here is the cheapest possible answer to "and
+        now what?".
 
         The one checkbox (ADR-0020 §1) is the second way into the advanced
         settings, and the one that matters for somebody who has just met the

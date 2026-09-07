@@ -24,7 +24,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections import deque
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
@@ -2187,6 +2187,17 @@ class Switchboard:
         self.store.silences[person] = until
         await self.store.async_save()
         self._async_schedule_silence_expiry(person, until)
+        # The queue has to be told too, and for the same reason `unsilence`
+        # below re-arms: the deferral timer is armed on the earliest of the
+        # wake time and the end of a running temporary silence, and until this
+        # call there was no such silence to be a candidate. Without the re-arm
+        # a quiet hour asked for at 04:30 by somebody who wakes at 07:00 ends
+        # at 06:00 with nobody waiting for it -- the night that queued the
+        # message may well have lifted in between, so the message would wait an
+        # hour past the last thing that held it. `_async_schedule_deferral`
+        # returns on the spot when there is nothing queued, which is the
+        # ordinary case.
+        self._async_schedule_deferral(person)
         self._async_notify_entities()
         _LOGGER.debug("Silenced %s until %s", person, until.isoformat())
 
@@ -2735,6 +2746,14 @@ class Switchboard:
     def _async_silence_changed(self, event: Event[EventStateChangedData]) -> None:
         """Refresh `binary_sensor.<person>_silenced`, and flush if the night ended.
 
+        Three readings of the new state, and only the first is §4's:
+
+        * gone (`off`, or the entity removed): flush, when this was the last
+          thing holding the queue;
+        * still `on`: nothing to release, but possibly a timer to give back --
+          `_async_rearm_silenced_queues`;
+        * `on` with a queue that is already armed: nothing at all.
+
         ADR-0019 §4: the router was already subscribed to every configured
         `silence_entities` of every person -- it simply refreshed a binary
         sensor and returned, so a schedule ending at 05:00 left the queue
@@ -2756,15 +2775,20 @@ class Switchboard:
         """
         self._async_notify_entities()
 
+        entity_id = event.data["entity_id"]
         new_state = event.data["new_state"]
-        if new_state is None or state_is_on(new_state.state):
+        if new_state is not None and state_is_on(new_state.state):
+            self._async_rearm_silenced_queues(entity_id)
             return
 
-        entity_id = event.data["entity_id"]
+        # `None` is an entity that has been renamed or removed, and it is the
+        # one state that cannot mean "keep waiting": it will never be seen `on`
+        # again, so a queue held behind it would never be offered §4 a second
+        # time. `has_configured_silence` reads `hass.states`, where the entity
+        # is now absent, so the loop below already treats it as lifted -- what
+        # this needed was to reach the loop at all.
         now = dt_util.utcnow()
-        for person_id, person in self.table.persons.items():
-            if entity_id not in person.silence_entities:
-                continue
+        for person_id, person in self._persons_silenced_by(entity_id):
             if self.has_configured_silence(person):
                 continue
             if self.store.is_temporarily_silenced(person_id, now):
@@ -2776,6 +2800,49 @@ class Switchboard:
                 person_id,
             )
             self._async_schedule_flush(person_id)
+
+    def _persons_silenced_by(
+        self, entity_id: str
+    ) -> Iterator[tuple[str, PersonConfig]]:
+        """Yield the persons who named `entity_id` among their silences.
+
+        The listener is subscribed to the union of everybody's
+        `silence_entities`, so every handler starts by asking whose entity this
+        was.
+        """
+        for person_id, person in self.table.persons.items():
+            if entity_id in person.silence_entities:
+                yield person_id, person
+
+    @callback
+    def _async_rearm_silenced_queues(self, entity_id: str) -> None:
+        """Give back a timer to a queue behind `entity_id` that has none.
+
+        A silence going `on` normally changes nothing: the deferral is already
+        armed on the wake time, and a person who has one is never left without
+        a timer. A person who has *not* can be, and `_async_schedule_deferral`
+        explains how -- a re-arm that runs at the exact instant the schedule
+        published reads an end that is no longer ahead of it, drops it rather
+        than spin, and leaves nothing armed. That is correct at the time and
+        would be permanent afterwards: the queue's only remaining hope is the
+        early flush of §4, and a schedule that goes `on` again for a second
+        block before it goes `off` never offers one.
+
+        So this is deliberately the narrow case: a queue exists, and nothing is
+        waiting for it. Re-arming a person who already has a timer would cancel
+        and rebuild it on every state write of every silence they own, for no
+        change of instant.
+        """
+        for person_id, _person in self._persons_silenced_by(entity_id):
+            if person_id in self._deferral_unsubs:
+                continue
+            if not any(key[0] == person_id for key in self.store.deferrals):
+                continue
+            _LOGGER.debug(
+                "A silence of %s went on with nothing armed for their queue: re-arming",
+                person_id,
+            )
+            self._async_schedule_deferral(person_id)
 
     @callback
     def _async_notify_entities(self) -> None:

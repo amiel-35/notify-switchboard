@@ -78,6 +78,25 @@ an advanced step without deciding what leaving it empty means would have turned
   not until the next morning. `unsilence` now reads the queue the way ADR-0019
   §4 reads a configured silence going `off`: nothing else holding it, flush on
   the spot; a night still on, re-arm on the end that is left.
+- **`notify_switchboard.silence` arms the queue as well as its own expiry.**
+  The deferral timer is armed on the earliest of the wake time and the end of a
+  running temporary silence, and until the silence existed there was nothing to
+  weigh: a quiet hour asked for *after* the message was queued never became a
+  candidate. Somebody who wakes at 07:00, has a message queued behind the
+  night at 23:30 and asks for ninety minutes of quiet at 04:30 saw the night
+  end at 05:00 and the quiet end at 06:00 with nobody waiting for either — the
+  message went out at 07:00, an hour after the last thing that held it had
+  gone. `silence` now re-arms the way `unsilence` does.
+- **A silence entity that is renamed or deleted counts as a silence lifting.**
+  Its state change reaches the router as `new_state is None`, which was read as
+  "nothing to say" and returned on. It is the one reading that cannot be right:
+  the entity will never be seen `on` again, so the early flush of ADR-0019 §4
+  had no second chance to run and the queue waited for the wake time with
+  nothing holding it. A silence that stays `on` is now looked at too, for one
+  narrow case: a queue with no timer at all — the wake-time-less one whose
+  re-arm the bullet below drops as stale — gets one back on the end that write
+  publishes, rather than waiting for an `off` that a schedule moving straight
+  into its next block never sends.
 - **A re-arm never targets an instant that has already passed.** A timer
   firing exactly at a schedule's `next_event` can run before that schedule's
   own state write lands, and `async_track_point_in_time` does not refuse a
