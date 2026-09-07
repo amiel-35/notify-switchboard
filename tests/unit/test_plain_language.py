@@ -24,7 +24,10 @@ from typing import Any
 
 import pytest
 from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import async_mock_service
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.notify_switchboard.config_flow import (
     _audience_options,
@@ -40,6 +43,7 @@ from .test_config_flow import (  # noqa: PLC2701 - the flow helpers live there
     _create_entry,
     _options_step,
 )
+from .test_dispatcher import install, make_person, make_target
 
 COMPONENT = (
     Path(__file__).resolve().parents[2] / "custom_components" / "notify_switchboard"
@@ -412,6 +416,74 @@ async def test_the_test_result_names_each_person(hass: HomeAssistant) -> None:
         f"brackets for whoever has to go and fix something. Got {text!r}"
     )
     assert "person.dev_bob" in text
+
+
+# ---------------------------------------------------------------------------
+# The outputs an `explain` sentence names
+# ---------------------------------------------------------------------------
+
+
+async def test_the_routed_detail_names_outputs_the_way_the_picker_does(
+    hass: HomeAssistant,
+) -> None:
+    """Where a message would go is answered with devices, not service names.
+
+    The `outputs` key of the answer keeps the full `notify.*` names a script
+    pastes into Developer tools (ADR-0018 §1); the `detail` **sentence** is the
+    half a household reads, and it is built from exactly the labels the
+    `outputs` picker offers -- otherwise the same phone is "Bob's iPhone" on
+    one screen and `notify.mobile_app_bob_s_iphone` on the next.
+    """
+    async_mock_service(hass, "notify", "mobile_app_bob_s_iphone")
+    async_mock_service(hass, "notify", "persistent_notification")
+    async_mock_service(hass, "notify", "airplay_bedroom")
+    registration = MockConfigEntry(
+        domain="mobile_app",
+        source="registration",
+        title="Bob's iPhone",
+        data={"device_name": "Bob's iPhone", "device_id": "device-bob"},
+    )
+    registration.add_to_hass(hass)
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                [
+                    "mobile_app_bob_s_iphone",
+                    "persistent_notification",
+                    "airplay_bedroom",
+                ],
+            )
+        ],
+        [make_target("leak", audience=["person.alice"])],
+        "leak",
+    )
+
+    answer = (await entry.runtime_data.switchboard.async_explain("leak"))["persons"][
+        "person.alice"
+    ]
+
+    detail = answer["detail"]
+    assert "Bob's iPhone" in detail, (
+        f"a Companion output is named by its device; got {detail!r}"
+    )
+    assert "Home Assistant notifications" in detail, (
+        f"the built-in dashboard notification has a name of its own; got {detail!r}"
+    )
+    assert "Airplay bedroom" in detail, (
+        f"any other output is at least turned back into words; got {detail!r}"
+    )
+    assert "notify." not in detail, (
+        "a service name is the code speaking; the sentence a household reads "
+        f"names devices (0.7.1). Got {detail!r}"
+    )
+    assert answer["outputs"] == [
+        "notify.mobile_app_bob_s_iphone",
+        "notify.persistent_notification",
+        "notify.airplay_bedroom",
+    ], "the machine-readable `outputs` key is untouched (ADR-0018 §1)"
 
 
 def _selector_options(result: Any, key: str) -> list[dict[str, str]]:
