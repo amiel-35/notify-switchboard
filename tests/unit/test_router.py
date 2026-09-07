@@ -32,6 +32,7 @@ from custom_components.notify_switchboard.router import (
     acknowledge_action,
     build_actions,
     build_routing_table,
+    caller_tag,
     collapse_by_tag,
     decide,
     default_tag,
@@ -659,6 +660,16 @@ def test_default_and_effective_tags() -> None:
     assert effective_tag("leak", {"tag": "mine"}) == "mine"
     # An empty tag is not a name, so the default still fills the gap.
     assert effective_tag("leak", {"tag": ""}) == "switchboard-leak"
+
+
+def test_caller_tag_tells_a_callers_name_from_the_routers_default() -> None:
+    """The two do not travel to the same outputs (ADR-0019 §6, amendment (2))."""
+    assert caller_tag({"tag": "mine"}) == "mine"
+    assert caller_tag({"tag": 7}) == "7"
+    assert caller_tag({}) is None
+    # Same reading of "not a name" as `effective_tag`.
+    assert caller_tag({"tag": ""}) is None
+    assert caller_tag({"tag": None}) is None
 
 
 @pytest.mark.parametrize(

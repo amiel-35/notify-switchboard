@@ -63,7 +63,10 @@ Decisions taken in Sprint 1, where the contract left room:
 
 - **Companion buttons are added only to outputs whose service name starts with
   `mobile_app_`.** Other outputs get the merged `data` without `actions` and
-  without `authenticationRequired`.
+  without `authenticationRequired`. Since 0.5.1 the same holds for every key
+  the router adds, `tag` included (ADR-0019 §6, amendment 2026-09-07 (2)):
+  what an output receives is the caller's `data` merged with the row's
+  `default_data`, plus only the keys that output reads.
 - **`authenticationRequired` is written both at the top level of `data` and on
   each action.** The acceptance suite pins the top-level key; the per-action
   key is what the Companion app actually reads.
@@ -340,7 +343,19 @@ that key routes to the whole audience there, exactly like any other message.
 `data.notification_id` mirrors the effective tag and is added for the bare
 `persistent_notification` output only — the one core documents as reading it
 (`homeassistant/components/notify/__init__.py`, the `persistent_notification`
-service handler). The `done` message deliberately does **not** share the
+service handler).
+
+That name is the router's own key, so it travels no further than the outputs
+that read it: the **default** `tag` is written on `mobile_app_*` outputs and on
+`persistent_notification` (where it is the source of the id), and nowhere else.
+Every other output gets the caller's `data` merged with the row's
+`default_data` and nothing added — the router is a proxy, and the sibling
+adapters of this suite refuse an unknown `data` key by design (AirPlay
+Notifier's `PREVENT_EXTRA` schema, Assist Satellite Notifier's
+`ALLOWED_DATA_KEYS`), so a stray router key is a `ServiceValidationError` on
+every call rather than harmless noise. The effective tag is still computed for
+every message: the episode record, the de-duplication key and the closing
+sequence all read it. The `done` message deliberately does **not** share the
 episode's tag: `clear_done` defaults to off, and a message carrying
 `switchboard-<slug>` could not be kept on the phone while the episode's own
 notifications are cleared.

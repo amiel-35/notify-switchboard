@@ -48,7 +48,10 @@ burst, and only if it is still worth delivering (see "The night" below).
 Every outgoing message also carries a name of its own: `data.tag` defaults to
 `switchboard-<slug>`, so a repeat updates the notification instead of stacking
 a second one, and on the `persistent_notification` output the matching
-`data.notification_id` is added too. Your own `tag` always wins.
+`data.notification_id` is added too. Your own `tag` always wins. Those defaults
+are the router's own keys and only reach the outputs that read them —
+Companion and `persistent_notification`; any other output receives your `data`
+merged with the row's default data and nothing else.
 
 ## Install
 
@@ -220,10 +223,15 @@ Three optional fields per row, all empty by default:
 |---|---|
 | `priority` | `info` / `normal` / `high` / `critical`; overrides the row's default. Only `critical` bypasses silence and snoozes. |
 | `source_entity` | The entity the message is about. Diagnostics and voice deny-lists read it. |
-| `tag` | De-duplicates a deferral and names the notification. Defaults to `switchboard-<slug>`. |
+| `tag` | De-duplicates a deferral and names the notification. Defaults to `switchboard-<slug>`, and that default is only sent to Companion and `persistent_notification` outputs; a `tag` **you** set is passed to every output like any other key. |
 | `ttl_minutes` | How long this message is still worth delivering once it has been held back. `0` means never expires. |
 | `switchboard_done` | Marks this call as the "back to normal" of the row's current episode, so it only reaches the people that episode reached. |
 | anything else | Merged over the row's default data, caller wins, and passed to the outputs untouched. |
+
+The router never adds a key an output cannot read: apart from the defaults
+above, an output receives exactly what you sent merged with the row's default
+data. That matters for adapters that validate their `data` and refuse anything
+unknown — the AirPlay and Assist Satellite notifiers of this suite do.
 
 ## Translations
 

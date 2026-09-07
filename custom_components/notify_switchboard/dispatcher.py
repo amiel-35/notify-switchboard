@@ -133,6 +133,7 @@ from .router import (
     TargetConfig,
     build_actions,
     build_routing_table,
+    caller_tag,
     collapse_by_tag,
     decide,
     effective_tag,
@@ -947,11 +948,22 @@ class Switchboard:
             title = target.default_title
 
         payload = await self._async_build_payload(target, routed)
+        # Whether the tag in that payload is the router's own default or a name
+        # the caller (or the row's `default_data`) wrote: only the first kind is
+        # scoped to the outputs that read it.
+        router_tag = caller_tag(routed.data) is None
         # Every output of this person at once, each bounded by its own timeout:
         # a phone off the network must not hold back the tablet next to it.
         outcomes = await asyncio.gather(
             *(
-                self._async_call_output(output, message, title, payload, target.slug)
+                self._async_call_output(
+                    output,
+                    message,
+                    title,
+                    payload,
+                    target.slug,
+                    router_tag=router_tag,
+                )
                 for output in routed.outputs
             ),
             return_exceptions=True,
@@ -1017,6 +1029,12 @@ class Switchboard:
         ADR-0019 §6: every message acquires a deterministic identity, because a
         notification you cannot name is one you can never clear. A caller's own
         `data.tag` always wins; the default only fills a gap.
+
+        This is the router's *internal* view of the message -- what the episode
+        record and the clear logic reason about. It is not what an output
+        receives: `_async_call_output` keeps each router-added key for the
+        outputs that read it and drops it for the others (§6, amendment
+        2026-09-07 (2)).
         """
         payload = dict(routed.data)
         payload[ATTR_TAG] = effective_tag(target.slug, routed.data)
@@ -1036,8 +1054,16 @@ class Switchboard:
         title: str | None,
         payload: Mapping[str, Any],
         slug: str,
+        *,
+        router_tag: bool,
     ) -> bool:
-        """Call one `notify.*` output; never let a failure stop the others."""
+        """Call one `notify.*` output; never let a failure stop the others.
+
+        `router_tag` says whether `payload["tag"]` is the router's own default
+        rather than a value the caller (or the row's `default_data`) wrote. A
+        router key is scoped to the outputs that read it; a caller key is
+        proxied to all of them (ADR-0019 §6, amendment 2026-09-07 (2)).
+        """
         if is_recursive_output(output):
             _LOGGER.error(
                 "Refusing to call %s: an output pointing back at the switchboard "
@@ -1061,21 +1087,37 @@ class Switchboard:
         service_data: dict[str, Any] = {"message": message}
         if title is not None:
             service_data["title"] = title
-        # Companion buttons only make sense on a Companion output.
+        # ADR-0019 §6, amendment 2026-09-07 (2): the router is a proxy
+        # (ADR-0002), so an output receives the caller's `data` merged with the
+        # row's `default_data` and nothing else. The keys the router adds for
+        # itself are scoped, here, per output -- never on the shared
+        # payload, which the episode record and the clear logic still read
+        # whole. Not cosmetic: a sibling adapter that validates its `data`
+        # (AirPlay Notifier's voluptuous schema, `PREVENT_EXTRA` by default;
+        # Assist Satellite Notifier's `ALLOWED_DATA_KEYS`) raises
+        # `ServiceValidationError` on a key it does not know, so a router key
+        # sent to one of them fails every single call.
         data = dict(payload)
-        if not service.startswith(COMPANION_OUTPUT_PREFIX):
+        companion = service.startswith(COMPANION_OUTPUT_PREFIX)
+        persistent = service == PERSISTENT_NOTIFICATION_OUTPUT
+        if not companion:
+            # Companion buttons only make sense on a Companion output.
             data.pop(ATTR_ACTIONS, None)
             data.pop(ATTR_AUTHENTICATION_REQUIRED, None)
-        # ADR-0019 §6: `data.notification_id` mirrors the effective tag, and is
-        # added for the bare `persistent_notification` output only -- the one
-        # core documents as reading it (`components/notify/__init__.py`, the
+            # `tag` is read by the Companion app and, below, by this method as
+            # the source of the `persistent_notification` id. Anywhere else it
+            # is a key the router invented. A tag the *caller* wrote is the
+            # caller's own key and is proxied like any other.
+            if router_tag and not persistent:
+                data.pop(ATTR_TAG, None)
+        # `data.notification_id` mirrors the effective tag, and is added for the
+        # bare `persistent_notification` output only -- the one core documents
+        # as reading it (`components/notify/__init__.py`, the
         # `persistent_notification` service handler: `notification_id =
         # data.get(pn.ATTR_NOTIFICATION_ID)`, then `pn.async_create(...)`).
         # Every other output would receive a key it has no use for. A
         # caller-supplied value wins here too, hence the membership test.
-        if service == PERSISTENT_NOTIFICATION_OUTPUT and ATTR_NOTIFICATION_ID not in (
-            data
-        ):
+        if persistent and ATTR_NOTIFICATION_ID not in data:
             tag = data.get(ATTR_TAG)
             if tag is not None:
                 data[ATTR_NOTIFICATION_ID] = str(tag)
@@ -1650,7 +1692,14 @@ class Switchboard:
         outcomes = await asyncio.gather(
             *(
                 self._async_call_output(
-                    output, "\n".join(lines), summary_title, payload, SUMMARY_TAG
+                    output,
+                    "\n".join(lines),
+                    summary_title,
+                    payload,
+                    SUMMARY_TAG,
+                    # `switchboard-summary` is a name the router chose for a
+                    # message it composed itself, never a caller's.
+                    router_tag=True,
                 )
                 for output in usable
             ),
