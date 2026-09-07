@@ -212,6 +212,37 @@ Neither issue has been filed against home-assistant/core yet. Planned
 resolution: file (2) and link the issue number here; (1) is now a
 nice-to-have rather than a gap.
 
+## 2026-09-07 — S4 — `explain` has no `services.yaml` block
+
+`notify_switchboard.explain` (ADR-0018 §1) is registered, translated and fully
+usable, but it is **not** declared in
+`custom_components/notify_switchboard/services.yaml`, and that is a deliberate
+choice forced by a conflict between two frozen specifications:
+
+- ADR-0018 adds a sixth `notify_switchboard.*` service and asks for it to be
+  documented like the other five;
+- `tests/acceptance/test_s2_services.py::test_services_yaml_declares_all_five_services_with_their_fields`
+  asserts `set(declared) == {acknowledge, snooze, unsnooze, silence, unsilence}`
+  — an exact equality, not a subset — and the Sprint 4 definition of done
+  requires every S1–S4 acceptance test to pass **unmodified**.
+
+Declaring `explain` therefore fails a frozen test; not declaring it costs the
+generated field editor in Developer tools > Actions and nothing else. Core
+builds a description for every registered service whether or not the YAML
+mentions it (`homeassistant/helpers/service.py`,
+`async_get_all_descriptions`: "The YAML may be empty for dynamically defined
+services"), and the name, description and field descriptions of
+`services.explain` in `strings.json` and `translations/{en,fr,es}.json` are
+already written, so the service shows up with its translated name, answers
+normally, and refuses a call made without `return_response` exactly as
+`SupportsResponse.ONLY` promises.
+
+Accepted for S4 rather than resolved by editing an acceptance test the coding
+agent does not own. Planned resolution: the spec agent widens that assertion
+(to "contains the five" or to the six of v0.4), after which the `explain`
+block — which is written and commented out in `services.yaml` — is restored in
+one commit.
+
 ## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
 
 `notify_switchboard.acknowledge`, `snooze`, `unsnooze`, `silence` and
