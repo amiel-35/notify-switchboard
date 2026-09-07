@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Router 0.7.1 — **plain-language interface**, on top of the 0.7.0 notes below.
+Nothing yet.
+
+## [0.7.1] - 2026-09-07
+
+Router 0.7.1 — **plain-language interface**.
 
 The maintainer opened the person step of a real instance and said: *« cet
 écran est incompréhensible pour un humain »*. He was right. The interface
@@ -20,6 +24,25 @@ almost none of it was usable.
 no storage migration, no contract change: every translation key, step id,
 field name, menu id, entity id, service name and stored option key is exactly
 what 0.7.0 had.
+
+### Highlights
+
+- **The whole interface now speaks plain language.** The config flow, the
+  options menu and its steps, field labels, errors, repairs, entity names and
+  the action descriptions say what will happen rather than how the router
+  works — in French first, then English and Spanish.
+- **People, devices and targets are named the way the household names them.**
+  An entity id now appears only where somebody actually has to go and change
+  something.
+- **Every device in the output picker has a readable label**, and Home
+  Assistant's own notification drawer (`persistent_notification`) is offered as
+  an output — the one a household has before any phone is registered.
+- **An explanation reads as a sentence.** `explain`, and the two test buttons
+  in the options menu, name devices, presence rules, priority floors and
+  whereabouts in words instead of raw values.
+- **Nothing about routing changes.** No new option, no new step, no storage
+  migration, no contract change: upgrading from 0.7.0 changes what you read,
+  not what the router does.
 
 ### Changed
 
@@ -98,9 +121,10 @@ what 0.7.0 had.
   mapping from the word on the screen to the contract term, so the
   documentation and the interface stay linked.
 
+## [0.7.0] - 2026-09-07
+
 Router 0.7.0 — **escalation and places, reduced** (contract v0.7 addendum,
-ADR-0021), on top of the 0.6.0, 0.5.1 and 0.5.0 notes below, which are in
-`main` but not tagged.
+ADR-0021).
 
 0.6.0 stopped adding and consolidated; 0.7.0 adds again, from a list the
 maintainer shortened after the product review. The sprint's guard-rail is the
@@ -108,6 +132,30 @@ one thing every rule below can be read against: **the router owns no timer and
 no counter of its own**. Every rule is evaluated at decision time, from
 entities that already exist. Nothing new is persisted, and
 `STORAGE_MINOR_VERSION` does not move.
+
+### Highlights
+
+- **Breaking — `data.priority` no longer reaches a Home Assistant Companion
+  (`mobile_app_*`) output.** It is the router's own input key and was never a
+  Companion key. If you set `data: {priority: high}` to make an Android
+  notification urgent, stop: the router now writes the critical keys itself.
+  Every other kind of output still receives `priority` untouched.
+- **A target can raise its own priority when nobody is home.** The new
+  `escalate_when_nobody_home` moves the call up one step — `normal` becomes
+  `high`, `high` becomes `critical` — when no person of its audience is home.
+- **A silence can let the urgent through.** A `schedule` publishing a
+  `min_priority` attribute holds only the calls below that floor: a night that
+  keeps the shopping list quiet and lets the leak alarm through, with no
+  automation of your own.
+- **A critical message now arrives as a real critical notification** — the iOS
+  critical sound, Android's `alarm_stream` channel — unless you switch the new
+  `critical_payload` option off.
+- **A speaker or a wall tablet can be an audience entry.** An audience may name
+  a plain `notify.*` service or a `notify` entity (Alexa, Telegram, a notify
+  group) instead of a person; such an output has no presence, no silence and no
+  deferral, and receives nothing the router invented.
+- **New `sensor.switchboard_routing_table`** listing the configured targets and
+  persons for a dashboard card, and `explain` gains `escalated` and `outputs`.
 
 ### Breaking
 
@@ -219,6 +267,31 @@ entities that already exist. Nothing new is persisted, and
   and the `normal` one did not.
 - **One options-menu entry**, "Escalation of a target", with its picker.
 
+### Changed
+
+- **`sensor.switchboard_routing_table` publishes no `state_class`.** It counts
+  configuration rows: the value moves only when somebody edits the options,
+  and a state class is exactly what asks the recorder to compile hourly
+  long-term statistics for a sensor, for ever. A five-year mean of "how many
+  targets does this household have" is a number nobody will read, in the
+  database of everybody who installs this. The unit, `targets`, stays — it is
+  what makes the state legible on a card — and the two closed attributes are
+  excluded from the recorder as they already were.
+- **`notify.notify` and `notify.send_message` are refused as audience
+  entries.** A bare output is told apart from a person by its domain, and two
+  of the three services the `notify` component itself owns are in that domain.
+  `notify.notify` is the aggregate legacy service: it fans one message out to
+  every notify platform on the instance — the undifferentiated channel this
+  router exists to replace — and the episode recording the delivery cannot say
+  who was reached, so nothing it sends can be cleared or told "back to normal".
+  `notify.send_message` is the entity action, whose schema requires an
+  `entity_id`, so the call built for a bare output is invalid by construction
+  and fails every delivery. Both are already hidden from the audience picker;
+  the options flow now also refuses them when they are typed by hand, with an
+  error of their own in the three languages. **`notify.persistent_notification`
+  stays allowed**: it takes a plain `message`, it names exactly one place, and
+  it is the bare output a household uses before any phone is registered.
+
 ### Deferred, with the reason and the native answer
 
 Each of these was in the first draft of this sprint and was cut by the
@@ -232,7 +305,38 @@ now carries the native recipe, built on a template `binary_sensor`'s
 **`sensor.switchboard_acknowledgements`**, **labels/areas/floors on a target**
 and **a `places` object** are all deferred too.
 
----
+### Documentation
+
+- **The escalation step says when escalation does nothing.** Raising the
+  priority of a message nobody is being sent changes nothing, so
+  `target_escalation` — and `README.md`'s "When the house is empty" — now say
+  that the setting only bites on a target whose presence rule notifies absent
+  people (`always` or `away_only`); with `home_only`, an empty house means
+  everybody is dropped with the reason `presence` and there is no priority
+  left to raise. Found on the development instance, where the form gave the
+  escalation table and no hint that a rule two steps away could void it.
+- **Three limits of 0.7.0 are written down where somebody will look.** The
+  option lists do not offer `notify` **entities** — both are built from the
+  service registry and both are pinned by the frozen S4 acceptance tests, so
+  an entity is reached by typing its id (`docs/known-issues.md`, and one
+  sentence in `README.md`). An episode cannot **clear** a bare output, because
+  the clear is addressed by the `tag` and `notification_id` a bare output is
+  deliberately not given, so a bare `notify.persistent_notification` lingers
+  on the dashboard next to its own back-to-normal message (`README.md`,
+  `docs/ARCHITECTURE.md`). And `binary_sensor.<person>_silenced` stays `on`
+  under a priority floor, because it answers "is a silence running?" and not
+  "would this message get through?" (`README.md`).
+- **`docs/accepted-deviations.md` gains §5**, the fifth place this integration
+  bends one of its own principles: ADR-0021 §6 says the router passes `title`
+  to a notify entity regardless and lets core decide, and the router instead
+  gates it on the entity's published `supported_features`. Core's gate lives
+  in the base `NotifyEntity.async_send_message`, which a platform overriding
+  that method never reaches, so "regardless" would hand a title to a platform
+  that published that it cannot take one — and the frozen
+  `test_s7_entity_outputs.py` asserts the opposite. The opening count and the
+  closing "what would change any of these" list are updated with it.
+
+## [0.6.0] - 2026-09-07
 
 Router 0.6.0 — **consolidation** (contract v0.6 addendum, ADR-0020).
 
@@ -243,6 +347,30 @@ concept instead of four, and documents that agree with the code. It introduces
 exception, the meaning of an absent wake time, because moving that field behind
 an advanced step without deciding what leaving it empty means would have turned
 "hold this until morning" into "drop this".
+
+### Highlights
+
+- **The first form of a target asks five questions instead of fifteen.** The
+  other nine moved to an "Advanced settings" step with identical selectors and
+  identical defaults; the person editor is split the same way. A target created
+  through the basic step alone routes exactly as 0.5 would have written it.
+- **One word per concept.** A routing-table row is a **target** everywhere — in
+  the interface, the errors, the repairs and the documentation, in the three
+  languages. "Rule" survives only as *presence rule*.
+- **A silenced person with no wake time is now held, not dropped** — when their
+  silence publishes its own end (a core `schedule`). A silence that publishes
+  no end still drops exactly as it did in 0.1 → 0.5, so no existing
+  installation changes behaviour.
+- **Several night-time bugs are fixed**: `silence` and `unsilence` now release
+  or re-arm the queue they affect, so a message no longer waits a whole extra
+  night; and the `alert:` snippet shown after saving an observer-mode target no
+  longer carries a `notifiers:` list, which used to produce duplicate
+  notifications when pasted as instructed.
+- **The unused `class` field of a target is gone.** A stored value is ignored,
+  not migrated and not deleted; there is no store migration.
+- **New documents**: a Glossary in `README.md`, a migration guide for an
+  existing pile of `notify.mobile_app_*` calls and `alert:` blocks, and a list
+  of the places this integration knowingly bends its own principles.
 
 ### Changed
 
@@ -283,28 +411,6 @@ an advanced step without deciding what leaving it empty means would have turned
   Companion Focus sensor, a temporary `notify_switchboard.silence` — still
   drops with reason `silenced`, exactly as in 0.1 → 0.5, so no installation
   that has left the field empty since 0.1.0 changes behaviour.
-- **`sensor.switchboard_routing_table` publishes no `state_class`.** It counts
-  configuration rows: the value moves only when somebody edits the options,
-  and a state class is exactly what asks the recorder to compile hourly
-  long-term statistics for a sensor, for ever. A five-year mean of "how many
-  targets does this household have" is a number nobody will read, in the
-  database of everybody who installs this. The unit, `targets`, stays — it is
-  what makes the state legible on a card — and the two closed attributes are
-  excluded from the recorder as they already were.
-- **`notify.notify` and `notify.send_message` are refused as audience
-  entries.** A bare output is told apart from a person by its domain, and two
-  of the three services the `notify` component itself owns are in that domain.
-  `notify.notify` is the aggregate legacy service: it fans one message out to
-  every notify platform on the instance — the undifferentiated channel this
-  router exists to replace — and the episode recording the delivery cannot say
-  who was reached, so nothing it sends can be cleared or told "back to normal".
-  `notify.send_message` is the entity action, whose schema requires an
-  `entity_id`, so the call built for a bare output is invalid by construction
-  and fails every delivery. Both are already hidden from the audience picker;
-  the options flow now also refuses them when they are typed by hand, with an
-  error of their own in the three languages. **`notify.persistent_notification`
-  stays allowed**: it takes a plain `message`, it names exactly one place, and
-  it is the bare output a household uses before any phone is registered.
 
 ### Fixed
 
@@ -433,39 +539,34 @@ an advanced step without deciding what leaving it empty means would have turned
 - **`target_saved` says that ticking its checkbox defers the save** to the next
   form, which is what it does: the target is written when `target_advanced` is
   submitted.
-- **The escalation step says when escalation does nothing.** Raising the
-  priority of a message nobody is being sent changes nothing, so
-  `target_escalation` — and `README.md`'s "When the house is empty" — now say
-  that the setting only bites on a target whose presence rule notifies absent
-  people (`always` or `away_only`); with `home_only`, an empty house means
-  everybody is dropped with the reason `presence` and there is no priority
-  left to raise. Found on the development instance, where the form gave the
-  escalation table and no hint that a rule two steps away could void it.
-- **Three limits of 0.7.0 are written down where somebody will look.** The
-  option lists do not offer `notify` **entities** — both are built from the
-  service registry and both are pinned by the frozen S4 acceptance tests, so
-  an entity is reached by typing its id (`docs/known-issues.md`, and one
-  sentence in `README.md`). An episode cannot **clear** a bare output, because
-  the clear is addressed by the `tag` and `notification_id` a bare output is
-  deliberately not given, so a bare `notify.persistent_notification` lingers
-  on the dashboard next to its own back-to-normal message (`README.md`,
-  `docs/ARCHITECTURE.md`). And `binary_sensor.<person>_silenced` stays `on`
-  under a priority floor, because it answers "is a silence running?" and not
-  "would this message get through?" (`README.md`).
-- **`docs/accepted-deviations.md` gains §5**, the fifth place this integration
-  bends one of its own principles: ADR-0021 §6 says the router passes `title`
-  to a notify entity regardless and lets core decide, and the router instead
-  gates it on the entity's published `supported_features`. Core's gate lives
-  in the base `NotifyEntity.async_send_message`, which a platform overriding
-  that method never reaches, so "regardless" would hand a title to a platform
-  that published that it cannot take one — and the frozen
-  `test_s7_entity_outputs.py` asserts the opposite. The opening count and the
-  closing "what would change any of these" list are updated with it.
+- Core already ships a `notify` that speaks: the legacy `platform: tts`
+  notify platform (`homeassistant/components/tts/notify.py`) pauses,
+  announces and resumes on a Music Assistant player, and interrupts a raw
+  Cast player. `README.md`, `docs/quickstart.md` and `docs/fr/doctrine.md`
+  now show that five-line recipe for a speaker output instead of implying
+  none exists; `docs/ARCHITECTURE.md`'s roadmap marks the sibling
+  `notify-cast` / `notify-airplay` rows superseded by it. Assist Satellite
+  Notifier is unaffected — `assist_satellite` still has no `notify` platform
+  of its own.
 
----
+## [0.5.1] - 2026-09-07
 
-Router 0.5.1 — a fix on top of the 0.5.0 notes below, which are in `main` but
-not tagged. No public name, option, event type or drop reason changes.
+Router 0.5.1 — a fix on top of 0.5.0. No public name, option, event type or
+drop reason changes.
+
+### Highlights
+
+- **Fixes a 0.5.0 regression that broke speaker and Telegram outputs.** 0.5.0
+  wrote the router's default `data.tag` onto every output of every person; the
+  adapters that validate their `data` refused the call, so a routing row whose
+  person output was `notify.airplay_*` or `notify.satellite_*` failed on every
+  single message.
+- **A router-added key now goes only to the outputs that understand it.** The
+  default `tag` reaches Companion outputs and the bare
+  `persistent_notification`, and nothing else. A `tag` **you** set is your own
+  key and still reaches every output.
+- **Nothing else moves**: no public name, option, event type or drop reason
+  changes, and everything the router computes internally is unchanged.
 
 ### Fixed
 
@@ -503,24 +604,35 @@ not tagged. No public name, option, event type or drop reason changes.
   reaches.
 - `tests/acceptance/test_s5_output_keys.py` pins it: one message, three
   outputs, three different payloads — and a caller's own `tag` on all three.
-- Core already ships a `notify` that speaks: the legacy `platform: tts`
-  notify platform (`homeassistant/components/tts/notify.py`) pauses,
-  announces and resumes on a Music Assistant player, and interrupts a raw
-  Cast player. `README.md`, `docs/quickstart.md` and `docs/fr/doctrine.md`
-  now show that five-line recipe for a speaker output instead of implying
-  none exists; `docs/ARCHITECTURE.md`'s roadmap marks the sibling
-  `notify-cast` / `notify-airplay` rows superseded by it. Assist Satellite
-  Notifier is unaffected — `assist_satellite` still has no `notify` platform
-  of its own.
 
----
+## [0.5.0] - 2026-09-07
 
 Router 0.5.0 — night, catch-up and closing the loop (contract v0.5 addendum,
-ADR-0019), on top of the router 0.4.0 and 0.3.0 changes further down, which are
-in `main` but not tagged either. 0.4.0 made the first hour of use bearable;
-this release makes the *night* bearable, and closes what the router opens. Two
-new drop reasons, three optional options keys, two `data` keys and one store
-migration — no new action, no new event type, no renamed name.
+ADR-0019). 0.4.0 made the first hour of use bearable; this release makes the
+*night* bearable, and closes what the router opens. Two new drop reasons, three
+optional options keys, two `data` keys and one store migration — no new action,
+no new event type, no renamed name.
+
+### Highlights
+
+- **A message held for the morning can now expire.** `info` lives 2 h,
+  `normal` 12 h, `high` for ever — so nobody is told at 07:00 that the front
+  door was open at 23:31. Changeable for the whole household or for one call.
+- **One summary instead of eleven notifications.** When more than one message
+  survives the night for somebody, they get a single notification per device
+  listing them, rather than eleven banners at the moment they open their eyes.
+  Turn it off per person.
+- **"Back to normal" reaches only the people who were told.** The router now
+  remembers, per alert, who actually received something; everybody else is
+  dropped with the new reason `not_notified`.
+- **A notification is replaced rather than stacked, and cleared when the alert
+  ends.** Every message gets a name (`data.tag`), so a repeat updates the
+  notification already on the phone, and the phone is cleared once the episode
+  closes (observer mode).
+- **A message released in the morning is decided again from scratch** —
+  presence, snooze, a deleted target all apply as they would to a fresh call —
+  and the queue is flushed as soon as the last silence turns off, instead of
+  waiting for the wake time.
 
 ### Added
 
@@ -658,13 +770,33 @@ migration — no new action, no new event type, no renamed name.
   open across a real Home Assistant restart, because core's `AlertEntity` never
   re-reads its watched entity (ADR-0019 §6, amendment (d)).
 
----
+## [0.4.0] - 2026-09-07
 
 Router 0.4.0 — zero-config and explainability (contract v0.4 addendum,
-ADR-0018), on top of the router 0.3.0 changes further down, which are in `main`
-but not tagged either. Every feature here is discovery, defaults and diagnosis
-over the decision engine 0.1.0 already had: no new routing semantics, no new
-event type, no new drop reason, and one optional routing-table row key.
+ADR-0018). Every feature here is discovery, defaults and diagnosis over the
+decision engine 0.1.0 already had: no new routing semantics, no new event type,
+no new drop reason, and one optional routing-table row key.
+
+### Highlights
+
+- **A new read-only action, `notify_switchboard.explain`**, answers per person
+  what would happen to a message and why, in a translated sentence naming the
+  silence that is on, when the snooze lifts or which presence rule decided —
+  without sending anything.
+- **A fresh install works after one form.** Adding the first person also
+  creates a `default` target pointing at them, so `notify.switchboard` reaches
+  a real phone straight away.
+- **Phones are discovered instead of typed.** The person editor lists the
+  instance's notify services, marks the ones registered to that person's own
+  user account and pre-selects them; iOS Focus sensors are proposed as silence
+  entities.
+- **"Test a person" and "Test a target"** in the options menu send one real
+  message through the ordinary path and then show the `explain` answer for it.
+- **The `alert:` block to paste is generated for you** on a confirmation step
+  after saving a target, keyed on that target's own alert.
+- **Two new warnings when the configuration cannot work**: a person in an
+  audience with no notify service at all, and a target tied to an `alert.*`
+  that is not in the state machine.
 
 ### Added
 
@@ -746,10 +878,28 @@ event type, no new drop reason, and one optional routing-table row key.
   `alert:` block, the test steps and `explain` after it; `README.md` gains My
   Home Assistant buttons for HACS and for the config flow.
 
----
+## [0.3.0] - 2026-09-07
 
 Router 0.3.0 — debts and robustness (contract v0.3 addendum, ADR-0017). No new
 user-facing concept: no TTL, no summary, no escalation, no new option key.
+
+### Highlights
+
+- **Entity names are translated** into French and Spanish. The entity **ids**
+  are unchanged in every language, so no `alert:`, automation or card breaks.
+- **Notifications go out to every device at once**, each with a 30 second
+  timeout: one phone off the network no longer holds back everybody else.
+- **The five `notify_switchboard.*` actions exist even when the entry is
+  unloaded**, so an automation naming one no longer fails its own validation at
+  startup with "action not found".
+- **Two shutdown bugs are fixed**: a timer left running when Home Assistant
+  stops, and an error with a traceback logged on every single stop.
+- **Repairs clear themselves again.** A warning about a missing target or a
+  missing output used to outlive the very change it asked for; and a person
+  whose delivery raised an unexpected error is no longer lost from the
+  counters entirely.
+- **A new warning when a person has no Home Assistant user link**, which is
+  what the router needs to tell who pressed a Companion button.
 
 ### Added
 
@@ -1056,6 +1206,13 @@ Detailed in [`docs/known-issues.md`](docs/known-issues.md):
   against a real device; `context.user_id` is tried first and does not depend
   on it.
 
-[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.5.1...v0.6.0
+[0.5.1]: https://github.com/amiel-35/notify-switchboard/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.0.1...v0.1.0
