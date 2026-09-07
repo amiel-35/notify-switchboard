@@ -790,8 +790,8 @@ async def test_diagnostics_redacts_default_data_values_but_keeps_the_keys(
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     rows = {row["slug"]: row for row in diagnostics["entry"]["options"]["targets"]}
     assert rows["leak"]["default_data"] == {
-        "channel": "REDACTED",
-        "url": "REDACTED",
+        "channel": "**REDACTED**",
+        "url": "**REDACTED**",
     }
     assert rows["garage"]["default_data"] == {}
     # The rest of the row is untouched: a dump has to stay readable.
