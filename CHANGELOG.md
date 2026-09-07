@@ -40,6 +40,16 @@ what 0.7.0 had.
   as its device name. `explain` details, the options-menu test result and the
   three consistency repairs say "Bob (person.dev_bob)" where the reader has to
   go and change something, and "Bob" where they do not.
+- **Every option of the `outputs` selector carries a readable label**, not only
+  the person's own phones (ADR-0018 §2, amendment 2026-09-07). Another person's
+  phone reads as the device its owner named it — "Alice's phone (application
+  Home Assistant)"; `persistent_notification` reads as "Notifications de Home
+  Assistant"; anything else is turned back into words and keeps its own name in
+  brackets, "Airplay bedroom (airplay_bedroom)", because there is no friendlier
+  name to hide it behind and somebody changing a configuration needs it. The
+  translated "this person's device" marker stays reserved for their own phones,
+  which is the question the ordering and the marker exist to answer. Stored
+  values are unchanged: an option's `value` is still the raw service name.
 - **The priority and presence choices are translated chips** rather than
   `info` / `normal` / `high` / `critical` and `always` / `home_only` /
   `away_only`, through a `selector` translation key. The stored values are
@@ -47,15 +57,6 @@ what 0.7.0 had.
 - **`README.md` gains "Words used in the interface"** in the Glossary: the
   mapping from the word on the screen to the contract term, so the
   documentation and the interface stay linked.
-
-### Known limitation
-
-In the `outputs` selector, only the person's *own* phones carry a readable
-label. `tests/acceptance/test_s4_discovery.py` pins `label == value` for every
-other option — a deliberate 0.4.0 decision that 0.7.1 does not have the
-standing to overturn on its own — so a speaker offered there still reads as
-its bare service name. The audience selector, which nothing pins, is readable
-from end to end.
 
 Router 0.7.0 — **escalation and places, reduced** (contract v0.7 addendum,
 ADR-0021), on top of the 0.6.0, 0.5.1 and 0.5.0 notes below, which are in

@@ -405,23 +405,39 @@ def _companion_device_names(hass: HomeAssistant) -> dict[str, str]:
 
 
 def _output_label(
-    service: str, devices: Mapping[str, str], texts: Mapping[str, str]
+    service: str,
+    devices: Mapping[str, str],
+    texts: Mapping[str, str],
+    *,
+    identifier: str | None = None,
 ) -> str:
-    """Return a readable name for one `notify` service, without its own name.
+    """Return the label of one `notify` service option, brackets included.
 
-    Three cases, in order: a Companion registration is its device, spelled the
-    way its owner spelled it; `persistent_notification` is the one core service
-    worth a name of its own; anything else is at least turned back into words.
-    Callers append the service name itself -- somebody who has to go and change
-    a configuration needs it, and a label that hid it would be friendlier and
-    useless.
+    Three kinds, in order, and each one decides for itself whether the raw
+    identifier is worth showing:
+
+    - a Companion registration **is** its device, spelled the way its owner
+      spelled it in the app; the `mobile_app_…` slug core derives from that
+      name is noise nobody has to read, so it is dropped;
+    - `persistent_notification` is the one core service worth a name of its
+      own, and that name says the whole thing;
+    - anything else has no friendlier name to hide behind, so it is at least
+      turned back into words and keeps its own name in brackets -- somebody
+      who has to go and change a configuration needs it.
+
+    `identifier` is what those brackets say, the service name by default. The
+    audience selector stores `notify.<service>` rather than the bare service
+    and has to show what it stores, which is the only reason this is an
+    argument rather than `service` itself.
     """
     device = devices.get(service)
     if device is not None:
         return f"{device} ({texts[LABEL_HOME_ASSISTANT_APP]})"
     if service == SERVICE_PERSISTENT_NOTIFICATION:
         return texts[LABEL_PERSISTENT_NOTIFICATION]
-    return service.replace("_", " ").capitalize()
+    name = service if identifier is None else identifier
+    readable = service.replace("_", " ").capitalize()
+    return readable if readable == name else f"{readable} ({name})"
 
 
 @callback
@@ -430,21 +446,28 @@ def _output_options(
     owned: list[str],
     marker: str,
     devices: Mapping[str, str] | None = None,
+    labels: Mapping[str, str] | None = None,
 ) -> list[selector.SelectOptionDict]:
-    """Build the `outputs` option list: this person's phones first, labelled.
+    """Build the `outputs` option list: this person's phones first, all labelled.
 
     `sort` is left at its default `False` on the selector so the frontend keeps
     this order; it is the whole point of the list.
 
     v0.7.1 opens the label of the person's *own* phones on the device name,
     which is the only thing they recognise -- "Bob's iPhone" rather than
-    `mobile_app_bob_s_iphone`. Every other option keeps the bare service name
-    as its label, and that is not an oversight: `test_s4_discovery.py`
-    §"the persons own phones come first and are labelled" pins
-    `label == value` for anything that is not this person's, so labelling them
-    is a change to an acceptance test rather than to this function.
+    `mobile_app_bob_s_iphone` -- and keeps the translated marker for them
+    alone, because "which of these is mine" is the question the ordering and
+    the marker exist to answer.
+
+    ADR-0018 §2 (amendment 2026-09-07) extends that to the rest of the list:
+    every option carries a readable label too. The first version of the ADR
+    said the others carried "the service name itself", which left raw slugs on
+    screen next to a labelled one -- the interface speaking like the code in
+    the one place a newcomer is asked to recognise their own phone. Only the
+    marker stays reserved; the `value` is the raw service name throughout.
     """
     devices = devices if devices is not None else _companion_device_names(hass)
+    texts = dict(OPTION_LABEL_FALLBACKS) | dict(labels or {})
     available = sorted(
         service
         for service in hass.services.async_services_for_domain(NOTIFY_DOMAIN)
@@ -458,7 +481,12 @@ def _output_options(
             label=f"{devices.get(service, service)} — {marker} ({service})",
         )
         for service in first
-    ] + [selector.SelectOptionDict(value=service, label=service) for service in rest]
+    ] + [
+        selector.SelectOptionDict(
+            value=service, label=_output_label(service, devices, texts)
+        )
+        for service in rest
+    ]
 
 
 @callback
@@ -479,9 +507,10 @@ def _audience_options(
     domain readable in the stored row and in the routing-table entity.
 
     v0.7.1 labels every option: a person by the name Home Assistant shows, a
-    speaker in words with its own name kept in brackets. Nothing an acceptance
-    test pins lives here, so unlike `_output_options` this list is readable
-    from end to end.
+    speaker in words with the `notify.<service>` it stores kept in brackets, a
+    phone by the device its owner named. `_output_label` composes the whole
+    label, brackets included, because which identifier is worth showing
+    depends on the kind of output.
     """
     texts = dict(OPTION_LABEL_FALLBACKS) | dict(labels or {})
     devices = _companion_device_names(hass)
@@ -496,7 +525,7 @@ def _audience_options(
     ] + [
         selector.SelectOptionDict(
             value=(value := f"{NOTIFY_DOMAIN}.{service}"),
-            label=f"{_output_label(service, devices, texts)} ({value})",
+            label=_output_label(service, devices, texts, identifier=value),
         )
         for service in speakers
     ]
@@ -925,6 +954,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                             self.hass,
                             _discovered_outputs(self.hass, person_id),
                             labels["this_persons_device"],
+                            labels=labels,
                         ),
                         multiple=True,
                         # A phone that has not registered yet, or an output
