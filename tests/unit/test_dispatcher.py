@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from typing import Any
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import homeassistant.helpers.device_registry as dr
@@ -27,6 +28,7 @@ from custom_components.notify_switchboard.diagnostics import (
 )
 from custom_components.notify_switchboard.dispatcher import (
     OUTPUT_TIMEOUT_SECONDS,
+    Switchboard,
     companion_service_name,
     next_wake_time,
 )
@@ -1173,6 +1175,52 @@ async def test_a_successful_call_clears_the_failure_counter(
     )
     await hass.async_block_till_done()
     assert entry.runtime_data.switchboard.failing_outputs == {}
+
+
+async def test_a_delivery_that_raises_is_counted_as_a_failed_delivery(
+    hass: HomeAssistant,
+) -> None:
+    """The fan-out guard must account for the person it just lost.
+
+    `_async_deliver_all` gathers with `return_exceptions=True`, so an
+    unexpected error in one person's delivery does not abort the others -- but
+    logging it and moving on made that person vanish from the counters
+    entirely: neither routed nor dropped, with `sensor.switchboard_*` silently
+    disagreeing with what actually went out.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    ok = async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("person.bob", "home")
+    await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [make_target("leak", audience=["person.alice", "person.bob"])],
+        "leak",
+    )
+
+    original = Switchboard._async_deliver
+
+    async def _boom(self, routed, message, title):
+        if routed.person == "person.alice":
+            raise RuntimeError("boom")
+        await original(self, routed, message, title)
+
+    with patch.object(Switchboard, "_async_deliver", _boom):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    # Bob still got his notification: one failure never aborts the fan-out.
+    assert len(ok) == 1
+    assert hass.states.get("sensor.switchboard_routed_today").state == "1"
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.state == "1"
+    assert dropped.attributes["reasons"] == {"delivery_failed": 1}
 
 
 async def test_the_unknown_target_repair_is_cleared_once_the_row_exists(
