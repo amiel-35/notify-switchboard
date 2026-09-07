@@ -14,7 +14,18 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import dt as dt_util
 
-from .const import ATTR_REASONS
+from .const import (
+    ATTR_REASONS,
+    CONF_ALERT_ENTITY,
+    CONF_ALLOW_ACKNOWLEDGE,
+    CONF_AUDIENCE,
+    CONF_PERSONS,
+    CONF_SLUG,
+    CONF_SNOOZE_MINUTES,
+    CONF_SUMMARY,
+    CONF_TARGETS,
+    CONF_WAKE_TIME,
+)
 from .dispatcher import Switchboard
 from .entity import SwitchboardGlobalEntity, SwitchboardPersonEntity
 from .router import PersonConfig
@@ -34,6 +45,7 @@ async def async_setup_entry(
         RoutedTodaySensor(switchboard),
         DroppedTodaySensor(switchboard),
         DeferredTodaySensor(switchboard),
+        RoutingTableSensor(switchboard),
     ]
     for person in switchboard.table.persons.values():
         entities.append(LastNotificationSensor(switchboard, person))
@@ -116,6 +128,84 @@ class DeferredTodaySensor(DailyCounterSensor):
         for person, slug, _tag in self._switchboard.store.deferrals:
             queued.setdefault(person, []).append(slug)
         return {"queued": queued}
+
+
+class RoutingTableSensor(SwitchboardGlobalEntity, SensorEntity):
+    """The routing table, so cards stop copying it (contract v0.7, ADR-0021 §3).
+
+    Every card written against this integration re-declares the slugs, the
+    names, the snooze durations and the wake times in its own YAML, because
+    nothing exposes them -- and that copy goes stale on the first options edit,
+    silently.
+
+    The two lists are **closed**: exactly the keys the contract names, and
+    nothing is added to either without an ADR. In particular the entity never
+    exposes a target's `default_data` -- the one key that carries whatever the
+    user put in it, which is where an API key, a webhook path or a phone number
+    ends up, and a state attribute is readable by anybody who can read the
+    state machine -- and never a person's `outputs`, which are that person's
+    physical devices. A caller that needs to know what *would* happen has
+    `notify_switchboard.explain` (ADR-0018 §1).
+
+    Both attributes are excluded from the recorder
+    (`$HA_CORE_SRC/homeassistant/helpers/entity.py` line 554,
+    `Entity._unrecorded_attributes`; unioned into
+    `__combined_unrecorded_attributes` by `__init_subclass__` at line 600 and
+    published on the state at line 1539 -- the mechanism `schedule` itself uses
+    for its custom block data). They are configuration, they change only on an
+    options edit, and writing the whole routing table into the database on
+    every state write would be a cost for nothing.
+    """
+
+    _unrecorded_attributes = frozenset({CONF_TARGETS, CONF_PERSONS})
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "targets"
+
+    def __init__(self, switchboard: Switchboard) -> None:
+        """Initialise `sensor.switchboard_routing_table`."""
+        super().__init__(switchboard, "routing_table")
+
+    @property
+    def native_value(self) -> int:
+        """Return the number of targets."""
+        return len(self._switchboard.table.targets)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose the two closed lists, in options order.
+
+        `alert_entity` and `wake_time` are `null` when the row has none, never
+        absent, so a card reads the same shape for every row; `wake_time` is
+        the `"HH:MM:SS"` string the options carry, so a card can print it
+        without parsing anything. `audience` is reported verbatim, bare outputs
+        included, because that is what the audience is.
+        """
+        table = self._switchboard.table
+        return {
+            CONF_TARGETS: [
+                {
+                    CONF_SLUG: target.slug,
+                    "name": target.name,
+                    CONF_ALERT_ENTITY: target.alert_entity,
+                    CONF_SNOOZE_MINUTES: list(target.snooze_minutes),
+                    CONF_ALLOW_ACKNOWLEDGE: target.allow_acknowledge,
+                    CONF_AUDIENCE: list(target.audience),
+                }
+                for target in table.targets.values()
+            ],
+            CONF_PERSONS: [
+                {
+                    "entity_id": person.entity_id,
+                    CONF_WAKE_TIME: (
+                        person.wake_time.isoformat()
+                        if person.wake_time is not None
+                        else None
+                    ),
+                    CONF_SUMMARY: person.summary,
+                }
+                for person in table.persons.values()
+            ],
+        }
 
 
 class LastNotificationSensor(SwitchboardPersonEntity, SensorEntity):

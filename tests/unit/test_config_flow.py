@@ -123,6 +123,9 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
         "target",
         "edit_target",
         "edit_target_advanced",
+        # v0.7 (ADR-0021 §1): `escalate_when_nobody_home` gets a step of its
+        # own, because contract v0.6 enumerates what `target_advanced` holds.
+        "edit_target_escalation",
         "remove_target",
         "general",
         # v0.5 (ADR-0019 §1): the household's time-to-live policy.
@@ -1018,3 +1021,139 @@ async def test_clearing_the_wake_time_is_a_supported_answer(
     person = entry.options[CONF_PERSONS][0]
     assert person["wake_time"] is None
     assert "summary" not in person
+
+
+# ---------------------------------------------------------------------------
+# v0.7 (ADR-0021): the escalation step and the global critical-payload option
+# ---------------------------------------------------------------------------
+
+
+async def test_the_escalation_step_writes_only_its_own_field(
+    hass: HomeAssistant,
+) -> None:
+    """`escalate_when_nobody_home`, and not one other key of the target.
+
+    It lives in a step of its own rather than as a tenth field on
+    `target_advanced` because contract v0.6 §"Four options-flow step ids are
+    public" enumerates what that step holds and the v0.7 addendum does not
+    amend the list.
+    """
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry, snooze_minutes="15, 60", audience=["person.alice"])
+    before = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
+    assert "escalate_when_nobody_home" not in before, "absent means off"
+
+    result = await _options_step(
+        hass,
+        entry,
+        "edit_target_escalation",
+        {"slug": "leak"},
+        {"escalate_when_nobody_home": True},
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+
+    after = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
+    assert after["escalate_when_nobody_home"] is True
+    assert {
+        key: value for key, value in after.items() if key != "escalate_when_nobody_home"
+    } == before, "the step must not be able to change anything else"
+
+
+async def test_the_escalation_step_opens_on_the_stored_value_and_can_clear_it(
+    hass: HomeAssistant,
+) -> None:
+    """Unticking it removes the key rather than storing `False`."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry, audience=["person.alice"])
+    await _options_step(
+        hass,
+        entry,
+        "edit_target_escalation",
+        {"slug": "leak"},
+        {"escalate_when_nobody_home": True},
+    )
+
+    form = await _options_step(hass, entry, "edit_target_escalation", {"slug": "leak"})
+    assert form["step_id"] == "target_escalation"
+    assert [str(marker) for marker in form["data_schema"].schema] == [
+        "escalate_when_nobody_home"
+    ]
+
+    await _options_step(
+        hass,
+        entry,
+        "edit_target_escalation",
+        {"slug": "leak"},
+        {"escalate_when_nobody_home": False},
+    )
+    row = next(item for item in entry.options[CONF_TARGETS] if item["slug"] == "leak")
+    assert "escalate_when_nobody_home" not in row
+
+
+async def test_the_escalation_picker_aborts_on_an_empty_table(
+    hass: HomeAssistant,
+) -> None:
+    """No target, nothing to open."""
+    entry = await _create_entry(hass)
+    result = await _options_step(hass, entry, "edit_target_escalation")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "nothing_to_edit"
+
+
+async def test_the_general_step_carries_the_critical_payload_option(
+    hass: HomeAssistant,
+) -> None:
+    """Written only when it is turned off; absent keeps meaning on."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
+    assert "critical_payload" not in entry.options
+
+    await _options_step(
+        hass,
+        entry,
+        "general",
+        {"default_target": "leak", "critical_payload": False},
+    )
+    assert entry.options["critical_payload"] is False
+
+    # And editing something else must not silently put it back on: `_load`
+    # carries it over, exactly as it does `ttl_minutes`.
+    await _add_person(hass, entry, person="person.bob")
+    assert entry.options["critical_payload"] is False
+
+    await _options_step(
+        hass,
+        entry,
+        "general",
+        {"default_target": "leak", "critical_payload": True},
+    )
+    assert "critical_payload" not in entry.options
+
+
+async def test_the_audience_selector_offers_the_notify_services_too(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0021 §5: bare outputs sit alongside the persons, no new menu."""
+    async_mock_service(hass, "notify", "kitchen_speaker")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(hass, entry, "target")
+    validator = next(
+        value
+        for marker, value in result["data_schema"].schema.items()
+        if str(marker) == "audience"
+    )
+    values = [
+        option["value"] if isinstance(option, dict) else option
+        for option in validator.config["options"]
+    ]
+    assert values[0] == "person.alice", "the persons come first"
+    assert "notify.kitchen_speaker" in values
+    assert validator.config["custom_value"] is True
+    assert not any("switchboard" in value for value in values), (
+        "offering the router's own service configures a recursion it then has to refuse"
+    )

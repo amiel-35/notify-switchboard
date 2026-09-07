@@ -29,12 +29,15 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol
+from homeassistant.components.notify import NotifyEntityFeature
 from homeassistant.const import (
     ATTR_ENTITY_ID,
+    ATTR_SUPPORTED_FEATURES,
     EVENT_HOMEASSISTANT_STOP,
     STATE_IDLE,
     STATE_OFF,
     STATE_ON,
+    STATE_UNAVAILABLE,
 )
 from homeassistant.core import (
     CALLBACK_TYPE,
@@ -68,9 +71,12 @@ from .const import (
     ATTR_AUTHENTICATION_REQUIRED,
     ATTR_DECISION,
     ATTR_DETAIL,
+    ATTR_ESCALATED,
+    ATTR_MIN_PRIORITY,
     ATTR_MISSING_OUTPUTS,
     ATTR_NEXT_EVENT,
     ATTR_NOTIFICATION_ID,
+    ATTR_OS_NAME,
     ATTR_OUTPUTS,
     ATTR_PERSON,
     ATTR_PERSONS,
@@ -84,6 +90,7 @@ from .const import (
     AUTHENTICATED_PRIORITIES,
     CLEAR_NOTIFICATION_MESSAGE,
     COMPANION_OUTPUT_PREFIX,
+    CONF_CRITICAL_PAYLOAD,
     CONF_TTL_MINUTES,
     DECISION_DEFERRED,
     DECISION_DROPPED,
@@ -119,6 +126,9 @@ from .const import (
     MAX_TRACKED_INVALID_SERVICE_CALLS,
     MIN_SILENCE_MINUTES,
     PERSISTENT_NOTIFICATION_OUTPUT,
+    PRIORITY_CRITICAL,
+    PRIORITY_RANK,
+    SERVICE_SEND_MESSAGE,
     SIGNAL_STATE_UPDATED,
     SUMMARY_TAG,
     TEST_MESSAGE_TAG,
@@ -136,13 +146,17 @@ from .router import (
     build_routing_table,
     caller_tag,
     collapse_by_tag,
+    critical_keys_for_os,
     decide,
+    effective_priority,
     effective_tag,
     is_recursive_output,
     merge_data,
     parse_action,
+    parse_min_priority,
     resolve_priority,
     resolve_ttl,
+    silences_catching,
     split_outputs,
     state_is_on,
     summary_data,
@@ -199,6 +213,9 @@ KEY_SUMMARY_LINE_UNTITLED = (
 # reason added to the contract cannot silently lose its sentence.
 KEY_DETAIL_PREFIX = f"component.{DOMAIN}.{TRANSLATION_CATEGORY}.detail_"
 DETAIL_SILENCED_TEMPORARY = "silenced_temporary"
+# The floored variant of `detail_silenced` (ADR-0021 §2): same drop reason,
+# same switch to look at, plus the floor that decided which calls it catches.
+DETAIL_SILENCED_FLOOR = "silenced_floor"
 
 FALLBACK_ACKNOWLEDGE = "Acknowledge"
 FALLBACK_SNOOZE = "Snooze {minutes} min"
@@ -438,11 +455,19 @@ class Switchboard:
             if (state := self.hass.states.get(entity_id)) is not None:
                 person_states[entity_id] = state.state
 
-        silenced: dict[str, bool] = {}
+        # Only the entities that are **on**, each mapped to the floor it
+        # publishes (ADR-0021 §2). An entity that is `off` is simply absent,
+        # which is what makes "is this silence catching my call" one membership
+        # test plus one rank comparison rather than two lookups.
+        silenced: dict[str, str | None] = {}
         for person in self.table.persons.values():
             for entity_id in person.silence_entities:
                 state = self.hass.states.get(entity_id)
-                silenced[entity_id] = state_is_on(state.state if state else None)
+                if state is None or not state_is_on(state.state):
+                    continue
+                silenced[entity_id] = parse_min_priority(
+                    state.attributes.get(ATTR_MIN_PRIORITY)
+                )
 
         return RoutingContext(
             now=now,
@@ -534,6 +559,75 @@ class Switchboard:
             and state.state == STATE_ON
             for entity_id in person.silence_entities
         )
+
+    @property
+    def critical_payload_enabled(self) -> bool:
+        """Return whether the Companion critical keys are added (ADR-0021 §7).
+
+        `entry.options["critical_payload"]` is a boolean whose default is
+        **true**, and an absent key means true -- so no migration and no
+        options rewrite. Only an explicit `False` turns it off, and turning it
+        off never puts `data.priority` back: the strip of §7(a) is
+        unconditional.
+        """
+        return self.entry.options.get(CONF_CRITICAL_PAYLOAD, True) is not False
+
+    def notify_entity_id(self, output: str) -> str | None:
+        """Return the `notify` entity id this output resolves to, or None (§6).
+
+        A legacy notify service and a notify entity share one namespace, so the
+        order has to be stated rather than discovered: **a registered service
+        wins**, which is exactly today's behaviour for every output that exists
+        today. Only an output that is not a registered service, and that is in
+        the `notify` domain, is looked up as an entity.
+
+        The router resolves the entity itself rather than calling and hoping.
+        `notify.send_message` is an entity service: an `entity_id` that
+        resolves to nothing is **logged and skipped**
+        (`$HA_CORE_SRC/homeassistant/helpers/service.py`,
+        `_resolve_entity_service_call_entities` at line 675, its
+        `referenced.log_missing(...)` at line 730), and one that exists but is
+        `unavailable` is filtered out of the candidates at line 722. Either way
+        the call succeeds and nothing is delivered, so a router that did not
+        check would count a delivery that never happened.
+        """
+        domain, _, service = output.rpartition(".")
+        if (domain or NOTIFY_DOMAIN) != NOTIFY_DOMAIN:
+            return None
+        entity_id = f"{NOTIFY_DOMAIN}.{service}"
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state == STATE_UNAVAILABLE:
+            return None
+        return entity_id
+
+    def output_is_reachable(self, output: str) -> bool:
+        """Return True when an output resolves to a service or a notify entity."""
+        domain, _, service = output.rpartition(".")
+        domain = domain or NOTIFY_DOMAIN
+        if self.hass.services.has_service(domain, service):
+            return True
+        return self.notify_entity_id(output) is not None
+
+    def companion_os_name(self, service: str) -> str | None:
+        """Return the `os_name` of the registration behind a Companion output.
+
+        The output service name is `slugify(f"mobile_app_{device_name}")`
+        (`$HA_CORE_SRC/homeassistant/components/notify/legacy.py`), which is
+        what `companion_service_name` composes, so the match is against the
+        `device_name` of each `mobile_app` config entry -- the same entry data
+        the router already reads `user_id` from. `None` is "no matching
+        registration, or one that declares no OS", which
+        `router.critical_keys_for_os` answers with both key sets.
+        """
+        for entry in self.hass.config_entries.async_entries(MOBILE_APP_DOMAIN):
+            device_name = entry.data.get("device_name")
+            if not device_name:
+                continue
+            if companion_service_name(str(device_name)) != service:
+                continue
+            os_name = entry.data.get(ATTR_OS_NAME)
+            return str(os_name) if os_name else None
+        return None
 
     def temporary_silence_until(self, person: PersonConfig) -> datetime | None:
         """Return when a temporary silence lifts, or None when there is none."""
@@ -708,8 +802,12 @@ class Switchboard:
             )
 
         data: dict[str, Any] = {} if priority is None else {ATTR_PRIORITY: priority}
-        effective = resolve_priority(target, data)
         context = self.build_context()
+        # ADR-0021 §8: `priority` reports the **escalated** priority, because
+        # `explain` answers "what would happen to a message sent right now" and
+        # right now the escalation is part of that. `escalated` names the rule
+        # that changed it, and is `null` when nothing did.
+        effective, escalated = effective_priority(target, data, context)
         # The message is never sent and never read: `decide` does not look at it.
         decision = decide(
             self.table,
@@ -717,12 +815,17 @@ class Switchboard:
             context,
         )
 
-        routed = {item.person: item for item in decision.routed}
+        routed = {item.person: item for item in decision.routed if not item.is_bare}
         dropped: dict[str | None, str] = {}
         for drop in decision.dropped:
-            dropped.setdefault(drop.person, drop.reason)
+            if drop.output is None:
+                dropped.setdefault(drop.person, drop.reason)
 
-        wanted = [person] if person is not None else list(target.audience)
+        # `persons` stays a mapping of `person.*` entity ids: a bare output is
+        # not a person and never appears there (ADR-0021 §5). It is listed under
+        # the top-level `outputs` key instead, because it has no person to hang
+        # off.
+        wanted = [person] if person is not None else list(target.audience_persons)
         persons: dict[str, Any] = {}
         for person_id in wanted:
             persons[person_id] = await self._async_explain_person(
@@ -731,12 +834,15 @@ class Switchboard:
                 routed.get(person_id),
                 dropped.get(person_id),
                 context,
+                priority=effective,
             )
 
         return {
             ATTR_TARGET: slug,
             ATTR_PRIORITY: effective,
             ATTR_PERSONS: persons,
+            ATTR_ESCALATED: escalated,
+            ATTR_OUTPUTS: list(target.bare_outputs),
         }
 
     async def _async_explain_person(
@@ -746,8 +852,15 @@ class Switchboard:
         routed: RoutedDelivery | None,
         reason: str | None,
         context: RoutingContext,
+        *,
+        priority: str,
     ) -> dict[str, Any]:
-        """Turn one person's outcome into the frozen six-key answer."""
+        """Turn one person's outcome into the frozen six-key answer.
+
+        `priority` is the effective one, escalation included: it is what
+        decides which of this person's `on` silence entities actually catch the
+        message, and therefore what the `detail` sentence has to name.
+        """
         person = self.table.persons.get(person_id)
         reachable, missing = self._split_registered_outputs(person)
 
@@ -762,6 +875,7 @@ class Switchboard:
                     person_id,
                     person,
                     context,
+                    priority=priority,
                     outputs=reachable,
                 ),
                 ATTR_OUTPUTS: reachable,
@@ -784,6 +898,7 @@ class Switchboard:
                     person_id,
                     person,
                     context,
+                    priority=priority,
                     until=until,
                 ),
                 ATTR_OUTPUTS: reachable,
@@ -795,7 +910,7 @@ class Switchboard:
             ATTR_UNTIL: None,
             ATTR_REASON: reason,
             ATTR_DETAIL: await self._async_detail(
-                reason, target, person_id, person, context
+                reason, target, person_id, person, context, priority=priority
             ),
             # Nothing would be called, so there is nothing to list (ADR-0018
             # §1). `missing_outputs` is still reported: a broken output is worth
@@ -831,6 +946,9 @@ class Switchboard:
         "where would this go" is something you can paste into Developer tools
         (ADR-0018 §1). Recursive outputs appear in neither: they are refused,
         not absent.
+
+        "Registered" means reachable, which from 0.7.0 is a registered legacy
+        service **or** an available `notify` entity (ADR-0021 §6).
         """
         if person is None:
             return [], []
@@ -841,7 +959,11 @@ class Switchboard:
             domain, _, service = output.rpartition(".")
             domain = domain or NOTIFY_DOMAIN
             full = f"{domain}.{service}"
-            if self.hass.services.has_service(domain, service):
+            # ADR-0021 §6: an output that is not a registered service may still
+            # be an available `notify` entity, and one that is is reachable.
+            # An entity id in no state machine, or an `unavailable` one, is a
+            # missing output exactly as an unregistered service is.
+            if self.output_is_reachable(output):
                 registered.append(full)
             else:
                 missing.append(full)
@@ -855,6 +977,7 @@ class Switchboard:
         person: PersonConfig | None,
         context: RoutingContext,
         *,
+        priority: str,
         outputs: list[str] | None = None,
         until: datetime | None = None,
     ) -> str:
@@ -881,17 +1004,31 @@ class Switchboard:
         }
 
         if key == DROP_SILENCED:
-            on_entities = self._silence_entities_on(person, context)
-            if not on_entities:
-                # No configured entity is on, so what silences this person is a
-                # temporary `notify_switchboard.silence`: name when it lifts
-                # rather than a switch they would look for and not find.
+            catching = self._silences_catching(person, context, priority)
+            if not catching:
+                # No configured entity catches this call, so what silences this
+                # person is a temporary `notify_switchboard.silence`: name when
+                # it lifts rather than a switch they would look for and not
+                # find.
                 key = DETAIL_SILENCED_TEMPORARY
                 placeholders["until"] = _local_text(
                     self.temporary_silence_until(person) if person else None
                 )
             else:
-                placeholders["entities"] = ", ".join(on_entities)
+                placeholders["entities"] = ", ".join(catching)
+                # ADR-0021 §2: naming only the entity leaves the user unable to
+                # tell why the `high` message got through and the `normal` one
+                # did not, so a floored silence gets a sentence that names the
+                # floor as well. Only when *every* catching entity carries one:
+                # one floor-less silence among them catches everything, and
+                # quoting a floor there would be a half-truth.
+                floors = [context.silenced[entity_id] for entity_id in catching]
+                if all(floor is not None for floor in floors):
+                    key = DETAIL_SILENCED_FLOOR
+                    placeholders["floor"] = max(
+                        (floor for floor in floors if floor is not None),
+                        key=lambda floor: PRIORITY_RANK[floor],
+                    )
         elif key == DECISION_DEFERRED:
             placeholders["entities"] = ", ".join(
                 self._silence_entities_on(person, context)
@@ -921,8 +1058,22 @@ class Switchboard:
         return [
             entity_id
             for entity_id in person.silence_entities
-            if context.silenced.get(entity_id, False)
+            if entity_id in context.silenced
         ]
+
+    def _silences_catching(
+        self, person: PersonConfig | None, context: RoutingContext, priority: str
+    ) -> list[str]:
+        """Return the person's `on` silences that catch a call at `priority`.
+
+        Narrower than `_silence_entities_on` from 0.7.0, and for the same
+        reason it existed in the first place: with a floor in play, an entity
+        that is on but lets this call through is not the switch the user has to
+        look at (ADR-0021 §2).
+        """
+        if person is None:
+            return []
+        return silences_catching(person, context, priority)
 
     # ------------------------------------------------------------------
     # Delivery
@@ -998,7 +1149,8 @@ class Switchboard:
         # scoped to the outputs that read it.
         router_tag = caller_tag(routed.data) is None
         # Every output of this person at once, each bounded by its own timeout:
-        # a phone off the network must not hold back the tablet next to it.
+        # a phone off the network must not hold back the tablet next to it. A
+        # bare output has exactly one, and this loop is the same one.
         outcomes = await asyncio.gather(
             *(
                 self._async_call_output(
@@ -1008,6 +1160,8 @@ class Switchboard:
                     payload,
                     target.slug,
                     router_tag=router_tag,
+                    priority=routed.priority,
+                    bare=routed.is_bare,
                 )
                 for output in routed.outputs
             ),
@@ -1029,7 +1183,10 @@ class Switchboard:
 
         self._async_record_episode(target, routed, payload, delivered)
         self.routed_today += 1
-        self.last_notification[routed.person] = dt_util.utcnow()
+        if routed.person is not None:
+            # A bare output is nobody's phone, so there is no
+            # `sensor.<person>_last_notification` for it to move (ADR-0021 §5).
+            self.last_notification[routed.person] = dt_util.utcnow()
         self._async_fire_delivery_event(
             EVENT_TYPE_ROUTED,
             {
@@ -1061,7 +1218,10 @@ class Switchboard:
         episode = self.store.episodes.get(target.slug)
         if episode is None or not episode.is_open:
             return
-        episode.persons.add(routed.person)
+        # The audience entry, not the person: a bare output is an episode
+        # recipient like any other (ADR-0021 §5), and what `decide` filters a
+        # `done` message against is the entry as the audience spells it.
+        episode.persons.add(routed.audience_entry)
         episode.outputs.update(delivered)
         episode.tags.add(str(payload[ATTR_TAG]))
         self._episodes_dirty = True
@@ -1092,6 +1252,89 @@ class Switchboard:
             payload[ATTR_AUTHENTICATION_REQUIRED] = True
         return payload
 
+    def _scope_output_data(
+        self,
+        payload: Mapping[str, Any],
+        service: str,
+        *,
+        router_tag: bool,
+        priority: str | None,
+        bare: bool,
+    ) -> dict[str, Any]:
+        """Return the `data` this one output actually receives.
+
+        ADR-0019 §6, amendment 2026-09-07 (2): the router is a proxy
+        (ADR-0002), so an output receives the caller's `data` merged with the
+        row's `default_data` and nothing else. The keys the router adds for
+        itself are scoped here, per output -- never on the shared payload,
+        which the episode record and the clear logic still read whole. Not
+        cosmetic: a sibling adapter that validates its `data` (AirPlay
+        Notifier's voluptuous schema, `PREVENT_EXTRA` by default; Assist
+        Satellite Notifier's `ALLOWED_DATA_KEYS`) raises
+        `ServiceValidationError` on a key it does not know, so a router key
+        sent to one of them fails every single call.
+        """
+        data = dict(payload)
+        companion = service.startswith(COMPANION_OUTPUT_PREFIX)
+        persistent = service == PERSISTENT_NOTIFICATION_OUTPUT
+        if bare or not companion:
+            # Companion buttons only make sense on a Companion output -- and a
+            # bare output is nobody's phone, so it gets none of them even when
+            # it is one (ADR-0021 §5).
+            data.pop(ATTR_ACTIONS, None)
+            data.pop(ATTR_AUTHENTICATION_REQUIRED, None)
+            # `tag` is read by the Companion app and, below, as the source of
+            # the `persistent_notification` id. Anywhere else it is a key the
+            # router invented. A tag the *caller* wrote is the caller's own key
+            # and is proxied like any other.
+            if router_tag and (bare or not persistent):
+                data.pop(ATTR_TAG, None)
+        if companion:
+            self._apply_companion_payload(data, priority, service)
+        # `data.notification_id` mirrors the effective tag, and is added for the
+        # bare `persistent_notification` output only -- the one core documents
+        # as reading it (`components/notify/__init__.py`, the
+        # `persistent_notification` service handler: `notification_id =
+        # data.get(pn.ATTR_NOTIFICATION_ID)`, then `pn.async_create(...)`).
+        # Every other output would receive a key it has no use for. A
+        # caller-supplied value wins here too, hence the membership test.
+        if not bare and persistent and ATTR_NOTIFICATION_ID not in data:
+            tag = data.get(ATTR_TAG)
+            if tag is not None:
+                data[ATTR_NOTIFICATION_ID] = str(tag)
+        return data
+
+    async def _async_call_unregistered_output(
+        self,
+        output: str,
+        domain: str,
+        service: str,
+        *,
+        message: str,
+        title: str | None,
+        slug: str,
+    ) -> bool:
+        """Handle an output that is not a registered legacy service (§6).
+
+        It may still be a `notify` **entity** -- Alexa Devices, Telegram, a
+        core `NotifyGroup` -- in which case `message` and `title` are the only
+        things that survive the trip. Anything else is a missing output, with
+        the same counter, the same repair and the same `delivery_failed` drop
+        an unregistered service has always produced.
+        """
+        if (entity_id := self.notify_entity_id(output)) is not None:
+            return await self._async_call_notify_entity(
+                output, entity_id, message, title, slug
+            )
+        self._async_record_output_failure(output)
+        _LOGGER.warning(
+            "Output %s.%s is neither a registered service nor an available "
+            "notify entity (yet); will retry on the next call",
+            domain,
+            service,
+        )
+        return False
+
     async def _async_call_output(
         self,
         output: str,
@@ -1101,6 +1344,8 @@ class Switchboard:
         slug: str,
         *,
         router_tag: bool,
+        priority: str | None = None,
+        bare: bool = False,
     ) -> bool:
         """Call one `notify.*` output; never let a failure stop the others.
 
@@ -1108,6 +1353,18 @@ class Switchboard:
         rather than a value the caller (or the row's `default_data`) wrote. A
         router key is scoped to the outputs that read it; a caller key is
         proxied to all of them (ADR-0019 §6, amendment 2026-09-07 (2)).
+
+        `bare` says this output is an audience entry of its own rather than one
+        of a person's phones (ADR-0021 §5): it receives exactly the caller's
+        `data` merged with the target's `default_data` and nothing the router
+        invented, even when it happens to be a Companion service. What it does
+        *not* escape is §7 -- the critical payload is a property of the
+        service, not of the audience entry.
+
+        `priority` is the **effective** priority of this message, after the
+        escalation of §1. `None` means "this is not a routed message" -- a
+        wake-time summary, whose `data` is built rather than merged and which
+        can never be critical, since a critical message is never deferred.
         """
         if is_recursive_output(output):
             _LOGGER.error(
@@ -1121,51 +1378,16 @@ class Switchboard:
         domain = domain or NOTIFY_DOMAIN
 
         if not self.hass.services.has_service(domain, service):
-            self._async_record_output_failure(output)
-            _LOGGER.warning(
-                "Output %s.%s does not exist (yet); will retry on the next call",
-                domain,
-                service,
+            return await self._async_call_unregistered_output(
+                output, domain, service, message=message, title=title, slug=slug
             )
-            return False
 
         service_data: dict[str, Any] = {"message": message}
         if title is not None:
             service_data["title"] = title
-        # ADR-0019 §6, amendment 2026-09-07 (2): the router is a proxy
-        # (ADR-0002), so an output receives the caller's `data` merged with the
-        # row's `default_data` and nothing else. The keys the router adds for
-        # itself are scoped, here, per output -- never on the shared
-        # payload, which the episode record and the clear logic still read
-        # whole. Not cosmetic: a sibling adapter that validates its `data`
-        # (AirPlay Notifier's voluptuous schema, `PREVENT_EXTRA` by default;
-        # Assist Satellite Notifier's `ALLOWED_DATA_KEYS`) raises
-        # `ServiceValidationError` on a key it does not know, so a router key
-        # sent to one of them fails every single call.
-        data = dict(payload)
-        companion = service.startswith(COMPANION_OUTPUT_PREFIX)
-        persistent = service == PERSISTENT_NOTIFICATION_OUTPUT
-        if not companion:
-            # Companion buttons only make sense on a Companion output.
-            data.pop(ATTR_ACTIONS, None)
-            data.pop(ATTR_AUTHENTICATION_REQUIRED, None)
-            # `tag` is read by the Companion app and, below, by this method as
-            # the source of the `persistent_notification` id. Anywhere else it
-            # is a key the router invented. A tag the *caller* wrote is the
-            # caller's own key and is proxied like any other.
-            if router_tag and not persistent:
-                data.pop(ATTR_TAG, None)
-        # `data.notification_id` mirrors the effective tag, and is added for the
-        # bare `persistent_notification` output only -- the one core documents
-        # as reading it (`components/notify/__init__.py`, the
-        # `persistent_notification` service handler: `notification_id =
-        # data.get(pn.ATTR_NOTIFICATION_ID)`, then `pn.async_create(...)`).
-        # Every other output would receive a key it has no use for. A
-        # caller-supplied value wins here too, hence the membership test.
-        if persistent and ATTR_NOTIFICATION_ID not in data:
-            tag = data.get(ATTR_TAG)
-            if tag is not None:
-                data[ATTR_NOTIFICATION_ID] = str(tag)
+        data = self._scope_output_data(
+            payload, service, router_tag=router_tag, priority=priority, bare=bare
+        )
         if data:
             service_data["data"] = data
 
@@ -1222,6 +1444,130 @@ class Switchboard:
         # process while the counter does not -- after a restart the repair is
         # still on screen with an empty `failing_outputs`. Deleting an issue
         # that is not there is a no-op (`issue_registry.async_delete`).
+        self.failing_outputs.pop(output, None)
+        ir.async_delete_issue(self.hass, DOMAIN, f"missing_output_{output}")
+        return True
+
+    def _entity_takes_a_title(self, entity_id: str) -> bool:
+        """Return whether a notify entity declares `NotifyEntityFeature.TITLE`.
+
+        Read from the published `supported_features` state attribute rather
+        than from the entity object: the router never reaches past a public
+        service into another integration's objects (ADR-0021, rejected
+        alternatives). An entity that publishes no `supported_features` is
+        given the benefit of the doubt and sent the title, because that is the
+        case where core's own drop still applies.
+        """
+        state = self.hass.states.get(entity_id)
+        if state is None:
+            return False
+        features = state.attributes.get(ATTR_SUPPORTED_FEATURES)
+        if features is None:
+            return True
+        return bool(int(features) & NotifyEntityFeature.TITLE)
+
+    @callback
+    def _apply_companion_payload(
+        self, data: dict[str, Any], priority: str | None, service: str
+    ) -> None:
+        """Fix up the `data` a Companion output receives (ADR-0021 §7).
+
+        Two changes, and to no other kind of output.
+
+        **(a) The router's own `priority` key is stripped. Unconditionally.**
+        `data.priority` is a router *input* -- it selects the effective
+        priority -- and has never been a Companion key. `mobile_app` on Android
+        reads `data.priority` and knows one value, `high`; on iOS it means
+        nothing at all. It is removed whatever the priority is and whatever the
+        option below says, which is the one breaking change of 0.7.0.
+
+        **(b) When the effective priority is `critical`, the Companion keys are
+        added**, translated for the OS the registration declares. A key the
+        caller (or the target's `default_data`) already wrote is never
+        overwritten, and `push` counts as a **single** caller key: if the
+        caller supplied any `push` mapping the router adds nothing under it,
+        which is how a household that prefers
+        `push: {interruption-level: critical}` writes it. Merging into a nested
+        mapping the caller wrote is where a rule like this stops being
+        predictable.
+
+        `priority` is the one exception to "caller wins", and (a) is why: it is
+        stripped before (b) runs, so the router's `priority: high` is never
+        contending with a caller's routing priority.
+        """
+        data.pop(ATTR_PRIORITY, None)
+        if priority != PRIORITY_CRITICAL or not self.critical_payload_enabled:
+            return
+        for key, value in critical_keys_for_os(self.companion_os_name(service)).items():
+            data.setdefault(key, value)
+
+    async def _async_call_notify_entity(
+        self,
+        output: str,
+        entity_id: str,
+        message: str,
+        title: str | None,
+        slug: str,
+    ) -> bool:
+        """Deliver one message through `notify.send_message` (ADR-0021 §6).
+
+        `message` and `title` and nothing else: `NotifyEntity.async_send_message`
+        takes those two
+        (`$HA_CORE_SRC/homeassistant/components/notify/__init__.py` line 185)
+        and the entity service schema accepts only those two (lines 84-91).
+
+        `title` is sent only to an entity that declares
+        `NotifyEntityFeature.TITLE` (line 63). Core's base implementation drops
+        it for an entity that does not, and ADR-0021 §6 leaves the decision to
+        core on that basis -- but a platform is free to override
+        `async_send_message`, and one that does never reaches the base
+        implementation that would have dropped it. Reading the published
+        `supported_features` and declining to send the key is the same outcome
+        for an entity that inherits the base behaviour and the *documented*
+        outcome for one that does not. An entity that publishes no
+        `supported_features` at all is sent the title and core decides, which
+        is the ADR's rule where it can still apply.
+
+        A target whose output is an entity therefore cannot carry
+        `default_data` to it, cannot carry a caller's `data`, and gets no tag,
+        no buttons and no critical payload. That is the same Home Assistant
+        limitation the contract already records for this integration's own
+        degraded `notify.switchboard` entity, stated in the other direction.
+
+        Failures are accounted for exactly as a service call's are: same
+        counter, same repair, same `delivery_failed` when it was a person's
+        only output.
+        """
+        service_data: dict[str, Any] = {ATTR_ENTITY_ID: entity_id, "message": message}
+        if title is not None and self._entity_takes_a_title(entity_id):
+            service_data["title"] = title
+        try:
+            async with asyncio.timeout(OUTPUT_TIMEOUT_SECONDS):
+                await self.hass.services.async_call(
+                    NOTIFY_DOMAIN, SERVICE_SEND_MESSAGE, service_data, blocking=True
+                )
+        except TimeoutError:
+            _LOGGER.warning(
+                "Notify entity %s did not answer within %s s for target %s; abandoned",
+                entity_id,
+                OUTPUT_TIMEOUT_SECONDS,
+                slug,
+            )
+            self._async_record_output_failure(output)
+            return False
+        except (HomeAssistantError, vol.Invalid) as err:
+            _LOGGER.error(
+                "Notify entity %s failed for target %s: %s", entity_id, slug, err
+            )
+            self._async_record_output_failure(output)
+            return False
+        except Exception:  # noqa: BLE001 - an output must never break the others
+            _LOGGER.exception(
+                "Unexpected error from notify entity %s for target %s", entity_id, slug
+            )
+            self._async_record_output_failure(output)
+            return False
+
         self.failing_outputs.pop(output, None)
         ir.async_delete_issue(self.hass, DOMAIN, f"missing_output_{output}")
         return True
@@ -1702,14 +2048,20 @@ class Switchboard:
         )
         decision = decide(self.table, request, context)
         refusals = tuple(
-            drop.reason for drop in decision.dropped if drop.person == person_id
+            drop.reason
+            for drop in decision.dropped
+            if drop.output is None and drop.person == person_id
         )
         for item in decision.routed:
             if item.person == person_id:
                 return item, None, refusals
         for drop in decision.dropped:
-            # `person is None` is the `unknown_target` drop: the row this
-            # message was queued for has been deleted since.
+            # `person is None` with no `output` is the `unknown_target` drop:
+            # the row this message was queued for has been deleted since. A
+            # drop that names an `output` belongs to a bare output of the same
+            # target (ADR-0021 §5) and says nothing about this person.
+            if drop.output is not None:
+                continue
             if drop.person in (person_id, None):
                 return None, drop.reason, ()
         return None, None, ()
@@ -1798,6 +2150,11 @@ class Switchboard:
                     # `switchboard-summary` is a name the router chose for a
                     # message it composed itself, never a caller's.
                     router_tag=True,
+                    # A summary carries no critical payload and no `priority`
+                    # (ADR-0021 §7): its `data` is *built* rather than merged
+                    # (ADR-0019 §2), and a critical message is never deferred,
+                    # so there is never a critical one to summarise.
+                    priority=None,
                 )
                 for output in usable
             ),
@@ -1963,6 +2320,15 @@ class Switchboard:
                 "target": target.slug,
                 "alert_entity": target.alert_entity,
                 "user_id": user_id,
+                # ADR-0021 §4: the acting user resolved through the
+                # **canonical** link only -- the `user_id` state attribute of a
+                # `person.*`, contract v0.3 §"Callback resolution order" step 1
+                # -- and `null` when that does not resolve. The `device_id`
+                # fallback of step 2 is deliberately not used for authorship:
+                # guessing who acknowledged from a device name is worse than
+                # saying "unknown". No entity and no store exposes this; the
+                # event is where it lives.
+                ATTR_PERSON: self._person_for_user_id(user_id),
             },
             context,
         )

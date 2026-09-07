@@ -21,6 +21,8 @@ from .const import (
     ACTION_ACKNOWLEDGE,
     ACTION_NAMESPACE,
     ACTION_SNOOZE,
+    ANDROID_OS_NAME,
+    APPLE_OS_NAMES,
     ATTR_PRIORITY,
     ATTR_SWITCHBOARD_DONE,
     ATTR_TAG,
@@ -34,6 +36,7 @@ from .const import (
     CONF_DEFAULT_TARGET,
     CONF_DEFAULT_TITLE,
     CONF_DONE_MESSAGE,
+    CONF_ESCALATE_WHEN_NOBODY_HOME,
     CONF_MANAGED,
     CONF_MESSAGE,
     CONF_OBSERVER_MODE,
@@ -59,18 +62,23 @@ from .const import (
     DROP_SNOOZED,
     DROP_UNKNOWN_PERSON,
     DROP_UNKNOWN_TARGET,
+    ESCALATED_NOBODY_HOME,
     LEGACY_SERVICE_NAME,
     PRESENCE_AWAY_ONLY,
     PRESENCE_HOME_ONLY,
     PRIORITY_CRITICAL,
+    PRIORITY_RANK,
     SUMMARY_TAG,
     SWITCHBOARD_DATA_PREFIX,
     TAG_PREFIX,
     VALID_PRESENCE_RULES,
     VALID_PRIORITIES,
+    critical_payload_android,
+    critical_payload_apple,
 )
 
 NOTIFY_PREFIX = "notify."
+PERSON_PREFIX = "person."
 
 # `switchboard:ack:<slug>` and `switchboard:snooze:<slug>:<minutes>`.
 ACTION_PARTS_ACKNOWLEDGE = 3
@@ -136,6 +144,33 @@ class TargetConfig:
     # message rings and then stays on the phone, which is why it never shares
     # the episode's own tag.
     clear_done: bool = False
+    # v0.7 addendum (ADR-0021 §1). Absent means False, so every target written
+    # before 0.7.0 keeps the exact dict it had. It raises the priority of one
+    # decision by one step when nobody of the audience is home; it changes
+    # neither `default_priority` nor the caller's `data.priority`, and the next
+    # call asks the question again from scratch.
+    escalate_when_nobody_home: bool = False
+
+    @property
+    def audience_persons(self) -> tuple[str, ...]:
+        """Return the audience entries that are `person.*` entity ids.
+
+        The domain is the whole rule (ADR-0021 §5): an entry in the `person`
+        domain is a person, an entry in the `notify` domain is a bare output,
+        and anything else is the `unknown_person` drop it already was -- which
+        is why this keeps everything that is not a `notify.*` name rather than
+        keeping only what starts with `person.`.
+        """
+        return tuple(entry for entry in self.audience if not is_bare_output(entry))
+
+    @property
+    def bare_outputs(self) -> tuple[str, ...]:
+        """Return the audience entries that are `notify.*` service names.
+
+        Verbatim, in audience order: this is what `explain` lists under its
+        top-level `outputs` key and what the routing-table entity reports.
+        """
+        return tuple(entry for entry in self.audience if is_bare_output(entry))
 
     @property
     def service_name(self) -> str:
@@ -194,8 +229,12 @@ class RoutingContext:
 
     now: datetime
     person_states: dict[str, str] = field(default_factory=dict)
-    # Configured `silence_entities` (entity_id -> is it `on`): read, never owned.
-    silenced: dict[str, bool] = field(default_factory=dict)
+    # The configured `silence_entities` that are **`on`**, each mapped to the
+    # priority floor it publishes (`None` when it publishes none, or an
+    # unreadable one). Read, never owned. Membership is what "this entity is
+    # silencing" means from 0.7.0: an entity that is `off` is simply absent,
+    # where 0.6.0 mapped it to `False` (ADR-0021 §2).
+    silenced: dict[str, str | None] = field(default_factory=dict)
     snoozes: dict[tuple[str, str], datetime] = field(default_factory=dict)
     # Temporary, router-owned silences (person -> expiry), ADR-0016. Defaults to
     # empty so every Sprint 1 caller of `decide` keeps its exact behaviour.
@@ -209,22 +248,46 @@ class RoutingContext:
 
 @dataclass(frozen=True, slots=True)
 class RoutedDelivery:
-    """One (person, target) pair that must be delivered."""
+    """One audience entry of one target that must be delivered.
 
-    person: str
+    `person` is `None` for a **bare output** (ADR-0021 §5): an audience entry
+    that is a `notify.*` service name rather than a `person.*` entity id. Such
+    a delivery has exactly one output, no presence, no silence, no snooze and
+    no deferral, and every payload the router invented for a person is scoped
+    away from it in `dispatcher._async_call_output`.
+    """
+
+    person: str | None
     slug: str
     outputs: tuple[str, ...]
     priority: str
     data: dict[str, Any] = field(default_factory=dict)
+    # The audience entry this delivery came from, verbatim: the `person.*`
+    # entity id, or the `notify.*` service name. It is what an episode records,
+    # so a `done` message reaches the bare outputs that heard the episode's
+    # messages and nobody else (ADR-0019 §5, ADR-0021 §5).
+    audience_entry: str = ""
+
+    @property
+    def is_bare(self) -> bool:
+        """Return True when this delivery is a bare output rather than a person."""
+        return self.person is None
 
 
 @dataclass(frozen=True, slots=True)
 class DroppedDelivery:
-    """One (person, target) pair that will not be delivered, and why."""
+    """One audience entry of one target that will not be delivered, and why.
+
+    `person` is `None` both for a drop that belongs to no audience entry at all
+    (`unknown_target`) and for a bare output, whose `person` key the contract
+    freezes as `null`; `output` is what tells the two apart, and the flush
+    re-decision depends on being able to (`dispatcher._redecide`).
+    """
 
     person: str | None
     slug: str
     reason: str
+    output: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +364,7 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
         default_title=_optional_text(raw.get(CONF_DEFAULT_TITLE)),
         managed=bool(raw.get(CONF_MANAGED)),
         clear_done=bool(raw.get(CONF_CLEAR_DONE)),
+        escalate_when_nobody_home=bool(raw.get(CONF_ESCALATE_WHEN_NOBODY_HOME)),
     )
 
 
@@ -359,12 +423,114 @@ def is_recursive_output(output: str) -> bool:
     return name == LEGACY_SERVICE_NAME or name.startswith(f"{LEGACY_SERVICE_NAME}_")
 
 
+def is_bare_output(entry: str) -> bool:
+    """Return True when an audience entry is a `notify.*` service name (§5).
+
+    The domain is the whole rule. An entry in the `notify` domain is a bare
+    output -- a kitchen speaker, a wall tablet's toast overlay -- and an entry
+    in any other domain is a person, known or not.
+    """
+    return entry.startswith(NOTIFY_PREFIX)
+
+
 def resolve_priority(target: TargetConfig, data: dict[str, Any]) -> str:
-    """Return the effective priority: `data.priority` overrides the row's."""
+    """Return the requested priority: `data.priority` overrides the row's.
+
+    This is the priority the *caller* asked for. `effective_priority` below is
+    what the decision actually uses, because an empty house can raise it
+    (ADR-0021 §1) -- and a deferral stores this one, so its flush re-asks the
+    question from scratch instead of freezing an answer from last night.
+    """
     raw = data.get(ATTR_PRIORITY)
     if isinstance(raw, str) and raw in VALID_PRIORITIES:
         return raw
     return target.default_priority
+
+
+def escalate_one_step(priority: str) -> str:
+    """Return the priority one step up the rank; `critical` is unchanged (§1).
+
+    One step, not a jump to `critical`: an empty house is a statement that
+    nobody is there to notice, not a statement that the message became a
+    life-safety alert. A target whose alerts matter says so with
+    `default_priority: high` and gets a critical message out of an empty house,
+    which is the case the flag exists for.
+    """
+    rank = PRIORITY_RANK.get(priority)
+    if rank is None:
+        return priority
+    return VALID_PRIORITIES[min(rank + 1, len(VALID_PRIORITIES) - 1)]
+
+
+def nobody_is_home(target: TargetConfig, context: RoutingContext) -> bool:
+    """Return True when no person of the target's audience is `home` (§1).
+
+    `home` is the literal state `home`
+    (`$HA_CORE_SRC/homeassistant/const.py` line 301, `STATE_HOME`): a named
+    zone, `not_home`, `unknown`, `unavailable` and a person the state machine
+    has never heard of all count as "not home", because a router that read
+    `unknown` as "probably in" would decline to escalate exactly when it knows
+    least.
+
+    An audience with no person in it -- empty, or made only of bare outputs --
+    is **not** an empty house: there is nothing to decide about, so the caller
+    below treats it as "do not escalate".
+    """
+    return not any(
+        context.person_states.get(person_id) == STATE_HOME
+        for person_id in target.audience_persons
+    )
+
+
+def effective_priority(
+    target: TargetConfig, data: dict[str, Any], context: RoutingContext
+) -> tuple[str, str | None]:
+    """Return the priority this decision runs at, and what raised it (§1, §8).
+
+    The second element is `explain`'s `escalated` key: it is populated **only
+    when the rule actually changed the decision**, so a target with the flag
+    on, nobody home and a call that is already `critical` reports `None`.
+    Reporting a rule that did nothing would make the key useless for the
+    question a card asks it ("why is this louder than I configured?").
+
+    The escalated priority is the effective one everywhere downstream: the
+    silence and snooze bypass, `authenticationRequired`, the `priority` of the
+    `routed` event, and the critical payload of §7.
+    """
+    priority = resolve_priority(target, data)
+    if not target.escalate_when_nobody_home or not target.audience_persons:
+        return priority, None
+    if not nobody_is_home(target, context):
+        return priority, None
+    raised = escalate_one_step(priority)
+    if raised == priority:
+        return priority, None
+    return raised, ESCALATED_NOBODY_HOME
+
+
+def parse_min_priority(raw: Any) -> str | None:
+    """Return a usable priority floor from a state attribute, or None (§2).
+
+    `CUSTOM_DATA_SCHEMA` accepts any string, so `min_priority: loud` reaches
+    the state attributes intact; a number and a bool reach it just as intact.
+    Anything that is not one of the four priority strings is ignored, and an
+    ignored floor makes the entity behave as an ordinary silence -- an
+    unreadable floor fails towards quiet, never towards noise.
+    """
+    if isinstance(raw, str) and raw in VALID_PRIORITIES:
+        return raw
+    return None
+
+
+def silence_catches(floor: str | None, priority: str) -> bool:
+    """Return True when a silence carrying `floor` catches a call at `priority`.
+
+    No floor catches everything, as a silence always has. A floor catches only
+    what is **below** it: `info < normal < high < critical`.
+    """
+    if floor is None:
+        return True
+    return PRIORITY_RANK.get(priority, 0) < PRIORITY_RANK[floor]
 
 
 def presence_allows(presence_rule: str, person_state: str | None) -> bool:
@@ -376,11 +542,30 @@ def presence_allows(presence_rule: str, person_state: str | None) -> bool:
     return True
 
 
-def has_configured_silence(person: PersonConfig, context: RoutingContext) -> bool:
-    """Return True when any of the person's own silence entities is `on`."""
-    return any(
-        context.silenced.get(entity_id, False) for entity_id in person.silence_entities
-    )
+def silences_catching(
+    person: PersonConfig, context: RoutingContext, priority: str
+) -> list[str]:
+    """Return the person's `on` silence entities that catch a call at `priority`.
+
+    The strictest `on` silence decides (§2): the person is silenced when
+    **any** of them would catch this call, so one entity with a `high` floor
+    and one with no floor together silence everything, because the floor-less
+    one does. Silence has always been an OR across sources (ADR-0016) and a
+    floor narrows one source, not the union.
+    """
+    return [
+        entity_id
+        for entity_id in person.silence_entities
+        if entity_id in context.silenced
+        and silence_catches(context.silenced[entity_id], priority)
+    ]
+
+
+def has_configured_silence(
+    person: PersonConfig, context: RoutingContext, priority: str
+) -> bool:
+    """Return True when one of the person's silence entities catches this call."""
+    return bool(silences_catching(person, context, priority))
 
 
 def has_temporary_silence(person_id: str, context: RoutingContext) -> bool:
@@ -389,15 +574,21 @@ def has_temporary_silence(person_id: str, context: RoutingContext) -> bool:
     return until is not None and until > context.now
 
 
-def is_silenced(person: PersonConfig, context: RoutingContext) -> bool:
+def is_silenced(person: PersonConfig, context: RoutingContext, priority: str) -> bool:
     """Return True when the person is silent, whichever source says so.
 
     ADR-0016: the two sources are independent and combine with an OR. A
     configured `schedule`/`input_boolean` is read and never owned; a temporary
     silence is owned by the router and expires on its own. Either one produces
     the same `silenced` drop reason, and `critical` bypasses both.
+
+    From 0.7.0 a configured silence may narrow *which* calls it catches, with a
+    `min_priority` state attribute (§2). A temporary
+    `notify_switchboard.silence` carries no floor and never will: it is a
+    gesture ("quiet for the next hour"), not a policy, and it has no state
+    attributes to read.
     """
-    return has_configured_silence(person, context) or has_temporary_silence(
+    return has_configured_silence(person, context, priority) or has_temporary_silence(
         person.entity_id, context
     )
 
@@ -580,7 +771,7 @@ def _decide_for_person(
     if not presence_allows(target.presence_rule, context.person_states.get(person_id)):
         return None, (DroppedDelivery(person_id, slug, DROP_PRESENCE),)
 
-    if not bypass and is_silenced(person, context):
+    if not bypass and is_silenced(person, context, priority):
         return None, (DroppedDelivery(person_id, slug, DROP_SILENCED),)
 
     if not bypass and snooze_is_active(person_id, slug, context):
@@ -602,8 +793,44 @@ def _decide_for_person(
             outputs=usable,
             priority=priority,
             data=dict(payload),
+            audience_entry=person_id,
         ),
         refusals,
+    )
+
+
+def _decide_for_bare_output(
+    entry: str,
+    slug: str,
+    *,
+    priority: str,
+    payload: dict[str, Any],
+) -> tuple[RoutedDelivery | None, tuple[DroppedDelivery, ...]]:
+    """Turn one bare audience entry into its own delivery (ADR-0021 §5).
+
+    A bare output is exactly what its name says and nothing more: no presence,
+    so no presence rule and no part in the empty-house question; no silence, no
+    snooze, no deferral, no time-to-live, no wake time and no summary. It is
+    delivered now or it is not delivered.
+
+    The one rule it does share with a person is the recursion guard: an entry
+    resolving to `notify.switchboard*` is refused with the existing
+    `recursion` reason, at config time and here at runtime. No drop reason is
+    added for any of this.
+    """
+    output = normalise_output(entry)
+    if is_recursive_output(output):
+        return None, (DroppedDelivery(None, slug, DROP_RECURSION, output=entry),)
+    return (
+        RoutedDelivery(
+            person=None,
+            slug=slug,
+            outputs=(output,),
+            priority=priority,
+            data=dict(payload),
+            audience_entry=entry,
+        ),
+        (),
     )
 
 
@@ -620,7 +847,7 @@ def decide(
             dropped.append(DroppedDelivery(None, slug, DROP_UNKNOWN_TARGET))
             continue
 
-        priority = resolve_priority(target, request.data)
+        priority, _escalated = effective_priority(target, request.data, context)
         bypass = priority == PRIORITY_CRITICAL
         payload = merge_data(target, request.data)
         # A `done` message reaches only the persons the episode it closes
@@ -630,23 +857,37 @@ def decide(
         # wrote an `alert:` block.
         recipients = context.episode_recipients.get(slug) if request.is_done else None
 
-        for person_id in target.audience:
-            if recipients is not None and person_id not in recipients:
+        for entry in target.audience:
+            bare = is_bare_output(entry)
+            if recipients is not None and entry not in recipients:
                 # Filtered before the rest of the decision runs: "back to
                 # normal" is a strange thing to receive about a problem you
-                # never heard of.
-                dropped.append(DroppedDelivery(person_id, slug, DROP_NOT_NOTIFIED))
+                # never heard of. A bare output is an episode recipient like
+                # any other (ADR-0021 §5), so it is filtered the same way.
+                dropped.append(
+                    DroppedDelivery(
+                        None if bare else entry,
+                        slug,
+                        DROP_NOT_NOTIFIED,
+                        output=entry if bare else None,
+                    )
+                )
                 continue
 
-            delivery, refusals = _decide_for_person(
-                table,
-                target,
-                person_id,
-                context,
-                priority=priority,
-                bypass=bypass,
-                payload=payload,
-            )
+            if bare:
+                delivery, refusals = _decide_for_bare_output(
+                    entry, slug, priority=priority, payload=payload
+                )
+            else:
+                delivery, refusals = _decide_for_person(
+                    table,
+                    target,
+                    entry,
+                    context,
+                    priority=priority,
+                    bypass=bypass,
+                    payload=payload,
+                )
             dropped.extend(refusals)
             if delivery is not None:
                 routed.append(delivery)
@@ -737,3 +978,21 @@ def _positive_int(raw: str) -> int | None:
 def state_is_on(state: str | None) -> bool:
     """Return True when a silence entity's state means "silent"."""
     return state == STATE_ON
+
+
+def critical_keys_for_os(os_name: str | None) -> dict[str, Any]:
+    """Return the Companion critical keys a registration understands (§7).
+
+    Matching is case-insensitive. Anything the router cannot identify -- an
+    unknown string, a registration with no `os_name`, no matching registration
+    at all -- gets **both** sets rather than neither: the keys of one OS are
+    inert on the other, and a household whose registration predates the field
+    should get a phone that rings, not a phone that is quiet because the router
+    could not identify it.
+    """
+    lowered = (os_name or "").strip().lower()
+    if lowered in APPLE_OS_NAMES:
+        return critical_payload_apple()
+    if lowered == ANDROID_OS_NAME:
+        return critical_payload_android()
+    return {**critical_payload_apple(), **critical_payload_android()}

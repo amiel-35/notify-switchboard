@@ -32,6 +32,7 @@ from custom_components.notify_switchboard.const import (
     MAX_SILENCE_MINUTES,
     MAX_TRACKED_INVALID_SERVICE_CALLS,
     MIN_SILENCE_MINUTES,
+    PRIORITY_NORMAL,
     UI_SERVICES,
 )
 from custom_components.notify_switchboard.diagnostics import (
@@ -413,12 +414,18 @@ def test_is_silenced_combines_both_sources() -> None:
     later = {"person.alice": now + timedelta(minutes=10)}
     earlier = {"person.alice": now - timedelta(minutes=10)}
 
-    assert not is_silenced(person, RoutingContext(now=now))
+    assert not is_silenced(person, RoutingContext(now=now), PRIORITY_NORMAL)
     assert is_silenced(
-        person, RoutingContext(now=now, silenced={"input_boolean.night": True})
+        person,
+        RoutingContext(now=now, silenced={"input_boolean.night": None}),
+        PRIORITY_NORMAL,
     )
-    assert is_silenced(person, RoutingContext(now=now, temporary_silences=later))
-    assert not is_silenced(person, RoutingContext(now=now, temporary_silences=earlier))
+    assert is_silenced(
+        person, RoutingContext(now=now, temporary_silences=later), PRIORITY_NORMAL
+    )
+    assert not is_silenced(
+        person, RoutingContext(now=now, temporary_silences=earlier), PRIORITY_NORMAL
+    )
     assert has_temporary_silence(
         "person.alice", RoutingContext(now=now, temporary_silences=later)
     )

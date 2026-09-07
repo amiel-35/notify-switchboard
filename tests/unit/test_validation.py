@@ -132,3 +132,45 @@ def test_alert_entity_may_be_empty() -> None:
         validate_target(a_target(alert_entity=None), [], ["person.alice"], is_new=True)
         == {}
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.7 (ADR-0021 §5): an audience entry may be a `notify.*` service name
+# ---------------------------------------------------------------------------
+
+
+def test_a_bare_output_is_a_valid_audience_entry() -> None:
+    """The domain is the whole rule: a `notify.*` name is not an unknown person."""
+    assert (
+        validate_target(
+            a_target(audience=["person.alice", "notify.kitchen_speaker"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )
+
+
+def test_a_bare_output_pointing_back_at_the_switchboard_is_refused() -> None:
+    """The recursion guard does not care which side of the audience it is on."""
+    errors = validate_target(
+        a_target(audience=["person.alice", "notify.switchboard_leak"]),
+        [],
+        ["person.alice"],
+        is_new=True,
+    )
+    assert errors["audience"] == "recursive_output"
+
+
+def test_an_audience_of_bare_outputs_only_is_valid() -> None:
+    """A target may address nothing but things: no person is not no audience."""
+    assert (
+        validate_target(
+            a_target(audience=["notify.kitchen_speaker"]),
+            [],
+            ["person.alice"],
+            is_new=True,
+        )
+        == {}
+    )

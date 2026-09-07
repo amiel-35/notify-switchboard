@@ -22,7 +22,8 @@
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
     "detail_expired": "A message queued for {person} would be dropped once its time to live has run out.",
-    "detail_not_notified": "{person} was told nothing during the last run of the target {target}, so the back-to-normal message is not for them."
+    "detail_not_notified": "{person} was told nothing during the last run of the target {target}, so the back-to-normal message is not for them.",
+    "detail_silenced_floor": "{person} is silenced by {entities}, which only lets {floor} and above through. Only a critical message always gets through."
   },
   "entity": {
     "binary_sensor": {
@@ -50,6 +51,9 @@
       },
       "routed_today": {
         "name": "Routed today"
+      },
+      "routing_table": {
+        "name": "Routing table"
       }
     }
   },
@@ -81,7 +85,8 @@
           "general": "Default target",
           "ttl": "Time to live",
           "test_person": "Test a person",
-          "test_target": "Test a target"
+          "test_target": "Test a target",
+          "edit_target_escalation": "Escalation of a target"
         }
       },
       "person": {
@@ -221,10 +226,12 @@
       "general": {
         "title": "Default target",
         "data": {
-          "default_target": "Default target"
+          "default_target": "Default target",
+          "critical_payload": "Make critical notifications critical"
         },
         "data_description": {
-          "default_target": "Used by notify.switchboard when no target is given, and by the notify entity."
+          "default_target": "Used by notify.switchboard when no target is given, and by the notify entity.",
+          "critical_payload": "Adds the Companion keys that ring a phone through Do Not Disturb when a message is critical. On by default; it applies to mobile_app services only."
         }
       },
       "ttl": {
@@ -264,6 +271,23 @@
       "test_result": {
         "title": "Test result",
         "description": "The message has been sent. Here is what the router decided for each person:\n\n{result}"
+      },
+      "target_escalation": {
+        "title": "Escalation of a target",
+        "description": "What {target} does when nobody of its audience is home. Nothing else about the target is touched.",
+        "data": {
+          "escalate_when_nobody_home": "Raise the priority when nobody is home"
+        },
+        "data_description": {
+          "escalate_when_nobody_home": "One step louder for that message only: info becomes normal, normal becomes high, high becomes critical. Critical is unchanged, and the presence rule still decides who is notified."
+        }
+      },
+      "edit_target_escalation": {
+        "title": "Escalation of a target",
+        "description": "Pick the target whose escalation setting you want to open. Everything else about it is left alone.",
+        "data": {
+          "slug": "Target"
+        }
       }
     },
     "error": {

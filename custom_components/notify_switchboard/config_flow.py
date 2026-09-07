@@ -86,11 +86,13 @@ from .const import (
     CONF_ALLOW_ACKNOWLEDGE,
     CONF_AUDIENCE,
     CONF_CLEAR_DONE,
+    CONF_CRITICAL_PAYLOAD,
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
     CONF_DEFAULT_TARGET,
     CONF_DEFAULT_TITLE,
     CONF_DONE_MESSAGE,
+    CONF_ESCALATE_WHEN_NOBODY_HOME,
     CONF_MANAGED,
     CONF_MESSAGE,
     CONF_OBSERVER_MODE,
@@ -187,6 +189,12 @@ TARGET_ADVANCED_FIELDS: frozenset[str] = frozenset(
     }
 )
 PERSON_BASIC_FIELDS: frozenset[str] = frozenset({CONF_OUTPUTS, CONF_SILENCE_ENTITIES})
+# v0.7 (ADR-0021 §1): `escalate_when_nobody_home` gets a step of its own rather
+# than a tenth field on `target_advanced`, because contract v0.6 §"Four
+# options-flow step ids are public" enumerates what `target_advanced` holds and
+# the v0.7 addendum does not amend that list. `target_escalation` and its
+# picker are internal steps, which the same section explicitly allows to change.
+TARGET_ESCALATION_FIELDS: frozenset[str] = frozenset({CONF_ESCALATE_WHEN_NOBODY_HOME})
 PERSON_ADVANCED_FIELDS: frozenset[str] = frozenset({CONF_WAKE_TIME, CONF_SUMMARY})
 
 # The checkbox `target_saved` grows (ADR-0020 §1): ticked, the flow carries on
@@ -204,16 +212,27 @@ def _advanced_target_values(stored: dict[str, Any] | None) -> dict[str, Any]:
     the form used to show.
     """
     stored = stored or {}
-    return {
-        CONF_DEFAULT_PRIORITY: stored.get(CONF_DEFAULT_PRIORITY) or DEFAULT_PRIORITY,
-        CONF_PRESENCE_RULE: stored.get(CONF_PRESENCE_RULE) or DEFAULT_PRESENCE_RULE,
-        CONF_ALLOW_ACKNOWLEDGE: bool(stored.get(CONF_ALLOW_ACKNOWLEDGE)),
-        CONF_SNOOZE_MINUTES: list(stored.get(CONF_SNOOZE_MINUTES) or []),
-        CONF_DEFAULT_DATA: dict(stored.get(CONF_DEFAULT_DATA) or {}),
-        CONF_MESSAGE: stored.get(CONF_MESSAGE) or None,
-        CONF_DONE_MESSAGE: stored.get(CONF_DONE_MESSAGE) or None,
-        CONF_DEFAULT_TITLE: stored.get(CONF_DEFAULT_TITLE) or None,
-    } | ({CONF_CLEAR_DONE: True} if stored.get(CONF_CLEAR_DONE) else {})
+    return (
+        {
+            CONF_DEFAULT_PRIORITY: stored.get(CONF_DEFAULT_PRIORITY)
+            or DEFAULT_PRIORITY,
+            CONF_PRESENCE_RULE: stored.get(CONF_PRESENCE_RULE) or DEFAULT_PRESENCE_RULE,
+            CONF_ALLOW_ACKNOWLEDGE: bool(stored.get(CONF_ALLOW_ACKNOWLEDGE)),
+            CONF_SNOOZE_MINUTES: list(stored.get(CONF_SNOOZE_MINUTES) or []),
+            CONF_DEFAULT_DATA: dict(stored.get(CONF_DEFAULT_DATA) or {}),
+            CONF_MESSAGE: stored.get(CONF_MESSAGE) or None,
+            CONF_DONE_MESSAGE: stored.get(CONF_DONE_MESSAGE) or None,
+            CONF_DEFAULT_TITLE: stored.get(CONF_DEFAULT_TITLE) or None,
+        }
+        | ({CONF_CLEAR_DONE: True} if stored.get(CONF_CLEAR_DONE) else {})
+        | (
+            # v0.7 (ADR-0021 §1): carried over, never invented. The basic step must
+            # not be able to clear a flag it does not show.
+            {CONF_ESCALATE_WHEN_NOBODY_HOME: True}
+            if stored.get(CONF_ESCALATE_WHEN_NOBODY_HOME)
+            else {}
+        )
+    )
 
 
 def _showable(errors: dict[str, str], fields: frozenset[str]) -> dict[str, str]:
@@ -350,6 +369,32 @@ def _output_options(
     ] + [selector.SelectOptionDict(value=service, label=service) for service in rest]
 
 
+@callback
+def _audience_options(
+    hass: HomeAssistant, known_persons: list[str]
+) -> list[selector.SelectOptionDict]:
+    """Build the `audience` option list: the persons, then the bare outputs.
+
+    ADR-0021 §5: "the audience selector of the `target` step simply offers the
+    registered `notify.*` services alongside the persons". There is no `places`
+    object, no schedule and no new menu -- a bare output is an audience entry
+    like any other, told apart by its domain and by nothing else.
+
+    The persons come first because they are what an audience usually is; a
+    speaker is spelled with its full `notify.` prefix, which is what makes the
+    domain readable in the stored row and in the routing-table entity.
+    """
+    speakers = sorted(
+        f"{NOTIFY_DOMAIN}.{service}"
+        for service in hass.services.async_services_for_domain(NOTIFY_DOMAIN)
+        if not is_recursive_output(service) and service not in NOTIFY_COMPONENT_SERVICES
+    )
+    return [
+        selector.SelectOptionDict(value=value, label=value)
+        for value in [*known_persons, *speakers]
+    ]
+
+
 def _alert_snippet(row: dict[str, Any]) -> str:
     """Return the ready-to-paste `alert:` block for one routing-table row.
 
@@ -481,6 +526,13 @@ class SwitchboardOptionsFlow(OptionsFlow):
             }
             if CONF_TTL_MINUTES in stored:
                 self._options[CONF_TTL_MINUTES] = dict(stored[CONF_TTL_MINUTES])
+            # v0.7 (ADR-0021 §7), same reason as `ttl_minutes`: a global option
+            # that is only present when it differs from its default, and that
+            # editing a person must not silently reset.
+            if CONF_CRITICAL_PAYLOAD in stored:
+                self._options[CONF_CRITICAL_PAYLOAD] = bool(
+                    stored[CONF_CRITICAL_PAYLOAD]
+                )
 
     def _save(self) -> ConfigFlowResult:
         """Write the whole validated table back at once.
@@ -521,6 +573,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 "target",
                 "edit_target",
                 "edit_target_advanced",
+                "edit_target_escalation",
                 "remove_target",
                 "general",
                 "ttl",
@@ -989,7 +1042,13 @@ class SwitchboardOptionsFlow(OptionsFlow):
                     selector.EntitySelectorConfig(domain="alert")
                 ),
                 vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
-                    selector.SelectSelectorConfig(options=known_persons, multiple=True)
+                    selector.SelectSelectorConfig(
+                        options=_audience_options(self.hass, known_persons),
+                        multiple=True,
+                        # A speaker that is not registered yet must still be
+                        # typable, exactly as an output is (ADR-0018 §2).
+                        custom_value=True,
+                    )
                 ),
                 vol.Optional(
                     CONF_OBSERVER_MODE, default=False
@@ -1216,6 +1275,104 @@ class SwitchboardOptionsFlow(OptionsFlow):
         )
         return self.async_show_form(step_id="edit_target", data_schema=schema)
 
+    async def async_step_target_escalation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit one target's `escalate_when_nobody_home` (ADR-0021 §1).
+
+        Its own step, and only its own field. `target_advanced` is a public
+        step id whose contents contract v0.6 §"Four options-flow step ids are
+        public" enumerates -- nine fields, a list the v0.7 addendum does not
+        amend -- so the tenth boolean lands here instead. Like both halves of
+        the target editor, this step writes **only its own field** and carries
+        every other value of the stored row over untouched.
+        """
+        self._load()
+        slug = self._editing_slug
+        stored = self._stored_target(slug) if slug is not None else None
+        if stored is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_edit_target_escalation()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            row = {
+                key: value
+                for key, value in stored.items()
+                if key not in TARGET_ESCALATION_FIELDS and key != CONF_MANAGED
+            }
+            # Absent means false: the key is written only when it is on, so a
+            # target that never used it keeps the exact dict it had.
+            if user_input.get(CONF_ESCALATE_WHEN_NOBODY_HOME):
+                row[CONF_ESCALATE_WHEN_NOBODY_HOME] = True
+            known_persons = [person["entity_id"] for person in self._persons]
+            errors = _showable(
+                validate_target(row, self._targets, known_persons, is_new=False),
+                TARGET_ESCALATION_FIELDS,
+            )
+            if not errors:
+                self._options[CONF_TARGETS] = [
+                    row if other[CONF_SLUG] == row[CONF_SLUG] else other
+                    for other in self._targets
+                ]
+                return self._save()
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_ESCALATE_WHEN_NOBODY_HOME, default=False
+                ): selector.BooleanSelector()
+            }
+        )
+        return self.async_show_form(
+            step_id="target_escalation",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                user_input
+                if user_input is not None
+                else {
+                    CONF_ESCALATE_WHEN_NOBODY_HOME: bool(
+                        stored.get(CONF_ESCALATE_WHEN_NOBODY_HOME)
+                    )
+                },
+            ),
+            errors=errors,
+            description_placeholders={
+                "target": stored.get("name") or stored[CONF_SLUG]
+            },
+        )
+
+    async def async_step_edit_target_escalation(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick which target's escalation setting to open.
+
+        A menu entry is a step id (`async_show_menu`,
+        `homeassistant/data_entry_flow.py` line 878), so the labelled entry
+        needs a step of its own; this is it. Internal, like
+        `edit_target_advanced`.
+        """
+        self._load()
+        targets = self._targets
+        if not targets:
+            return self.async_abort(reason="nothing_to_edit")
+
+        if user_input is not None:
+            self._editing_slug = user_input[CONF_SLUG]
+            return await self.async_step_target_escalation()
+
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_SLUG): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[row[CONF_SLUG] for row in targets]
+                    )
+                )
+            }
+        )
+        return self.async_show_form(
+            step_id="edit_target_escalation", data_schema=schema
+        )
+
     async def async_step_remove_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -1258,6 +1415,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._options[CONF_DEFAULT_TARGET] = user_input[CONF_DEFAULT_TARGET]
+            # v0.7 (ADR-0021 §7): the key is written only when it is turned
+            # **off**, so a household that never opens this step keeps an
+            # options dict with the exact keys it always had, and an absent key
+            # keeps meaning "on".
+            if user_input.get(CONF_CRITICAL_PAYLOAD, True):
+                self._options.pop(CONF_CRITICAL_PAYLOAD, None)
+            else:
+                self._options[CONF_CRITICAL_PAYLOAD] = False
             return self._save()
 
         current = self._options.get(CONF_DEFAULT_TARGET) or targets[0][CONF_SLUG]
@@ -1269,10 +1434,19 @@ class SwitchboardOptionsFlow(OptionsFlow):
                     selector.SelectSelectorConfig(
                         options=[row[CONF_SLUG] for row in targets]
                     )
-                )
+                ),
+                vol.Optional(
+                    CONF_CRITICAL_PAYLOAD, default=True
+                ): selector.BooleanSelector(),
             }
         )
-        return self.async_show_form(step_id="general", data_schema=schema)
+        return self.async_show_form(
+            step_id="general",
+            data_schema=self.add_suggested_values_to_schema(
+                schema,
+                {CONF_CRITICAL_PAYLOAD: self._options.get(CONF_CRITICAL_PAYLOAD, True)},
+            ),
+        )
 
     async def async_step_ttl(
         self, user_input: dict[str, Any] | None = None

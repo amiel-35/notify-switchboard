@@ -7,7 +7,7 @@ the legacy service name, the `notify.switchboard_<slug>` scheme and the
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final
 
 DOMAIN: Final = "notify_switchboard"
 
@@ -64,6 +64,19 @@ CONF_OBSERVER_MODE: Final = "observer_mode"
 # cleared from the Companion outputs that received it once the episode is
 # closed, instead of living in the notification centre for a week.
 CONF_CLEAR_DONE: Final = "clear_done"
+
+# v0.7 addendum (ADR-0021 §1): an optional target key, absent means false,
+# written into the row only when it is true -- so every target written before
+# 0.7.0 keeps the exact dict it had. When it is true and no person of the
+# target's audience is in the literal state `home` at decision time, the call's
+# priority is raised one step, for that decision only.
+CONF_ESCALATE_WHEN_NOBODY_HOME: Final = "escalate_when_nobody_home"
+
+# v0.7 addendum (ADR-0021 §7): a *global* option, `entry.options`-level, whose
+# default is **on**; absent means on, so no migration and no options rewrite.
+# Turning it off stops the router adding the Companion critical keys; it never
+# puts `data.priority` back.
+CONF_CRITICAL_PAYLOAD: Final = "critical_payload"
 
 # v0.4 addendum (ADR-0018 §4): the only new options key of 0.4.0. Optional on
 # every row, absent means false, so no storage migration is needed. While it is
@@ -122,6 +135,23 @@ ATTR_USER_ID: Final = "user_id"
 # `ATTR_USER_ID`, so the integration keeps no dependency on `schedule`.
 ATTR_NEXT_EVENT: Final = "next_event"
 
+# State attribute a silence entity may carry to narrow what it catches (v0.7
+# addendum, ADR-0021 §2). A `schedule`'s per-block `data:` becomes state
+# attributes -- `CUSTOM_DATA_SCHEMA` in
+# `$HA_CORE_SRC/homeassistant/components/schedule/__init__.py` line 122, the key
+# name `CONF_DATA` in `.../schedule/const.py` line 23, and
+# `Schedule._update`'s `self._attr_extra_state_attributes.update(current_data)`
+# at line 395 -- so a household publishes a floor with no automation of its own.
+# The router reads the **attribute**, never the domain: anything that is `on`
+# and exposes it is read the same way.
+ATTR_MIN_PRIORITY: Final = "min_priority"
+
+# Registration key `mobile_app` stores the device's operating system under
+# (`$HA_CORE_SRC/homeassistant/components/mobile_app/const.py` line 36,
+# `ATTR_OS_NAME`). Spelled out here rather than imported, exactly like
+# `ATTR_USER_ID`, so the integration keeps no dependency on `mobile_app`.
+ATTR_OS_NAME: Final = "os_name"
+
 # The tag every message sent by the options flow's "test this person" /
 # "test this target" steps carries under `data.tag` (contract v0.4,
 # ADR-0018 §6). Public: a caller, an automation or a Companion channel may
@@ -168,6 +198,21 @@ VALID_PRIORITIES: Final[tuple[str, ...]] = (
     PRIORITY_HIGH,
     PRIORITY_CRITICAL,
 )
+
+# `info < normal < high < critical`, which is the order `VALID_PRIORITIES`
+# already declares (contract v0.7, ADR-0021 §1 and §2). Derived from that tuple
+# rather than written out a second time: two lists of the same four strings in
+# the same file is one list and one bug waiting for the day somebody edits only
+# one of them.
+PRIORITY_RANK: Final[dict[str, int]] = {
+    priority: rank for rank, priority in enumerate(VALID_PRIORITIES)
+}
+
+# The value `explain`'s `escalated` key carries when an empty house raised this
+# decision's priority (contract v0.7, ADR-0021 §8). It is `null` when nothing
+# did -- including when the rule's condition held but the priority was already
+# `critical`.
+ESCALATED_NOBODY_HOME: Final = "nobody_home"
 
 # Time-to-live defaults, in minutes, per priority (contract v0.5, ADR-0019 §1).
 # `None` means "never expires", and so does an absent key of
@@ -264,6 +309,53 @@ ACTION_SNOOZE: Final = "snooze"
 COMPANION_OUTPUT_PREFIX: Final = "mobile_app_"
 
 # ---------------------------------------------------------------------------
+# The critical payload, translated per OS (contract v0.7, ADR-0021 §7)
+# ---------------------------------------------------------------------------
+
+# The keys the Companion documentation gives for a critical notification
+# (<https://companion.home-assistant.io/docs/notifications/critical-notifications/>,
+# fetched 2026-09-07): on iOS a sound that plays through Do Not Disturb, on
+# Android the alarm stream plus an immediate, unbatched Firebase delivery.
+# Written as builders rather than as module-level dicts because the iOS payload
+# is nested: a shared nested mapping handed to `dict.setdefault` would end up
+# in every message's `data`, one object for the whole process.
+ATTR_PUSH: Final = "push"
+ATTR_TTL: Final = "ttl"
+ATTR_CHANNEL: Final = "channel"
+CRITICAL_SOUND_NAME: Final = "default"
+CRITICAL_CHANNEL: Final = "alarm_stream"
+
+
+def critical_payload_apple() -> dict[str, Any]:
+    """Return the Companion critical keys an Apple registration understands."""
+    return {
+        ATTR_PUSH: {
+            "sound": {"name": CRITICAL_SOUND_NAME, "critical": 1, "volume": 1.0}
+        }
+    }
+
+
+def critical_payload_android() -> dict[str, Any]:
+    """Return the Companion critical keys an Android registration understands."""
+    return {ATTR_TTL: 0, ATTR_PRIORITY: PRIORITY_HIGH, ATTR_CHANNEL: CRITICAL_CHANNEL}
+
+
+# Matching is case-insensitive, and anything the router cannot identify -- an
+# unknown string, an entry with no `os_name`, no matching registration at all --
+# takes **both** sets: the keys of one OS are inert on the other, and a
+# household whose registration predates the field should get a phone that rings
+# rather than one that is quiet because the router could not tell.
+APPLE_OS_NAMES: Final[frozenset[str]] = frozenset({"ios", "ipados", "watchos"})
+ANDROID_OS_NAME: Final = "android"
+
+# The `notify` entity action an output that is an entity id is delivered with
+# (`$HA_CORE_SRC/homeassistant/components/notify/const.py` line 29,
+# `SERVICE_SEND_MESSAGE`; registered on the entity component in
+# `.../notify/__init__.py` lines 84-91). It carries `message` and `title` and
+# nothing else, which is the whole of contract v0.7 §"Entity outputs".
+SERVICE_SEND_MESSAGE: Final = "send_message"
+
+# ---------------------------------------------------------------------------
 # UI services (contract §"UI services (v0.2, ADR-0016)")
 # ---------------------------------------------------------------------------
 
@@ -294,6 +386,13 @@ ATTR_REASON: Final = "reason"
 ATTR_DETAIL: Final = "detail"
 ATTR_OUTPUTS: Final = "outputs"
 ATTR_MISSING_OUTPUTS: Final = "missing_outputs"
+
+# v0.7 addendum (ADR-0021 §8): the response goes from three top-level keys to
+# five. `escalated` names the rule that raised this decision's priority;
+# `outputs` -- the same string as the per-person key above, deliberately, since
+# it is the same kind of list -- lists the target's bare outputs at the top
+# level, because a bare output has no person to hang off.
+ATTR_ESCALATED: Final = "escalated"
 
 # The three values `decision` can take. No fourth one without an ADR.
 DECISION_ROUTED: Final = "routed"

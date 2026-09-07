@@ -322,7 +322,12 @@ async def test_notify_entity_routes_to_the_default_target(
     assert len(calls) == 1
     assert calls[0].data["message"] == "hello"
     assert calls[0].data["title"] == "hi"
-    assert calls[0].data["data"]["priority"] == "normal"
+    # v0.7 (ADR-0021 §7(a)): `priority` is the router's own input key and is
+    # stripped from every `mobile_app_*` output, whatever its value. The
+    # degraded entity still routes at `normal` -- that is what carries no
+    # buttons here, since `normal` is not in `AUTHENTICATED_PRIORITIES`.
+    assert "priority" not in calls[0].data.get("data", {})
+    assert "authenticationRequired" not in calls[0].data.get("data", {})
 
 
 # ---------------------------------------------------------------------------
@@ -3151,3 +3156,160 @@ async def test_a_silence_going_on_again_re_arms_a_queue_that_lost_its_timer(
     await hass.async_block_till_done()
 
     assert switchboard._deferral_unsubs["person.alice"] is armed
+
+
+# ---------------------------------------------------------------------------
+# v0.7 (ADR-0021 §6 and §7): notify entities and the Companion critical payload
+# ---------------------------------------------------------------------------
+
+
+async def test_a_notify_entity_output_is_missing_until_it_is_available(
+    hass: HomeAssistant,
+) -> None:
+    """Absent, or `unavailable`, is a missing output -- and the router checks.
+
+    `notify.send_message` is an entity service, and core *logs and skips* an
+    `entity_id` that resolves to nothing rather than raising
+    (`$HA_CORE_SRC/homeassistant/helpers/service.py`,
+    `_resolve_entity_service_call_entities`), so calling and hoping would count
+    a delivery that never happened.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["notify.living_room"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard.notify_entity_id("living_room") is None
+    assert not switchboard.output_is_reachable("living_room")
+
+    hass.states.async_set("notify.living_room", "unavailable")
+    assert switchboard.notify_entity_id("living_room") is None
+
+    hass.states.async_set("notify.living_room", "2026-09-07T12:00:00+00:00")
+    assert switchboard.notify_entity_id("living_room") == "notify.living_room"
+    assert switchboard.output_is_reachable("living_room")
+
+
+async def test_only_a_notify_output_is_ever_looked_up_as_an_entity(
+    hass: HomeAssistant,
+) -> None:
+    """The entity path lives in the `notify.` namespace and nowhere else."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    hass.states.async_set("custom.thing", "on")
+    assert switchboard.notify_entity_id("custom.thing") is None
+
+
+async def test_a_title_is_sent_only_to_an_entity_that_declares_the_feature(
+    hass: HomeAssistant,
+) -> None:
+    """And an entity that publishes no `supported_features` still gets one.
+
+    `NotifyEntity.async_send_message` drops a title for an entity without
+    `NotifyEntityFeature.TITLE`, but a platform is free to override that
+    method; reading the published attribute is the same outcome for an entity
+    that inherits core's behaviour and the documented one for the rest.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["notify.living_room"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard._entity_takes_a_title("notify.nowhere") is False
+
+    hass.states.async_set("notify.living_room", "unknown")
+    assert switchboard._entity_takes_a_title("notify.living_room") is True
+
+    hass.states.async_set("notify.living_room", "unknown", {"supported_features": 0})
+    assert switchboard._entity_takes_a_title("notify.living_room") is False
+
+    hass.states.async_set("notify.living_room", "unknown", {"supported_features": 1})
+    assert switchboard._entity_takes_a_title("notify.living_room") is True
+
+
+async def test_a_failing_notify_entity_is_recorded_like_a_failing_service(
+    hass: HomeAssistant,
+) -> None:
+    """Same counter, same `delivery_failed` when it was the only output."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["notify.living_room"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    hass.states.async_set("notify.living_room", "unknown")
+
+    async def _raise(call: ServiceCall) -> None:
+        raise HomeAssistantError("no")
+
+    hass.services.async_register("notify", "send_message", _raise)
+    hass.states.async_set("person.alice", "home")
+
+    await switchboard.async_handle_request("Leak!")
+    await hass.async_block_till_done()
+
+    # Outputs are stored without their `notify.` prefix (`normalise_output`),
+    # so that is the name every counter and every repair uses.
+    assert switchboard.failing_outputs["living_room"] == 1
+    assert switchboard.drop_reasons.get("delivery_failed") == 1
+
+
+async def test_the_companion_os_is_read_from_the_matching_registration(
+    hass: HomeAssistant,
+) -> None:
+    """No matching registration is `None`, which means "both key sets"."""
+    registration = MockConfigEntry(
+        domain="mobile_app",
+        source="registration",
+        title="Phone One",
+        data={"device_name": "Phone One", "user_id": "u", "os_name": "Android"},
+    )
+    registration.add_to_hass(hass)
+    nameless = MockConfigEntry(
+        domain="mobile_app", source="registration", title="Nameless", data={}
+    )
+    nameless.add_to_hass(hass)
+
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_phone_one"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard.companion_os_name("mobile_app_phone_one") == "Android"
+    assert switchboard.companion_os_name("mobile_app_unknown_phone") is None
+
+
+async def test_the_critical_payload_option_defaults_to_on(
+    hass: HomeAssistant,
+) -> None:
+    """Absent means on; only an explicit `False` turns it off."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard.critical_payload_enabled is True
+
+    hass.config_entries.async_update_entry(
+        entry, options={**entry.options, "critical_payload": False}
+    )
+    await hass.async_block_till_done()
+    assert entry.runtime_data.switchboard.critical_payload_enabled is False
