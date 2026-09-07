@@ -405,3 +405,4 @@ for its own concurrent fixes — works in its own
 | [0014](ADR/0014-cast-notifier-name.md) | The Cast voice adapter is named "Cast Notifier" |
 | [0015](ADR/0015-refusals-raise-service-validation-error.md) | A refused notification raises `ServiceValidationError`, never fails silently |
 | [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-row message texts |
+| [0017](ADR/0017-debts-and-robustness.md) | Debts and robustness — frozen ids under any language, parallel fan-out, canonical callbacks, services without an entry |
