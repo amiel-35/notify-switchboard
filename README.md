@@ -7,7 +7,8 @@
 A [Home Assistant](https://www.home-assistant.io/) custom integration that
 acts as a pure `notify` **proxy**. It never delivers a notification itself:
 it only forwards to `notify.*` services you already have configured
-(Companion app, persistent notification, voice adapters, and so on).
+(Companion app, persistent notification, a speaker via core's own `notify:
+platform: tts`, and so on — see "Adding a speaker as an output" below).
 
 ## Why
 
@@ -101,6 +102,28 @@ alert:
     notifiers:
       - switchboard_leak
 ```
+
+## Adding a speaker as an output
+
+A speaker is just another `notify.*` service — core already ships one that
+speaks, the legacy `platform: tts` notify platform
+(`homeassistant/components/tts/notify.py`). Five lines make it a target,
+whether it is one person's output or a bare row's:
+
+```yaml
+notify:
+  - platform: tts
+    name: kitchen_speaker      # -> notify.kitchen_speaker
+    entity_id: tts.home_assistant_cloud
+    media_player: media_player.kitchen
+```
+
+Aim it at a Music Assistant player to get pause/announce/resume; a raw Cast
+player is interrupted. Pick `notify.kitchen_speaker` in a person's **Notify
+services** the same way you would a phone, or list it directly as a target's
+output. Assist Satellite Notifier (a sibling of this suite) is the one
+adapter still worth a separate integration — `assist_satellite` has no
+`notify` platform of its own.
 
 ## The night
 

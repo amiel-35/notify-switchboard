@@ -546,8 +546,8 @@ per sprint.
 | Suite S0 | Foundations: repo, template, CI, dev instance | CI green on the skeleton; `hassfest` passes |
 | Suite S1 | Router v0.1: routing table, per-person decision, acknowledge / snooze buttons, night deferral, observer mode, diagnostics, config flow | A test alert routes to a present phone, not to an absent one; silence blocks unless `critical`; acknowledging from a phone stops the repeat; a 1 h snooze holds across a restart |
 | Suite S2 | Router v0.2: five UI services (acknowledge/snooze/unsnooze/silence/unsilence), temporary person-wide silence, per-row `message`/`done_message`/`default_title` | A card silences somebody for an hour and the message is dropped, not lost; a snooze the row does not offer is refused with a translated error |
-| Suite S3 | `notify-cast` v0.1: a `notify` per Cast speaker that talks | An announcement is heard in the kitchen |
-| Suite S4 | `notify-airplay` v0.1: same for AirPlay speakers | An announcement is heard on an AirPlay speaker |
+| Suite S3 | `notify-cast` v0.1: a `notify` per Cast speaker that talks — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard in the kitchen |
+| Suite S4 | `notify-airplay` v0.1: same for AirPlay speakers — **superseded by core `notify: platform: tts` + Music Assistant (2026-09-07)** | An announcement is heard on an AirPlay speaker |
 | Suite S5 | `notify-alexa` v0.1: same via Alexa Media Player | An announcement is heard on an Echo |
 | Suite S6 | Cards v0.1: alert bubble, silence tiles | The wall shows active alerts and can acknowledge them |
 | Suite S7 | Blueprints + docs site | An external user routes an alert in 10 minutes |
