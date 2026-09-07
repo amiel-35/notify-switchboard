@@ -1694,6 +1694,31 @@ async def test_a_person_device_falls_back_to_the_object_id(
     assert device.name == "Jean Luc"
 
 
+async def test_a_person_device_ignores_a_state_without_a_friendly_name(
+    hass: HomeAssistant,
+) -> None:
+    """`State.name` does not title the object_id; the fallback has to.
+
+    `State.name` is `friendly_name or object_id.replace("_", " ")`
+    (`homeassistant/core.py`, `State.name`) -- lower case. A person whose
+    entity carries no friendly name must still be named "Jean Luc", not
+    "jean luc", since `has_entity_name` prefixes every entity with it.
+    """
+    hass.states.async_set("person.jean_luc", "home")
+    entry = await install(
+        hass,
+        [make_person("person.jean_luc", ["mobile_app_jl"])],
+        [make_target("leak", audience=["person.jean_luc"])],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.jean_luc"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Jean Luc"
+
+
 async def test_the_output_timeout_is_thirty_seconds(hass: HomeAssistant) -> None:
     """ADR-0017 §3 fixes the value, not only the name."""
     assert OUTPUT_TIMEOUT_SECONDS == 30
