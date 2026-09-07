@@ -1,76 +1,79 @@
-# Sprint 7 brief — Notify Switchboard v0.7.0 (places, entity outputs, critical payload, labels; suite roadmap "S11")
+# Sprint 7 brief — Notify Switchboard v0.7.0 (escalation and places, reduced; suite roadmap "S11")
 
-> Spec agent first (ADR-0021, contract v0.7 addendum, failing acceptance
-> tests `tests/acceptance/test_s7_*.py`, branch `spec/s7-router`, PR), then
-> coding agent (branch `feat/s7-router`). English. `$HA_CORE_SRC`, `$VENV`
-> from the orchestrator. No dev instance, no workflows; the coding agent
-> never edits `docs/contract.md` or the acceptance tests.
+> Reduced by the maintainer on 2026-09-07 after the product review. Spec agent
+> first (ADR-0021 — the branch `spec/s6-router` / closed PR #25 holds a fuller
+> ADR-0020 draft and tests to **cut down**, not extend), then coding agent.
+> Same rules as Sprint 6.
+
+## Guard-rail (unchanged)
+
+The router owns **no timer and no counter of its own**. Every rule below is
+evaluated at decision time from entities that exist.
 
 ## Scope (must)
 
-1. **Places.** New options list `places`: `{id (slug), name, outputs
-   (list of notify services or notify entities), schedule_entity
-   (optional)}`. A row's `audience` may contain `place:<id>`. Decision for a
-   place: no presence rule, no silence, no snooze, no deferral, no TTL; if
-   `schedule_entity` is set and `off` the call is dropped with the **new
-   reason `place_closed`**; otherwise routed to the place's outputs with the
-   same merged `data` (no Companion buttons). Places never appear in
-   recipients-of-episode logic for `done` filtering (they always get the
-   `done` message if they got the episode's first message). `explain` and
-   `sensor.switchboard_routing_table` include places. Options flow: a
-   "Places" menu entry with the same discovery selector as person outputs.
-2. **Entity outputs.** An output (person or place) that is an entity id of
-   domain `notify` (e.g. `notify.living_room_speak` from Alexa Devices, a
-   Telegram entity, a `NotifyGroup`) is delivered with
-   `notify.send_message` (`message`, `title`; `data` cannot be carried —
-   `$HA_CORE_SRC/homeassistant/components/notify/__init__.py`,
-   `NotifyEntityFeature.TITLE`), everything else keeps the legacy call. A
-   missing entity is handled exactly like a missing legacy service
-   (retries, repair). Recursion guard extended to `notify.switchboard*`
-   entities. Documented plainly: buttons and `data` keys are lost on entity
-   outputs.
-3. **Critical payload per OS.** For a `mobile_app_*` legacy output, when the
-   *effective* priority is `critical`, the router adds — only where the
-   caller did not set the key — the Companion keys that make the phone
-   sound through silent mode: iOS `data.push.sound = {name: "default",
-   critical: 1, volume: 1.0}` and `data.push["interruption-level"] =
-   "critical"`; Android `data.ttl = 0`, `data.priority = "high"`,
-   `data.channel = "Critical"`. The OS comes from the matching `mobile_app`
-   config entry's registration data (`os_name`; verify the key in
-   `$HA_CORE_SRC/homeassistant/components/mobile_app/`); unknown OS ⇒ both
-   sets are added (harmless on the other platform — verify against the
-   Companion documentation and cite it). Global option `critical_payload`
-   (default on) disables it.
-4. **Label audiences.** An `audience` entry `label:<label_id>` resolves, at
-   decision time, to every `person.*` entity carrying that label in the
-   entity registry (`$HA_CORE_SRC/homeassistant/helpers/entity_registry.py`,
-   `labels` on `RegistryEntry`; `helpers/label_registry.py`). Unknown label
-   ⇒ empty set and a repair `unknown_label` raised once. Areas and floors
-   are **not** supported (persons are not in rooms); say so in the docs.
-   `explain` lists the resolved persons.
-5. **Options flow and docs.** Audience selector accepts persons, places and
-   labels (three grouped option lists); `docs/ARCHITECTURE.md`, `README.md`
-   ("Places", "Entity outputs", "Critical notifications"), `CHANGELOG.md`,
-   `docs/known-issues.md`.
+1. **`escalate_when_nobody_home`** (target bool, default false): when no person
+   of the audience is `home` at decision time, the priority is raised **one
+   step** (`info→normal`, `normal→high`, `high→critical`, `critical` unchanged)
+   for this decision only. `explain` reports `escalated: nobody_home`.
+2. **Scheduled priority floor**: when a person's silence entity is `on` and
+   carries a `min_priority` state attribute (a `schedule` block's `data`,
+   `components/schedule/__init__.py`), that silence drops only calls below the
+   floor (reason `silenced`); unreadable value ⇒ silences everything. `explain`
+   names the floor in `detail`. No per-person `min_priority` option.
+3. **`sensor.switchboard_routing_table`** (state = number of targets; attributes
+   `targets` = `{slug, name, alert_entity, snooze_minutes, allow_acknowledge,
+   audience}`, `persons` = `{entity_id, wake_time, summary}`; never
+   `default_data`, never outputs); attributes **excluded from the recorder**
+   (`_unrecorded_attributes`). The cards drop `target_map`/`snooze_minutes`
+   afterwards (cards 0.2.0).
+4. **Acknowledgement authorship in the event only**: the `acknowledged` event
+   payload gains `user_id` and `person` (canonical `person.user_id` link, `null`
+   otherwise). No new entity, no store.
+5. **Bare outputs in an audience**: an `audience` entry may be a `notify.*`
+   service name (e.g. `notify.kitchen_speaker`, `notify.tablet_toast`); it has
+   no presence, no silence, no snooze, no deferral, no TTL, no buttons, receives
+   exactly the caller/row data, and takes part in episodes like a person output
+   for the `done` message. No `places` list, no schedule, no new reason, no new
+   menu — the audience selector simply offers `notify.*` services alongside
+   persons. `explain` lists them under `outputs`.
+6. **Entity outputs**: an output that is a `notify` **entity id** (Alexa
+   Devices, Telegram, `NotifyGroup`) is delivered with `notify.send_message`
+   (`message`, `title`; `data` cannot be carried — documented); missing entity
+   handled like a missing service; recursion guard extended.
+7. **Critical payload, translated, per OS** — for `mobile_app_*` outputs the
+   router **removes its own `priority` key** from the forwarded `data`
+   (it is a router input, not a Companion key; Android reads `data.priority`
+   and only knows `high`) and, when the effective priority is `critical`, adds
+   the keys the Companion documentation gives
+   (https://companion.home-assistant.io/docs/notifications/critical-notifications/):
+   iOS `push.sound: {name: default, critical: 1, volume: 1.0}` (or
+   `push.interruption-level: critical`), Android `ttl: 0`, `priority: high`,
+   `channel: alarm_stream`. OS from the matching `mobile_app` entry's
+   registration `os_name` (`components/mobile_app/const.py`); unknown OS ⇒ both
+   sets. Caller-set keys win. Global option `critical_payload` (default on).
+   Contract change: `data.priority` no longer reaches `mobile_app_*` outputs
+   (ADR records it).
 
-## Out of scope (must not)
+## Out of scope (deferred, decided)
 
-Area/floor audiences, `data` on entity outputs (core limitation), voice,
-cards.
+Escalation after N minutes (needs episode timestamps = state machine; a
+blueprint with a template `delay_on` alert is the native answer — document it
+in `docs/blueprints.md`), `max_deliveries` (a counter), per-target
+`require_authentication`, per-person `min_priority`,
+`sensor.switchboard_acknowledgements`, labels/areas/floors, a `places` object.
 
-## Acceptance (spec agent writes; coding agent must not modify)
+## Acceptance
 
-`test_s7_places.py` (routing, `place_closed`, no buttons, `done` always
-delivered to a place that got the first message), `test_s7_entity_outputs.py`
-(`send_message` called with message/title; missing entity ⇒ same path as
-missing service; recursion refused), `test_s7_critical_payload.py` (iOS,
-Android, unknown OS, caller-set keys preserved, option off),
-`test_s7_labels.py`, `test_contract.py` (new reason, new keys, `places`
-in the routing-table entity).
+`test_s7_nobody_home.py`, `test_s7_scheduled_floor.py`,
+`test_s7_routing_table.py` (incl. unrecorded attributes),
+`test_s7_ack_authorship.py`, `test_s7_bare_outputs.py`,
+`test_s7_entity_outputs.py`, `test_s7_critical_payload.py` (iOS, Android,
+unknown OS, caller keys preserved, option off, `priority` stripped),
+`test_contract.py`.
 
 ## Definition of done
 
-S1–S7 acceptance green unmodified; coverage ≥ 90 % on changed modules;
-ruff / mypy / hassfest green; en/fr/es complete; PR lists every core API
-with its path and the Companion documentation pages used. Branch
-`feat/s7-router`; do not merge, do not tag.
+As Sprint 6, version 0.7.0, plus real-device evidence requested from the
+maintainer for one critical push on iOS (documented in known-issues until
+observed).

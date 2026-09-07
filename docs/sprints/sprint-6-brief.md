@@ -1,87 +1,97 @@
-# Sprint 6 brief — Notify Switchboard v0.6.0 (bounded, declarative escalation; suite roadmap "S10")
+# Sprint 6 brief — Notify Switchboard v0.6.0 (consolidation; suite roadmap "S10")
 
-> Spec agent first (ADR-0020, contract v0.6 addendum, failing acceptance
-> tests `tests/acceptance/test_s6_*.py`, branch `spec/s6-router`, PR), then
-> coding agent (branch `feat/s6-router`). English. `$HA_CORE_SRC`, `$VENV`
-> from the orchestrator. No dev instance, no workflows; the coding agent
-> never edits `docs/contract.md` or the acceptance tests.
+> Decided by the maintainer on 2026-09-07 after an independent product review of
+> 0.1 → 0.5.1: **stop adding, consolidate.** Spec agent first (ADR-0020, contract
+> v0.6 addendum, acceptance tests on the *shape* of the options flow and on the
+> removed/renamed things), then coding agent. `$HA_CORE_SRC`, `$VENV` from the
+> orchestrator. Nobody touches the dev instance or `.github/workflows`; the coding
+> agent never edits `docs/contract.md`, `docs/ADR/` or acceptance test files.
 
-## Guard-rail (the reason this sprint is "bounded")
+## Goal
 
-The router owns **no timer and no counter of its own** for escalation. The
-only clock is the core `alert`'s own `repeat` (each repeat calls the
-notifier again); the only state is what the store already keeps per
-episode. Every rule below is evaluated at decision time from entities that
-exist. Anything that would need `async_call_later` to escalate is out.
+A newcomer meets **five fields** to create their first target, one vocabulary,
+one honest quickstart, and a router whose documented promises match its code.
+No new routing semantics.
 
 ## Scope (must)
 
-1. **`escalate_when_nobody_home`** (row, bool, default false). At decision
-   time, if no person of the row's audience is `home`, the call's priority
-   becomes `critical` for this decision only (bypasses silence and snooze,
-   triggers the critical payload of later sprints). `explain` shows it as
-   `escalated: nobody_home`.
-2. **Escalation audience after N minutes** (row: `escalation_after_minutes`
-   int, `escalation_audience` list of persons; both optional, both required
-   together). For rows with an `alert_entity`: when a call arrives for an
-   episode that started at least N minutes ago (episode start = the alert's
-   `idle → on` transition, already tracked for recipients) and the alert is
-   still `on`, the escalation audience is added to the audience and the
-   priority is raised one step (`normal → high`, `high → critical`; `info`
-   stays `info`; `critical` stays). Documented granularity: the escalation
-   happens at the first repeat after N minutes, so the effective delay is
-   `N` rounded up to the alert's repeat interval. `explain` shows
-   `escalated: after_minutes`.
-3. **`max_deliveries`** (row, int, optional). Per (episode, person): after
-   that many routed deliveries the next ones are dropped with the **new
-   reason `max_deliveries`**; the `done` message is not counted and always
-   allowed. Reset at episode end.
-4. **Acknowledgement authorship.** On every acknowledgement (Companion
-   button or `notify_switchboard.acknowledge`) the router records
-   `{target, person or null, user_id, at}` and exposes it: new global entity
-   `sensor.switchboard_acknowledgements` (state = count today, attributes
-   `last` = the record above, `by_target` = last record per slug), plus the
-   `acknowledged` event payload gains `user_id` and `person`. The
-   acknowledgement record is persisted and restored.
-5. **Routing table exposed for user interfaces.** New global entity
-   `sensor.switchboard_routing_table` (state = number of rows, attributes
-   `targets` = list of `{slug, name, alert_entity, snooze_minutes,
-   allow_acknowledge, audience}` and `persons` = list of `{entity_id,
-   wake_time, summary}`), so cards stop duplicating `target_map` /
-   `wake_time` in their own config. No secrets, no `default_data`.
-6. **Priority floor.** Per-person option `min_priority` (default `info`):
-   calls below it are dropped with the **new reason `below_min_priority`**.
-   Additionally, when a person's silence entity is a `schedule` whose
-   currently active block carries `data: {min_priority: <p>}`
-   (`$HA_CORE_SRC/homeassistant/components/schedule/__init__.py`, per-block
-   `data` exposed as state attributes while the block is active), that
-   block silences only calls below `<p>` (reason `silenced`) instead of
-   everything. `explain` names the floor in `detail`.
-7. **`require_authentication`** (row, bool or null, default null = today's
-   rule "high/critical require it"). Explicit true/false overrides the
-   default for that row's Companion buttons.
+1. **Target editor in two steps.** `target` step = `slug`, `name`, `alert_entity`,
+   `audience`, `observer_mode` (five fields, that is all). A second, optional
+   `target_advanced` step (reached from a menu entry "Advanced settings of a
+   target", and offered as a link sentence after saving) holds everything else:
+   `default_priority`, `presence_rule`, `allow_acknowledge`, `snooze_minutes`,
+   `default_data`, `message`, `done_message`, `default_title`, `clear_done`.
+   Defaults unchanged. The `target_saved` snippet step stays after the basic step.
+2. **Person editor likewise**: `person_outputs` keeps `outputs` and
+   `silence_entities`; `wake_time`, `summary` move to a `person_advanced` step.
+   Wake time default: none (the router then uses the silence entity's own end —
+   already the 0.5 early-flush behaviour — and, with no silence entity, delivers
+   immediately, as today).
+3. **Remove the dead `class` row key.** Nothing reads it (`router.py` stores it,
+   no consumer). Removed from the schema, strings, docs, examples; a stored value
+   is ignored, never migrated, never shown. ADR records it; `test_contract.py`
+   pins that `class` is absent from the row keys.
+4. **TTL defaults are documented defaults, not frozen values.** Contract v0.6
+   addendum reclassifies `ttl_minutes` defaults (`info` 120, `normal` 720, `high`
+   none) as "defaults that a minor version may change", exposed in the general
+   options step with the same values.
+5. **One vocabulary.** "target" everywhere for a routing-table row (strings,
+   README, quickstart, ARCHITECTURE, known-issues, error messages); the legacy
+   `target:` list of the notify service is called "the notify `target` list" the
+   one time it is mentioned; "person" everywhere for `person.*`; silence /
+   snooze / wake time / quiet hours each defined once in a **Glossary** section
+   of README that the other docs link to. `fr`/`es`: "cible", "personne" etc.
+   consistently.
+6. **Quickstart and README aligned**: one duration claim (measure the real path
+   on a fresh instance: it is "ten minutes" including the YAML `alert:` and a
+   restart, say so), observer mode as the primary path in README too (the
+   `notifiers:` example second), the five-line core `notify: platform: tts`
+   recipe for speakers (already there), a "Migrating an existing installation"
+   guide (`docs/migration-guide.md`): where to start when you have N inline
+   `notify.mobile_app_x` calls and M `alert:` blocks, one target per alert, the
+   `default` target first, `explain` to check, rollback = remove the row.
+7. **ARCHITECTURE and known-issues truthful**: roadmap rows rewritten to the
+   decided sequence (0.6.0 consolidation, 0.7.0 escalation-and-places reduced,
+   later: labels, per-row auth, intents), "Suite S3/S4 Cast/AirPlay" marked
+   superseded (done), no "planned for S7" leftovers; known-issues entries that
+   describe accepted design (temporary silence owned by the router; episodes as a
+   small persisted state; `not_in_audience` uncounted) moved to a new
+   `docs/accepted-deviations.md` with the doctrine principle each one bends and
+   why the maintainer accepted it.
+8. **Upstream issue drafts** in `docs/upstream/` (English, ready to paste; the
+   maintainer files them): `helpers/event.py` `cancel_on_shutdown` inoperative
+   for `async_call_later` handles (with the reproduction), and `AlertEntity`
+   never re-reading its watched entity at startup (with the consequence for
+   long-lived alerts). Cite core lines.
+9. **Cards README** (separate repository, separate small PR by another agent):
+   "planned for 0.2.0" wording removed; feature matrix by router version
+   (0.2 services, 0.4 explain, 0.5 summary tag); `target_map`/`snooze_minutes`
+   still required until the routing-table entity ships in 0.7.0.
 
 ## Out of scope (must not)
 
-Own timers, own repeat counters, changing `alert.repeat`, places, entity
-outputs, critical payload (next sprint), cards (separate repository,
-separate sprint that consumes items 4–5).
+Any new routing rule, entity, service or drop reason; escalation, places,
+labels (0.7.0); store migrations beyond ignoring `class`.
 
 ## Acceptance (spec agent writes; coding agent must not modify)
 
-`test_s6_nobody_home.py`, `test_s6_escalation.py` (episode older than N ⇒
-audience widened and priority raised at the next call; younger ⇒ not;
-alert already off ⇒ not), `test_s6_max_deliveries.py`,
-`test_s6_acknowledgements.py` (entity, event payload, persistence),
-`test_s6_routing_table.py` (attributes reflect options; no `default_data`
-leaked), `test_s6_min_priority.py` (person floor; schedule block floor),
-`test_s6_require_authentication.py`, `test_contract.py` (two new entities,
-two new reasons, new row/person keys).
+`test_s6_target_editor.py` — the `target` step schema has exactly the five
+fields; `target_advanced` holds the rest with unchanged defaults; a target
+created through the basic step routes exactly as one created in 0.5 with
+defaults; editing through advanced keeps basic values.
+`test_s6_person_editor.py` — same split; a person without `wake_time` and with
+a `schedule` silence flushes at the schedule's end (early flush) and is never
+stuck.
+`test_s6_class_removed.py` — a stored row with `class` loads and routes; the
+key is absent from the schema and from the routing-table exposure (diagnostics).
+`test_s6_vocabulary.py` — `strings.json` never uses "row" or "rule" for a
+target; every `issues`/`exceptions` string that names a target uses "target".
+`test_contract.py` — `class` absent; TTL defaults documented as changeable.
 
 ## Definition of done
 
-S1–S6 acceptance green unmodified; coverage ≥ 90 % on changed modules;
-ruff / mypy / hassfest green; en/fr/es complete (options, entity names,
-reasons); `docs/ARCHITECTURE.md` gains the "no own clock" rule in words;
-`CHANGELOG.md`; PR lists every core API with its path. Branch
-`feat/s6-router`; do not merge, do not tag.
+S1–S6 acceptance green unmodified; unit coverage ≥ 90 % on changed modules;
+ruff / `ruff format --check .` / mypy / hassfest; en/fr/es parity; version
+0.6.0; the migration guide and glossary reviewed by the reviewer *as a
+newcomer*; PR lists every core API with its path. Branch `feat/s6-router`;
+do not merge, do not tag.
