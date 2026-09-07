@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.5 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.6 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -25,6 +25,18 @@
 > message carries when the caller supplies none. The four
 > `event.switchboard_delivery` event types are unchanged. Everything above and
 > below stays the v0 / v0.2 / v0.3 / v0.4 text, unchanged.
+>
+> v0.6 addendum (ADR-0020): two more frozen entity names
+> (`sensor.switchboard_acknowledgements`, `sensor.switchboard_routing_table`),
+> two more drop reasons (`max_deliveries`, `below_min_priority`), five optional
+> routing-table row keys (`escalate_when_nobody_home`,
+> `escalation_after_minutes`, `escalation_audience`, `max_deliveries`,
+> `require_authentication`), one optional per-person key (`min_priority`), one
+> state attribute a silence entity may carry (`min_priority`), one more
+> `explain` response key (`escalated`), and the payload of the `acknowledged`
+> event. The four `event.switchboard_delivery` event types and the three
+> `explain` `decision` values are unchanged. Everything above and below stays
+> the v0 / v0.2 / v0.3 / v0.4 / v0.5 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -36,7 +48,7 @@
 | Notify entity (degraded path) | `notify.switchboard` entity, `notify.send_message` with `message` + `title` only |
 | Event entity | `event.switchboard_delivery` with fixed `event_types`: `routed`, `dropped`, `acknowledged`, `snoozed` |
 | Per-person entities | `binary_sensor.<person>_silenced`, `sensor.<person>_last_notification`, `sensor.<person>_active_snoozes` (unique_id = `<entry_id>:<person entity_id>:<kind>`) |
-| Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`, `sensor.switchboard_deferred_today` (v0.3, ADR-0017) |
+| Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`, `sensor.switchboard_deferred_today` (v0.3, ADR-0017), `sensor.switchboard_acknowledgements`, `sensor.switchboard_routing_table` (v0.6, ADR-0020) |
 | UI services (v0.2, ADR-0016) | `notify_switchboard.acknowledge`, `notify_switchboard.snooze`, `notify_switchboard.unsnooze`, `notify_switchboard.silence`, `notify_switchboard.unsilence` |
 | Read-only service (v0.4, ADR-0018) | `notify_switchboard.explain` (`SupportsResponse.ONLY`) |
 
@@ -410,6 +422,238 @@ been routed:
 
 A clear is **not a message**: it is not counted, it fires no
 `event.switchboard_delivery`, and it is subject to no routing rule.
+
+## v0.6 addendum (ADR-0020)
+
+Everything in this block is evaluated **at decision time**, from entities and
+records that already exist. The router owns no timer and no counter of its own
+for escalation; the only clock is the core `alert`'s own `repeat`. That is an
+invariant of the design, not an implementation note, and §"Escalation after N
+minutes" below states the granularity it costs.
+
+### Two more frozen entity names
+
+| Entity | State | Attributes |
+|---|---|---|
+| `sensor.switchboard_acknowledgements` | number of acknowledgements since local midnight | `last`, `by_target` |
+| `sensor.switchboard_routing_table` | number of routing-table rows | `targets`, `persons` |
+
+Both are global entities, in the frozen English form, in every instance
+language (v0.3 §"Names" applies to them unchanged).
+
+### Two more drop reasons
+
+The reason list of §"Routing decision" gains exactly two values. The four
+`event.switchboard_delivery` event types are **unchanged**; both new reasons
+travel in the existing `dropped` event and in the `reasons` attribute of
+`sensor.switchboard_dropped_today`, and both count towards it.
+
+| Reason | Meaning |
+|---|---|
+| `max_deliveries` | this person has already received the row's `max_deliveries` deliveries during the current episode |
+| `below_min_priority` | the call's effective priority is below this person's `min_priority` floor |
+
+### New routing-table row keys
+
+All five are optional and absent by default, so every row written before 0.6.0
+keeps the exact dict it had and behaves exactly as it did.
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `escalate_when_nobody_home` | bool | `false` | see below |
+| `escalation_after_minutes` | int > 0 | absent | see below; required together with `escalation_audience` |
+| `escalation_audience` | list of `person.*` | absent | required together with `escalation_after_minutes` |
+| `max_deliveries` | int > 0 | absent | see below |
+| `require_authentication` | bool or `null` | `null` | see below |
+
+### New per-person key
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `min_priority` | `info` / `normal` / `high` / `critical` | `info` | calls below it are dropped with reason `below_min_priority` |
+
+Priorities rank `info < normal < high < critical`.
+
+### `escalate_when_nobody_home`
+
+At decision time, when the row carries `escalate_when_nobody_home: true` and
+**no** person of the row's effective audience is in state `home`, the call's
+priority becomes `critical` **for this decision only**: it bypasses silence and
+snooze exactly as a caller-supplied `critical` does. The row's
+`default_priority` and the caller's `data.priority` are not modified, and the
+next call re-evaluates the question.
+
+Only the literal state `home` counts as home; a named zone, `not_home`,
+`unknown`, `unavailable` and an unknown entity all count as "not home". The
+row's presence rule is unaffected — a `home_only` row with nobody home still
+drops everybody with reason `presence`. An empty effective audience escalates
+nothing.
+
+### Escalation after N minutes
+
+For a row that names an `alert_entity` and carries both
+`escalation_after_minutes` and `escalation_audience`: when a call arrives, the
+row's current episode has a known start at least that many minutes in the past,
+and the row's `alert_entity` is in state `on` right now, then for that decision
+only:
+
+- `escalation_audience` is **added** to the row's audience. The added persons
+  are ordinary members of the effective audience — presence, floor, silence,
+  snooze and `max_deliveries` all apply to them — and they are not reported
+  `not_in_audience`.
+- the priority is raised **one step**: `normal → high`, `high → critical`.
+  `info` and `critical` are unchanged.
+
+"Still `on`" is the acknowledgement check: an acknowledged alert reads `off`,
+so it does not escalate.
+
+**Granularity.** The router is called when the alert calls it, so the
+escalation happens at the **first repeat after N minutes** and the effective
+delay is `N` rounded **up** to the alert's repeat interval. An alert with
+`repeat: [15]` and `escalation_after_minutes: 20` escalates at 30 minutes.
+
+### `max_deliveries`
+
+Per **episode and person**: once that many routed deliveries of the row have
+reached a person during the current episode, the next ones are dropped with
+reason `max_deliveries`. A delivery is the unit
+`sensor.switchboard_routed_today` already counts — one (person, target) pair
+that reached at least one output.
+
+- The count resets with the episode: a new episode starts every person's count
+  at zero.
+- A row with no `alert_entity` has no episodes, so the key is inert on it.
+- A `done` message is never counted and is always allowed, whatever the cap.
+  §"Episodes and the `done` message" (v0.5) still applies to it unchanged.
+- `critical` does **not** bypass the cap. It bypasses a person's silence and
+  snooze, not a bound the household put on a row.
+- The cap is evaluated after presence, the priority floor, silence and snooze,
+  so a delivery dropped for another reason keeps that reason and does not
+  consume the budget.
+
+### Priority floors
+
+A call whose effective priority is below a person's `min_priority` is dropped
+for that person with reason `below_min_priority`. The floor is evaluated after
+the presence rule and before silence and snooze. `critical` is the top of the
+rank, so it is never below a floor.
+
+A silence entity that is `on` **and** carries a `min_priority` state attribute
+silences only the calls **below** that value, with the existing reason
+`silenced`; calls at or above it pass. A silence entity that is `on` and
+carries no such attribute silences everything, as before. The documented way to
+produce the attribute is a core `schedule` whose active block carries
+`data: {min_priority: <p>}`:
+
+```yaml
+schedule:
+  night:
+    monday:
+      - from: "22:30:00"
+        to: "07:00:00"
+        data:
+          min_priority: high
+```
+
+A `min_priority` attribute whose value is not one of the four priorities is
+ignored and the entity silences everything: a typo fails towards quiet.
+
+### `require_authentication`
+
+Governs the `authenticationRequired` flag on the row's Companion buttons, and
+nothing else. `null` (or absent) is the rule of §"Buttons and callbacks",
+unchanged: set when the message's effective priority is `high` or `critical`.
+`true` always sets it; `false` never does. The effective priority a `null` row
+reads is the escalated one.
+
+It is not an authorisation decision: the ADR-0009 allow-list remains the only
+thing that decides whether a row can be acknowledged at all.
+
+### `explain` gains one response key
+
+The response of `notify_switchboard.explain` is a mapping with **four** keys:
+`target`, `priority`, `persons` and the new `escalated`.
+
+| Value of `escalated` | Meaning |
+|---|---|
+| `null` | nothing escalated this decision |
+| `"nobody_home"` | the `escalate_when_nobody_home` rule fired |
+| `"after_minutes"` | the escalation-after-N-minutes rule fired |
+
+`priority` reports the escalated priority and `persons` covers the effective
+audience, escalation audience included. `escalated` is populated only when a
+rule actually changed the decision — a raised priority, a widened audience, or
+both; a rule whose condition holds but which would change nothing leaves it
+`null`. When both rules fire, `escalated` is `"nobody_home"`.
+
+The per-person keys are unchanged, and so are the three `decision` values; the
+two new drop reasons travel in the existing `reason` key, and `detail` names
+the floor or the cap that decided. `explain` remains a pure evaluation: it
+consumes no `max_deliveries` budget and writes nothing.
+
+### The `acknowledged` event payload
+
+The payload of the `acknowledged` `event.switchboard_delivery` event is frozen
+as:
+
+```yaml
+target: leak                 # the routing-table slug
+alert_entity: alert.leak     # the row's alert
+user_id: "01J..."            # the acting Home Assistant user, or null
+person: person.alice         # that user's `person.*`, or null
+```
+
+`person` is resolved through the canonical link only — the `user_id` state
+attribute of a `person.*`, step 1 of v0.3 §"Callback resolution order". The
+`device_id` fallback is not used for authorship: `person` is `null` rather than
+a guess.
+
+### Acknowledgement records
+
+Every acknowledgement that actually happens — through the Companion button or
+through `notify_switchboard.acknowledge`, once the ADR-0009 allow-list has said
+yes — is recorded as:
+
+```yaml
+target: leak
+person: person.alice   # or null
+user_id: "01J..."      # or null
+at: "2026-09-07T03:12:44+00:00"
+```
+
+`sensor.switchboard_acknowledgements` exposes them: its **state** is the number
+of records since local midnight, its `last` attribute is the most recent record
+(or `null`), and its `by_target` attribute maps each row slug to that row's most
+recent record. Only the state resets at local midnight; `last` and `by_target`
+survive the reset, a reload and a restart, because the records are persisted.
+
+A refused acknowledgement records nothing.
+
+### `sensor.switchboard_routing_table`
+
+Its state is the number of routing-table rows. Its two attributes are:
+
+```yaml
+targets:
+  - slug: leak
+    name: Fuite d'eau
+    alert_entity: alert.leak        # or null
+    snooze_minutes: [15, 60]
+    allow_acknowledge: true
+    audience: [person.alice, person.bob]
+persons:
+  - entity_id: person.alice
+    wake_time: "07:00:00"           # or null
+    summary: true
+```
+
+`targets` follows the order of the routing table and `persons` that of the
+person rows. `wake_time` is the `"HH:MM:SS"` string the options carry.
+
+The two lists carry **exactly** the keys shown. In particular the entity never
+exposes `default_data` — the one row key that carries whatever the user put in
+it, and therefore the one where a secret ends up — and it exposes no person
+`outputs`. Nothing else is added to either list without a new ADR.
 
 ## Observer mode (plan B, ADR-007)
 

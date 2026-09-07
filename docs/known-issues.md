@@ -190,6 +190,22 @@ did not take it up even though it added three other per-row fields. Planned
 resolution: a `require_authentication` tri-state on the row when a real use
 case shows up.
 
+**Resolved in 0.6.0 (ADR-0020 §7)**, by exactly the tri-state named above, and
+the entry is kept because the *reasoning* — why 0.1.0 and 0.2.0 both declined
+it — is what the ADR had to answer.
+
+`require_authentication` is a routing-table row key, `true` / `false` / `null`,
+defaulting to `null` and written into the row only when it is not `null`.
+`null` is this entry's behaviour to the letter (`high` and `critical` set the
+flag), `true` always sets it, `false` never does. It governs the row's
+Companion buttons and nothing else: the ADR-0009 allow-list remains the only
+thing deciding whether a row can be acknowledged at all. The one subtlety a
+reader of this entry would not have predicted is that the effective priority a
+`null` row reads is the **escalated** one, so a `normal` call raised to
+`critical` by an empty house gets an authenticated button — the button that
+goes out matches the message that goes out. Pinned by
+`tests/acceptance/test_s6_require_authentication.py`.
+
 ## 2026-09-07 — S1 — two `alert` limitations to raise upstream
 
 This entry exists so the follow-up is not lost:
@@ -219,6 +235,17 @@ watched entity out of the alert state, which reaches `end_alerting` and
 `tests/conftest.py` still lists exactly the three S1/S2 tests that acknowledge
 one, and `tests/acceptance/conftest.py`'s `real_alert` fixture says so where
 somebody adding an episode test will read it.
+
+**Still open in 0.6.0, and (2) has become load-bearing rather than merely
+annoying.** ADR-0020 §2 reads "nobody has acknowledged yet" straight off the
+`alert.*` being in state `on`, which works precisely *because* `alert.turn_off`
+sets `_ack` without cancelling anything: the alert keeps its repeat, keeps
+calling this integration, and each call sees `off` and declines to escalate. If
+core ever fixed (2) by cancelling the repeat on acknowledgement, the escalation
+rule would still be correct — there would simply be no further call to evaluate
+it on. The S6 tests still need no `expected_lingering_timers` entry: the
+`real_alert` fixture now ends every alert it made at teardown, and
+`end_alerting` cancels.
 
 ## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
 
