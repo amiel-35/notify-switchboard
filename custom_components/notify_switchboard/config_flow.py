@@ -65,11 +65,6 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
-from homeassistant.components.notify.const import (
-    SERVICE_NOTIFY,
-    SERVICE_PERSISTENT_NOTIFICATION,
-    SERVICE_SEND_MESSAGE,
-)
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigEntryState,
@@ -132,7 +127,7 @@ from .dispatcher import (
     named_entity,
     output_label as _output_label,
 )
-from .router import is_recursive_output
+from .router import NON_OUTPUT_COMPONENT_SERVICES, is_recursive_output
 from .validation import parse_snooze_minutes, validate_person, validate_target
 
 if TYPE_CHECKING:
@@ -157,15 +152,25 @@ MOBILE_APP_USER_ID = "user_id"
 # Companion app supplies one or the other depending on its version.
 FOCUS_MARKER = "focus"
 
-# The three services the `notify` component itself owns
-# (`homeassistant/components/notify/const.py`): the aggregate legacy service,
-# the `NotifyEntity` action, and the built-in "write it on the dashboard" one.
-# None of them is a person's device, and offering `send_message` as an output
-# would be a plain bug -- it is an entity action and takes no bare `message`.
-# They stay typable thanks to `custom_value`.
-NOTIFY_COMPONENT_SERVICES = frozenset(
-    {SERVICE_NOTIFY, SERVICE_SEND_MESSAGE, SERVICE_PERSISTENT_NOTIFICATION}
-)
+# Two of the three services the `notify` component itself owns
+# (`homeassistant/components/notify/const.py`) are left out of both pickers:
+# `notify.notify` fans a message out to every platform on the instance --
+# the one undifferentiated channel this router exists to replace -- and
+# `notify.send_message` is an entity action whose schema takes no bare
+# `message`, so offering it as an output would be a plain bug.
+#
+# The third, `notify.persistent_notification`, is offered (ADR-0018 §2,
+# amendment 2026-09-07). It is Home Assistant's own notification drawer: the
+# most common output of somebody with no phone, and the one the quickstart
+# uses before any phone exists. `output_label` gives it a translated name of
+# its own, so it reads as "Home Assistant notifications" and not as a slug.
+#
+# `NON_OUTPUT_COMPONENT_SERVICES` is the router's own list of the same two, and
+# is imported rather than rewritten: the picker hiding one thing and
+# `validate_target` refusing another is exactly the drift a second copy makes
+# inevitable. What the router refuses is unchanged; only the list of what is
+# *offered* grows. Both stay typable thanks to `custom_value`.
+NOTIFY_COMPONENT_SERVICES = NON_OUTPUT_COMPONENT_SERVICES
 
 KEY_THIS_PERSONS_DEVICE = f"component.{DOMAIN}.common.this_persons_device"
 KEY_DEFAULT_TARGET_NAME = f"component.{DOMAIN}.common.default_target_name"

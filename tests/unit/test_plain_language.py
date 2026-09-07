@@ -277,6 +277,41 @@ async def test_no_output_option_is_left_showing_a_bare_service_name(
         )
 
 
+async def test_the_dashboard_notification_is_offered_by_both_pickers(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0018 §2 (amendment 2026-09-07), the half spec #36 added.
+
+    `notify.persistent_notification` is Home Assistant's own notification
+    drawer: the most common output of somebody with no phone, and the one the
+    quickstart uses before any phone exists. It was hidden alongside the two
+    services that really cannot be outputs; only those two stay hidden.
+    """
+    async_mock_service(hass, "notify", "persistent_notification")
+    async_mock_service(hass, "notify", "notify")
+    async_mock_service(hass, "notify", "send_message")
+
+    outputs = {
+        option["value"]: option["label"]
+        for option in _output_options(hass, [], "their device", {}, TEXTS)
+    }
+    audience = {
+        option["value"]: option["label"] for option in _audience_options(hass, [])
+    }
+
+    assert outputs["persistent_notification"] == "Home Assistant notifications", (
+        f"the drawer is offered, and named in words; got {outputs!r}"
+    )
+    assert audience["notify.persistent_notification"] == (
+        "Home Assistant notifications"
+    ), f"and it is an audience entry like any other (ADR-0021 §5); got {audience!r}"
+    for hidden in ("notify", "send_message"):
+        assert hidden not in outputs, (
+            f"`notify.{hidden}` can never be an output, so it is not offered"
+        )
+        assert f"notify.{hidden}" not in audience
+
+
 async def test_the_audience_offers_people_by_name_and_speakers_in_words(
     hass: HomeAssistant,
 ) -> None:
