@@ -1427,6 +1427,48 @@ async def test_unloading_the_entry_detaches_the_stop_listener_once(
     assert switchboard._stop_unsub is None
 
 
+async def test_a_person_device_is_named_after_the_person(hass: HomeAssistant) -> None:
+    """The virtual device carries the person's friendly name, not their slug.
+
+    A `person.*` entity is renamed in the UI without its entity id following,
+    so `person.alice` may well be "Alice Martin". Titling the object_id gave
+    "Alice", which is a different person's name as far as the user is
+    concerned -- and `has_entity_name` puts that word in front of every
+    entity of the device.
+    """
+    hass.states.async_set("person.alice", "home", {"friendly_name": "Alice Martin"})
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.alice"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Alice Martin"
+
+
+async def test_a_person_device_falls_back_to_the_object_id(
+    hass: HomeAssistant,
+) -> None:
+    """No state yet (a restart races person setup): keep the old form."""
+    entry = await install(
+        hass,
+        [make_person("person.jean_luc", ["mobile_app_jl"])],
+        [make_target("leak", audience=["person.jean_luc"])],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.jean_luc"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Jean Luc"
+
+
 async def test_the_output_timeout_is_thirty_seconds(hass: HomeAssistant) -> None:
     """ADR-0017 §3 fixes the value, not only the name."""
     assert OUTPUT_TIMEOUT_SECONDS == 30
