@@ -2,214 +2,216 @@
   "title": "Standard de notification",
   "common": {
     "acknowledge": "J'ai vu",
-    "snooze_minutes": "Reporter {minutes} min",
+    "snooze_minutes": "Plus tard ({minutes} min)",
     "back_to_normal": "Tout est revenu à la normale",
-    "this_persons_device": "appareil de cette personne",
+    "this_persons_device": "son appareil",
+    "home_assistant_app": "application Home Assistant",
+    "persistent_notification": "Notifications de Home Assistant",
     "default_target_name": "Tout le monde",
-    "test_message": "Message de test de Notify Switchboard.",
-    "detail_routed": "Ce message serait remis à {outputs}.",
-    "detail_deferred": "{person} est en silence à cause de {entities} : ce message serait mis en attente et délivré à {until}.",
-    "detail_dropped": "Ce message serait écarté pour {person}, motif {reason}.",
-    "detail_presence": "La règle de présence de cette cible est {rule}, et {person} est actuellement {state}.",
-    "detail_silenced": "{person} est en silence à cause de {entities}. Seul un message critical passerait.",
-    "detail_silenced_temporary": "{person} est en silence via notify_switchboard.silence jusqu'à {until}. Seul un message critical passerait.",
-    "detail_snoozed": "{person} a reporté la cible {target} jusqu'à {until}.",
-    "detail_no_outputs": "Aucun service notify n'est configuré pour {person} : il n'y a nulle part où envoyer ce message.",
-    "detail_not_in_audience": "{person} ne fait pas partie de l'audience de la cible {target}.",
-    "detail_unknown_person": "La cible {target} nomme {person}, qui n'est pas dans la table de Notify Switchboard.",
-    "detail_recursion": "Tous les services notify configurés pour {person} pointent vers Notify Switchboard, ce qui bouclerait.",
+    "test_message": "Message d'essai du Standard de notification.",
+    "detail_routed": "Ce message partirait vers {outputs}.",
+    "detail_deferred": "On ne dérange pas {person} en ce moment ({entities}). Le message attendrait, et serait remis à {until}.",
+    "detail_dropped": "Ce message ne serait pas remis à {person} ({reason}).",
+    "detail_presence": "Cette cible ne prévient pas tout le monde en toutes circonstances : sa règle de présence est {rule}, et {person} est actuellement {state}.",
+    "detail_silenced": "On ne dérange pas {person} en ce moment ({entities}). Seule une alerte critique passerait.",
+    "detail_silenced_temporary": "{person} a été mis en silence pour un moment, jusqu'à {until}. Seule une alerte critique passerait.",
+    "detail_snoozed": "{person} a mis « {target} » en attente jusqu'à {until}.",
+    "detail_no_outputs": "Aucun appareil n'est indiqué pour {person} : il n'y a nulle part où envoyer ce message.",
+    "detail_not_in_audience": "{person} ne fait pas partie des personnes prévenues par « {target} ».",
+    "detail_unknown_person": "« {target} » veut prévenir {person}, qui n'est pas dans la liste des personnes de la maison.",
+    "detail_recursion": "Tous les appareils de {person} renvoient vers le Standard de notification lui-même : le message tournerait en rond.",
     "summary_title": "{count} messages pendant votre absence",
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
-    "detail_expired": "Un message en attente pour {person} serait abandonné une fois sa durée de vie écoulée.",
-    "detail_not_notified": "{person} n'a rien reçu pendant le dernier épisode de la cible {target} : le message de retour à la normale ne le concerne pas.",
-    "detail_silenced_floor": "{person} est en silence via {entities}, qui ne laisse passer que {floor} et au-dessus. Seul un message critical passe toujours."
+    "detail_expired": "Un message mis en attente pour {person} serait abandonné : il aurait trop attendu pour valoir encore la peine.",
+    "detail_not_notified": "{person} n'a rien reçu la dernière fois que « {target} » s'est déclenchée : le message de retour à la normale ne la concerne pas.",
+    "detail_silenced_floor": "On ne dérange pas {person} en ce moment ({entities}), et seuls les messages d'importance {floor} et au-dessus passent. Une alerte critique passe toujours."
   },
   "entity": {
     "binary_sensor": {
       "silenced": {
-        "name": "En silence"
+        "name": "À ne pas déranger"
       }
     },
     "event": {
       "delivery": {
-        "name": "Remise"
+        "name": "Envoi"
       }
     },
     "sensor": {
       "active_snoozes": {
-        "name": "Reports en cours"
+        "name": "Mises en attente en cours"
       },
       "deferred_today": {
-        "name": "Reportées aujourd'hui"
+        "name": "Retenues aujourd'hui"
       },
       "dropped_today": {
-        "name": "Écartées aujourd'hui"
+        "name": "Non remises aujourd'hui"
       },
       "last_notification": {
         "name": "Dernière notification"
       },
       "routed_today": {
-        "name": "Acheminées aujourd'hui"
+        "name": "Envoyées aujourd'hui"
       },
       "routing_table": {
-        "name": "Table de routage"
+        "name": "Qui reçoit quoi"
       }
     }
   },
   "config": {
     "step": {
       "user": {
-        "title": "Configurer Standard de notification",
-        "description": "Standard de notification est un relais : il n'envoie jamais de notification lui-même. Une fois installé, construisez la table de routage depuis ses options : d'abord les personnes et leurs services notify, puis une cible par alerte."
+        "title": "Installer le Standard de notification",
+        "description": "Le Standard de notification décide qui est prévenu, sur quoi et à quel moment ; ce sont vos téléphones et vos enceintes qui sonnent, il ne sonne jamais lui-même. Une fois installé, ouvrez ses options : ajoutez d'abord les personnes de la maison et leurs appareils, puis une cible par alerte."
       }
     },
     "abort": {
-      "single_instance_allowed": "Standard de notification est déjà configuré. Une seule instance est autorisée."
+      "single_instance_allowed": "Le Standard de notification est déjà installé. Il n'en faut qu'un."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Standard de notification",
-        "description": "Ajoutez les personnes que la maison notifie, puis une cible par alerte. Chaque cible devient un service notify.switchboard_[slug] à lister dans les notifiers d'une alerte.",
+        "description": "Commencez par les personnes de la maison : sur quels appareils chacune est prévenue, et quand il ne faut pas la déranger. Créez ensuite une cible par alerte — une fuite d'eau, un portail resté ouvert — en choisissant qui doit être prévenu.",
         "menu_options": {
-          "person": "Ajouter ou modifier une personne",
-          "edit_person": "Modifier une personne",
-          "edit_person_advanced": "Réglages avancés d'une personne",
-          "remove_person": "Supprimer une personne",
-          "target": "Ajouter ou modifier une cible",
+          "person": "Ajouter quelqu'un",
+          "edit_person": "Changer les appareils de quelqu'un",
+          "edit_person_advanced": "Régler la nuit de quelqu'un",
+          "remove_person": "Retirer quelqu'un",
+          "target": "Ajouter une cible",
           "edit_target": "Modifier une cible",
           "edit_target_advanced": "Réglages avancés d'une cible",
           "remove_target": "Supprimer une cible",
-          "general": "Cible par défaut",
-          "ttl": "Durée de vie",
-          "test_person": "Tester une personne",
-          "test_target": "Tester une cible",
-          "edit_target_escalation": "Escalade d'une cible"
+          "general": "Cible utilisée par défaut",
+          "ttl": "Combien de temps un message retenu reste utile",
+          "test_person": "Envoyer un message d'essai à quelqu'un",
+          "test_target": "Envoyer un message d'essai par une cible",
+          "edit_target_escalation": "Ce qui se passe quand la maison est vide"
         }
       },
       "person": {
-        "title": "Personne",
-        "description": "Choisissez la personne à ajouter ou à modifier. L'étape suivante propose les services notify et les capteurs Focus de ses téléphones.",
+        "title": "Ajouter quelqu'un",
+        "description": "Choisissez qui vous voulez ajouter ou modifier. L'écran suivant propose déjà ses téléphones et son mode Concentration.",
         "data": {
           "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "L'entité person.* dont la présence décide si cette personne est notifiée."
+          "entity_id": "Sa présence à la maison pourra servir à décider s'il faut la prévenir."
         }
       },
       "edit_person": {
-        "title": "Modifier une personne",
-        "description": "Choisissez la personne à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "title": "Changer les appareils de quelqu'un",
+        "description": "Choisissez qui vous voulez modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré.",
         "data": {
           "entity_id": "Personne"
         }
       },
       "person_outputs": {
-        "title": "Services notify et silence",
-        "description": "Quels services notify joignent {person}, et quand cette personne est en silence. Les services des téléphones rattachés à son utilisateur Home Assistant sont listés en premier et déjà cochés.",
+        "title": "Prévenir {person}",
+        "description": "Sur quels appareils {person} reçoit les notifications, et quand faut-il ne pas la ou le déranger ?",
         "data": {
-          "outputs": "Services notify",
-          "silence_entities": "Entités de silence"
+          "outputs": "Où prévenir",
+          "silence_entities": "Quand ne pas déranger"
         },
         "data_description": {
-          "outputs": "Choisissez parmi les services notify de cette instance, ou saisissez-en un qui n'existe pas encore : il est toléré et réessayé.",
-          "silence_entities": "Toute entité dont l'état on veut dire « silence » : un schedule, un input_boolean, un capteur binaire. Un capteur Focus d'iPhone est proposé automatiquement."
+          "outputs": "Ses téléphones sont déjà cochés. Vous pouvez ajouter un appareil qui n'est pas encore installé : il sera utilisé dès qu'il apparaîtra.",
+          "silence_entities": "Un horaire, un interrupteur, ou le mode Concentration de son iPhone : tant qu'il est actif, ses notifications attendent."
         }
       },
       "person_advanced": {
-        "title": "Réglages avancés d'une personne",
-        "description": "La nuit de {person}. Les deux champs sont facultatifs, et laisser l'heure de réveil vide est une réponse, pas un oubli : un message retenu attend alors la fin du silence lui-même, quand ce silence en publie une — un schedule le fait — et est écarté sinon, comme il l'a toujours été.",
+        "title": "La nuit de {person}",
+        "description": "À quelle heure sa nuit se termine, et comment lui rendre au réveil ce qui a été mis de côté. Les deux réponses sont facultatives, et laisser l'heure de réveil vide est une réponse : les messages attendent alors la fin de la période « ne pas déranger » elle-même, quand elle en annonce une — un horaire le fait — et sont abandonnés sinon.",
         "data": {
           "wake_time": "Heure de réveil",
-          "summary": "Résumer la nuit"
+          "summary": "Tout résumer en un seul message"
         },
         "data_description": {
-          "wake_time": "Fin du silence de nuit. Un message qui serait écarté pendant le silence est délivré à cette heure-là au lieu d'être perdu. Laissez vide pour utiliser la fin que le silence publie.",
-          "summary": "Une seule notification à la fin de la nuit listant tout ce qui a été retenu, au lieu d'une notification par message. Activé par défaut."
+          "wake_time": "Ce qui a été retenu pendant la nuit est remis à cette heure-là, au lieu d'être perdu. Vide : les messages attendent la fin de la période « ne pas déranger », quand elle en annonce une.",
+          "summary": "Au réveil, une seule notification qui liste tout ce qui a été retenu, au lieu d'une notification par message. Activé par défaut."
         }
       },
       "edit_person_advanced": {
-        "title": "Réglages avancés d'une personne",
-        "description": "Choisissez la personne dont vous voulez ouvrir l'heure de réveil et le résumé de nuit. Ses services notify et ses entités de silence sont laissés tels quels.",
+        "title": "La nuit de quelqu'un",
+        "description": "Choisissez de qui vous voulez régler la nuit. Ses appareils et ses périodes « ne pas déranger » ne sont pas touchés.",
         "data": {
           "entity_id": "Personne"
         }
       },
       "remove_person": {
-        "title": "Supprimer une personne",
+        "title": "Retirer quelqu'un",
         "data": {
           "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "La personne est aussi retirée de l'audience de toutes les cibles."
+          "entity_id": "Cette personne ne sera plus prévenue par aucune cible."
         }
       },
       "target": {
-        "title": "Cible",
-        "description": "Une cible de la table de routage. Elle devient notify.switchboard_[slug]. Ces cinq champs suffisent à router ; la priorité, la présence, les boutons et les modèles ont tous une valeur par défaut et vivent dans les réglages avancés.",
+        "title": "Une cible : une alerte, et qui elle prévient",
+        "description": "Une cible, c'est une alerte de la maison — une fuite d'eau, un portail resté ouvert — et les personnes à prévenir quand elle se déclenche. Ces cinq réponses suffisent : l'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable et se règlent plus tard.",
         "data": {
-          "slug": "Identifiant",
+          "slug": "Identifiant court",
           "name": "Nom",
-          "alert_entity": "Alerte",
-          "audience": "Audience",
-          "observer_mode": "Mode observateur"
+          "alert_entity": "Alerte surveillée",
+          "audience": "Qui prévenir",
+          "observer_mode": "Surveiller l'alerte directement"
         },
         "data_description": {
-          "slug": "En minuscules, sans espaces. Le renommer casse toutes les alertes qui listent l'ancien service.",
-          "name": "Affiché aux personnes, et utilisé comme message en mode observateur quand l'alerte n'en porte pas.",
-          "alert_entity": "L'alert.* à laquelle cette cible est liée. Nécessaire pour le bouton « J'ai vu ».",
-          "audience": "Les personnes concernées par cette cible. Les autres ne sont pas notifiées.",
-          "observer_mode": "Surveiller l'état de l'alerte au lieu d'attendre d'être appelé comme notifier."
+          "slug": "Lettres minuscules sans espace, par exemple fuite_eau. Il devient notify.switchboard_fuite_eau. Le changer plus tard casse tout ce qui utilisait l'ancien nom.",
+          "name": "Le nom que les gens voient. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
+          "alert_entity": "L'alerte de Home Assistant que cette cible accompagne. Nécessaire pour le bouton « J'ai vu ».",
+          "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
+          "observer_mode": "Le standard regarde l'alerte lui-même et prévient dès qu'elle se déclenche, sans que vous ayez à la lui faire appeler. C'est la façon recommandée."
         }
       },
       "target_saved": {
         "title": "Cible enregistrée",
-        "description": "Voici le bloc alert: que cette cible attend. Copiez-le dans votre configuration YAML, faites pointer entity_id vers l'entité à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nLe bloc suit le mode observateur que vous avez choisi : en mode observateur le routeur surveille l'alerte lui-même et aucun notifiers: n'est nécessaire, et si le mode observateur est désactivé c'est l'entrée notifiers: qui permet à l'alerte de piloter le routeur.\n\nTout le reste — priorité, présence, boutons, modèles — a déjà une valeur par défaut. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
+        "description": "Il reste une chose à faire une seule fois : copier ce bloc dans votre configuration, remplacer binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrer Home Assistant.\n\n```yaml\n{snippet}\n```\n\nLe bloc suit le choix que vous venez de faire : si le standard surveille l'alerte directement, il n'y a personne à prévenir à déclarer ici ; sinon, c'est justement ce qui relie l'alerte au standard.\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer cette cible telle quelle. Si vous cochez, la cible est enregistrée à la validation du formulaire suivant."
+          "advanced": "Laissez décoché pour enregistrer la cible telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
         }
       },
       "target_advanced": {
-        "title": "Réglages avancés d'une cible",
-        "description": "Tout ce qui, sur {target}, a déjà une valeur par défaut raisonnable. Rien n'est obligatoire ici, et ce que vous ne touchez pas garde la valeur qu'il a.",
+        "title": "Réglages avancés de « {target} »",
+        "description": "Tout ce qui, sur {target}, a déjà une valeur raisonnable. Rien n'est obligatoire ici, et ce que vous ne touchez pas garde sa valeur.",
         "data": {
-          "default_priority": "Priorité par défaut",
-          "presence_rule": "Règle de présence",
-          "allow_acknowledge": "Autoriser l'acquittement",
-          "snooze_minutes": "Durées de report",
-          "default_data": "Données par défaut",
-          "message": "Modèle de message",
-          "done_message": "Modèle de retour à la normale",
+          "default_priority": "Importance par défaut",
+          "presence_rule": "Prévenir selon la présence",
+          "allow_acknowledge": "Bouton « J'ai vu »",
+          "snooze_minutes": "Boutons « plus tard »",
+          "default_data": "Options envoyées avec chaque message",
+          "message": "Texte du message",
+          "done_message": "Texte du retour à la normale",
           "default_title": "Titre par défaut",
           "clear_done": "Effacer le message de retour à la normale"
         },
         "data_description": {
-          "default_priority": "Seul `critical` lève le silence et les reports d'une personne.",
-          "presence_rule": "Si l'état person.* doit être à la maison, absent, ou peu importe.",
-          "allow_acknowledge": "Ajoute un bouton « J'ai vu » qui éteint l'alerte.",
-          "snooze_minutes": "Minutes séparées par des virgules, par exemple 15, 60. Laissez vide pour ne pas proposer de report.",
-          "default_data": "Fusionné sous le data de l'appelant ; en cas de conflit, l'appelant gagne.",
-          "message": "Modèle facultatif utilisé en mode observateur quand l'alerte se déclenche. L'état de l'alerte est disponible sous alert, par exemple {{ alert.attributes.level }}. Laissez vide pour envoyer le nom.",
-          "done_message": "Modèle facultatif utilisé en mode observateur quand l'alerte revient au repos. Laissez vide pour envoyer le texte traduit de retour à la normale.",
-          "default_title": "Titre utilisé quand l'appelant n'en donne pas, et pour tous les messages envoyés en mode observateur.",
-          "clear_done": "Retirer la notification de retour à la normale des téléphones qui l'ont reçue, une fois l'épisode clos. Désactivé par défaut : elle sonne, puis elle reste."
+          "default_priority": "Seule une alerte critique passe quand la personne ne veut pas être dérangée ou a mis la cible en attente.",
+          "presence_rule": "Faut-il être à la maison, être sorti, ou peu importe, pour être prévenu ?",
+          "allow_acknowledge": "Ajoute dans la notification un bouton qui éteint l'alerte.",
+          "snooze_minutes": "Des durées en minutes séparées par des virgules, par exemple 15, 60. Vide : aucun bouton « plus tard ».",
+          "default_data": "Ajouté à chaque message de cette cible. Si l'appel fournit la même chose, c'est l'appel qui gagne.",
+          "message": "Facultatif, et utilisé seulement quand le standard surveille l'alerte lui-même. L'alerte elle-même est disponible dans le modèle sous le nom alert. Vide : le nom de la cible est envoyé.",
+          "done_message": "Facultatif, envoyé quand l'alerte s'éteint, si le standard la surveille lui-même. Vide : un texte tout prêt est envoyé.",
+          "default_title": "Titre utilisé quand l'appel n'en donne pas, et pour tous les messages que le standard envoie de lui-même.",
+          "clear_done": "Retire le message de retour à la normale des téléphones qui l'ont reçu, une fois l'alerte terminée. Désactivé par défaut : il sonne, puis il reste."
         }
       },
       "edit_target": {
         "title": "Modifier une cible",
-        "description": "Choisissez la cible à modifier. Le formulaire s'ouvre sur ses réglages enregistrés.",
+        "description": "Choisissez la cible à modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré.",
         "data": {
           "slug": "Cible"
         }
       },
       "edit_target_advanced": {
         "title": "Réglages avancés d'une cible",
-        "description": "Choisissez la cible dont vous voulez ouvrir les réglages avancés. Ses cinq champs de base sont laissés tels quels.",
+        "description": "Choisissez la cible dont vous voulez ouvrir les réglages avancés. Son alerte et les personnes qu'elle prévient ne sont pas touchées.",
         "data": {
           "slug": "Cible"
         }
@@ -220,244 +222,261 @@
           "slug": "Cible"
         },
         "data_description": {
-          "slug": "Le service notify.switchboard_[slug] disparaît avec elle."
+          "slug": "Ce qui s'en servait pour prévenir les gens ne préviendra plus personne."
         }
       },
       "general": {
-        "title": "Cible par défaut",
+        "title": "Cible utilisée par défaut",
         "data": {
-          "default_target": "Cible par défaut",
-          "critical_payload": "Rendre les notifications critical réellement critiques"
+          "default_target": "Cible utilisée par défaut",
+          "critical_payload": "Faire sonner les téléphones pour les alertes critiques"
         },
         "data_description": {
-          "default_target": "Utilisée par notify.switchboard quand aucune cible n'est donnée, et par l'entité notify.",
-          "critical_payload": "Ajoute les clés Companion qui font sonner un téléphone malgré le mode Ne pas déranger quand un message est critical. Activé par défaut ; ne concerne que les services mobile_app."
+          "default_target": "Celle qui sert quand on demande au standard de prévenir sans dire par quelle cible.",
+          "critical_payload": "Une alerte critique fait alors sonner le téléphone même s'il est en « Ne pas déranger ». Activé par défaut ; ne concerne que l'application Home Assistant."
         }
       },
       "ttl": {
-        "title": "Durée de vie",
-        "description": "Combien de temps un message retenu pendant qu'une personne est en silence vaut encore la peine d'être délivré. Laissez un champ vide pour que les messages de cette priorité n'expirent jamais. Critical n'est pas listé : il n'est jamais retenu, donc il ne peut pas expirer.",
+        "title": "Combien de temps un message retenu reste utile",
+        "description": "Un message retenu pendant que quelqu'un ne veut pas être dérangé ne vaut plus forcément la peine d'être remis douze heures plus tard. Indiquez, selon l'importance, combien de temps il reste bon à délivrer. Un champ vide veut dire qu'il n'expire jamais. Les alertes critiques ne sont jamais retenues : elles n'ont donc pas de délai ici.",
         "data": {
-          "info": "Info",
-          "normal": "Normal",
-          "high": "Haute"
+          "info": "Peu importants",
+          "normal": "Normaux",
+          "high": "Importants"
         },
         "data_description": {
-          "info": "Minutes pendant lesquelles un message info reste utile après avoir été retenu. Valeur par défaut aujourd'hui : 120, et une version future peut en choisir une autre.",
-          "normal": "Minutes pendant lesquelles un message normal reste utile après avoir été retenu. Valeur par défaut aujourd'hui : 720, et une version future peut en choisir une autre.",
-          "high": "Minutes pendant lesquelles un message high reste utile. Vide par défaut : il n'expire jamais."
+          "info": "En minutes, à partir du moment où le message a été retenu. Aujourd'hui 120 par défaut, et une version future pourra choisir un autre nombre.",
+          "normal": "En minutes, à partir du moment où le message a été retenu. Aujourd'hui 720 par défaut, et une version future pourra choisir un autre nombre.",
+          "high": "En minutes, à partir du moment où le message a été retenu. Vide par défaut : ces messages n'expirent jamais."
         }
       },
       "test_target": {
-        "title": "Tester une cible",
-        "description": "Envoie un vrai message de test par cette cible, à toute son audience.",
+        "title": "Envoyer un message d'essai par une cible",
+        "description": "Envoie un vrai message d'essai, à tous ceux que cette cible prévient.",
         "data": {
           "slug": "Cible"
         },
         "data_description": {
-          "slug": "La cible à tester. Le message est compté et évènementé comme n'importe quel autre."
+          "slug": "La cible à essayer. Le message compte comme n'importe quel autre."
         }
       },
       "test_person": {
-        "title": "Tester une personne",
-        "description": "Envoie un vrai message de test à cette personne, par la cible qui la joint.",
+        "title": "Envoyer un message d'essai à quelqu'un",
+        "description": "Envoie un vrai message d'essai à cette personne, par une cible qui la prévient.",
         "data": {
           "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "La cible par défaut est utilisée si elle joint cette personne, sinon la première cible dont l'audience la contient."
+          "entity_id": "La cible par défaut est utilisée si elle prévient cette personne, sinon la première cible qui la prévient."
         }
       },
       "test_result": {
-        "title": "Résultat du test",
-        "description": "Le message a été envoyé. Voici ce que le routeur a décidé pour chaque personne :\n\n{result}"
+        "title": "Résultat de l'essai",
+        "description": "Le message est parti. Voici ce qui s'est passé pour chacun :\n\n{result}"
       },
       "target_escalation": {
-        "title": "Escalade d'une cible",
-        "description": "Ce que fait {target} quand personne de son audience n'est à la maison. Rien d'autre n'est modifié sur la cible. Ce réglage ne change quelque chose que si la règle de présence de la cible notifie les absents — always ou away_only. Avec home_only, une maison vide veut dire que personne n'est notifié : il ne reste aucune priorité à monter.",
+        "title": "Ce qui se passe quand la maison est vide",
+        "description": "Ce que fait « {target} » quand personne de ceux qu'elle prévient n'est à la maison. Rien d'autre n'est modifié. Ce choix ne sert que si la cible prévient aussi les absents : si elle ne prévient que les gens présents, une maison vide veut dire que personne n'est prévenu, et il n'y a plus rien à monter.",
         "data": {
-          "escalate_when_nobody_home": "Monter la priorité quand la maison est vide"
+          "escalate_when_nobody_home": "Monter l'importance quand la maison est vide"
         },
         "data_description": {
-          "escalate_when_nobody_home": "Un cran plus fort pour ce message seulement : info devient normal, normal devient high, high devient critical. Critical ne change pas, et la règle de présence décide toujours qui est notifié."
+          "escalate_when_nobody_home": "Un cran plus fort pour ce message-là seulement : peu important devient normal, normal devient important, important devient critique. Une alerte déjà critique ne bouge pas, et c'est toujours la présence qui décide qui est prévenu."
         }
       },
       "edit_target_escalation": {
-        "title": "Escalade d'une cible",
-        "description": "Choisissez la cible dont vous voulez ouvrir le réglage d'escalade. Tout le reste est laissé tel quel.",
+        "title": "Ce qui se passe quand la maison est vide",
+        "description": "Choisissez la cible à régler. Tout le reste est laissé tel quel.",
         "data": {
           "slug": "Cible"
         }
       }
     },
     "error": {
-      "not_a_person": "Choisissez une entité person.*.",
-      "duplicate_person": "Cette personne est déjà dans la table.",
-      "no_outputs": "Indiquez au moins un service notify.",
-      "recursive_output": "Une sortie ne peut pas pointer sur Standard de notification.",
-      "component_service_output": "notify.notify et notify.send_message appartiennent au composant notify lui-même, pas à quelque chose qui peut être notifié. Indiquez un vrai service notify.",
-      "invalid_output": "Un nom de service notify contient des caractères qu'un nom de service ne peut pas porter.",
-      "invalid_entity": "Ce n'est pas un identifiant d'entité.",
+      "not_a_person": "Choisissez quelqu'un dans la liste des personnes de la maison.",
+      "duplicate_person": "Cette personne est déjà là.",
+      "no_outputs": "Indiquez au moins un appareil.",
+      "recursive_output": "Un appareil ne peut pas renvoyer vers le Standard de notification lui-même.",
+      "component_service_output": "Ce choix n'est pas un appareil : c'est le mécanisme de notification lui-même, qui ne sonne nulle part. Choisissez un vrai appareil.",
+      "invalid_output": "Ce nom contient des caractères qu'un nom d'appareil ne peut pas porter.",
+      "invalid_entity": "Ce n'est pas quelque chose que Home Assistant connaît.",
       "invalid_time": "Utilisez HH:MM ou HH:MM:SS.",
       "invalid_slug": "Utilisez uniquement des minuscules, des chiffres et des tirets bas.",
-      "duplicate_slug": "Une autre cible utilise déjà cet identifiant.",
-      "invalid_priority": "Choisissez `info`, `normal`, `high` ou `critical`.",
-      "invalid_presence_rule": "Choisissez always, home_only ou away_only.",
-      "not_an_alert": "Choisissez une entité alert.*.",
+      "duplicate_slug": "Une autre cible porte déjà cet identifiant.",
+      "invalid_priority": "Choisissez : peu important, normal, important ou critique.",
+      "invalid_presence_rule": "Choisissez : toujours, seulement à la maison, ou seulement en cas d'absence.",
+      "not_an_alert": "Choisissez une alerte.",
       "empty_audience": "Choisissez au moins une personne.",
-      "unknown_person": "Cette cible nomme quelqu'un qui n'est pas dans la table.",
-      "invalid_snooze_minutes": "Utilisez des minutes entières positives séparées par des virgules.",
-      "invalid_default_data": "Les données par défaut doivent être un objet."
+      "unknown_person": "Cette cible veut prévenir quelqu'un qui n'est pas dans la liste des personnes de la maison.",
+      "invalid_snooze_minutes": "Utilisez des minutes entières, positives, séparées par des virgules.",
+      "invalid_default_data": "Ce champ attend une liste d'options, pas du texte."
     },
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
       "nothing_to_edit": "Il n'y a encore rien à modifier.",
-      "nothing_to_configure": "Ajoutez d'abord une cible.",
-      "nothing_to_test": "Aucune cible n'a cette personne dans son audience : il n'y a rien à lui envoyer. Ajoutez-la d'abord à l'audience d'une cible."
+      "nothing_to_configure": "Créez d'abord une cible.",
+      "nothing_to_test": "Aucune cible ne prévient cette personne : il n'y a rien à lui envoyer. Ajoutez-la d'abord à une cible."
     }
   },
   "issues": {
     "unknown_target": {
-      "title": "Cible inconnue du Standard de notification",
-      "description": "Quelque chose a appelé notify.switchboard avec la cible {slug}, qui n'est pas dans la table de routage. Le message a été écarté. Ajoutez la cible, ou corrigez l'appelant."
+      "title": "Une cible demandée n'existe pas",
+      "description": "Quelque chose a demandé la cible {slug}, qui n'existe pas. Le message a été abandonné. Créez cette cible, ou corrigez ce qui la demande."
     },
     "missing_output": {
-      "title": "Service notify inutilisable",
-      "description": "Le service notify {output} échoue depuis plusieurs notifications d'affilée : il n'existe pas, ou chaque appel a levé une erreur. Les messages qui lui sont destinés sont perdus. Réparez le service, ou retirez-le des sorties de la personne."
+      "title": "Un appareil ne répond plus",
+      "description": "{output} échoue depuis plusieurs notifications d'affilée : il n'existe pas, ou tous les envois se sont soldés par une erreur. Les messages qui lui sont destinés sont perdus. Réparez-le, ou retirez-le des appareils de la personne."
     },
     "invalid_service_target": {
-      "title": "Une carte ou un script appelle sans cesse une cible inconnue",
-      "description": "Un service notify_switchboard a été refusé plusieurs fois pour la cible {value}, qui n'est pas dans la table de routage. Quelque chose — le plus souvent une carte ou un script resté sur une cible renommée — continue de la demander. Corrigez l'appelant, ou ajoutez la cible."
+      "title": "Quelque chose demande sans cesse une cible qui n'existe pas",
+      "description": "Le Standard de notification a refusé plusieurs fois la cible {value}, qui n'existe pas. Quelque chose — le plus souvent une carte ou un script resté sur une cible renommée — continue de la demander. Corrigez-le, ou créez cette cible."
     },
     "invalid_service_person": {
-      "title": "Une carte ou un script nomme sans cesse une personne inutilisable",
-      "description": "Un service notify_switchboard a été refusé plusieurs fois pour {value}, qui n'est pas dans la table ou pas dans l'audience de la cible. Corrigez l'appelant, ou ajoutez cette personne à la table ou à l'audience."
+      "title": "Quelque chose nomme sans cesse quelqu'un qu'il ne peut pas prévenir",
+      "description": "Le Standard de notification a refusé plusieurs fois {value}, qui n'est pas dans la liste des personnes de la maison, ou n'est pas prévenu par cette cible. Corrigez ce qui la demande, ou ajoutez cette personne."
     },
     "invalid_service_calls_many": {
-      "title": "Une carte ou un script appelle sans cesse avec des valeurs inexistantes",
-      "description": "Des services notify_switchboard ont été refusés pour plus de {count} cibles ou personnes différentes. Plutôt qu'un avertissement par valeur, celui-ci les représente toutes. Quelque chose produit des noms absents de la table de routage — le plus souvent un modèle qui ne rend pas ce qu'on croit. Corrigez l'appelant ; cet avertissement disparaît au rechargement de l'intégration."
+      "title": "Quelque chose demande sans cesse des noms qui n'existent pas",
+      "description": "Le Standard de notification a maintenant refusé plus de {count} cibles ou personnes différentes. Plutôt qu'un avertissement par nom, celui-ci les représente tous. Quelque chose produit des noms qui n'existent pas — le plus souvent un modèle qui ne rend pas ce qu'on croit. Corrigez-le ; cet avertissement disparaît au rechargement du Standard de notification."
     },
     "person_without_user_id": {
-      "title": "Une personne n'est pas reliée à un utilisateur Home Assistant",
-      "description": "{person} reçoit des notifications avec des boutons J'ai vu ou Reporter, mais son entité person n'est reliée à aucun utilisateur Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à toute l'audience de la cible. Reliez-la dans Paramètres > Personnes, puis rechargez le Standard de notification."
+      "title": "Une personne n'est reliée à aucun compte Home Assistant",
+      "description": "{person} reçoit des notifications avec les boutons « J'ai vu » et « Plus tard », mais sa fiche n'est reliée à aucun compte Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à tous ceux que la cible prévient. Reliez-la dans Paramètres > Personnes, puis rechargez le Standard de notification."
     },
     "person_without_outputs": {
-      "title": "Une personne n'a aucun service notify",
-      "description": "{person} fait partie de l'audience d'au moins une cible mais n'a aucun service notify : tout message qui lui est destiné est écarté avec le motif no_outputs. Ouvrez les options de Notify Switchboard, modifiez cette personne et donnez-lui au moins un service notify."
+      "title": "Une personne n'a aucun appareil",
+      "description": "{person} est prévenue par au moins une cible, mais aucun appareil n'est indiqué pour elle : tous les messages qui lui sont destinés sont perdus. Ouvrez les options du Standard de notification, modifiez cette personne et donnez-lui au moins un appareil."
     },
     "alert_entity_missing": {
-      "title": "Une cible pointe vers une alerte qui n'existe pas",
-      "description": "La cible {slug} est liée à {entity_id}, qui n'est pas dans la machine à états. Cette cible n'acquitte rien et n'observe rien. Écrivez ce bloc alert:, ou videz le champ alerte de la cible, puis rechargez Notify Switchboard."
+      "title": "Une cible surveille une alerte qui n'existe pas",
+      "description": "La cible {slug} surveille {entity_id}, qui n'existe pas. Elle ne surveille donc rien et son bouton « J'ai vu » n'éteint rien. Créez cette alerte, ou videz le champ « Alerte surveillée » de la cible, puis rechargez le Standard de notification."
     }
   },
   "exceptions": {
     "unknown_target": {
-      "message": "Il n'y a pas de cible {target} dans la table de routage."
+      "message": "Il n'y a pas de cible {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "La cible {target} ne peut pas être acquittée : elle n'a pas d'alerte, ou l'acquittement y est désactivé."
+      "message": "La cible {target} n'a pas de bouton « J'ai vu » : elle ne surveille aucune alerte, ou le bouton y est désactivé."
     },
     "snooze_minutes_not_offered": {
-      "message": "La cible {target} ne propose pas de report de {minutes} min. Elle propose : {offered}."
+      "message": "La cible {target} ne propose pas de mise en attente de {minutes} min. Elle propose : {offered}."
     },
     "unknown_person": {
-      "message": "{person} n'est pas dans la table du Standard de notification."
+      "message": "{person} n'est pas dans la liste des personnes que le Standard de notification connaît."
     },
     "person_not_in_audience": {
-      "message": "{person} n'est pas dans l'audience de la cible {target}."
+      "message": "{person} ne fait pas partie des personnes prévenues par la cible {target}."
     },
     "invalid_silence_minutes": {
       "message": "Un silence dure entre {min} et {max} minutes ; {minutes} n'est ni l'un ni l'autre."
     },
     "no_audience": {
-      "message": "La cible {target} n'a personne dans son audience."
+      "message": "La cible {target} ne prévient personne."
     },
     "no_loaded_entry": {
-      "message": "Le Standard de notification n'a aucune entrée de configuration chargée, il ne peut donc rien faire. Ajoutez ou réactivez son entrée, puis réessayez."
+      "message": "Le Standard de notification n'est pas chargé, il ne peut donc rien faire. Réactivez-le, puis réessayez."
+    }
+  },
+  "selector": {
+    "priority": {
+      "options": {
+        "info": "Peu important",
+        "normal": "Normal",
+        "high": "Important",
+        "critical": "Critique — passe même quand on ne veut pas être dérangé"
+      }
+    },
+    "presence_rule": {
+      "options": {
+        "always": "Toujours, à la maison comme dehors",
+        "home_only": "Seulement les personnes à la maison",
+        "away_only": "Seulement les personnes sorties"
+      }
     }
   },
   "services": {
     "acknowledge": {
-      "name": "Acquitter",
-      "description": "Éteint l'alerte liée à une cible, exactement comme le bouton « J'ai vu » d'une notification.",
+      "name": "Marquer comme vu",
+      "description": "Éteint l'alerte que surveille une cible, exactement comme le bouton « J'ai vu » d'une notification.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la cible. Elle doit avoir une alerte et autoriser l'acquittement."
+          "description": "L'identifiant court de la cible. Elle doit surveiller une alerte et proposer le bouton « J'ai vu »."
         }
       }
     },
     "snooze": {
-      "name": "Reporter",
-      "description": "Coupe les notifications d'une cible pendant un moment, pour une personne ou pour toute son audience.",
+      "name": "Mettre en attente",
+      "description": "Coupe les messages d'une cible pendant un moment, pour une personne ou pour tous ceux qu'elle prévient.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la cible à reporter."
+          "description": "L'identifiant court de la cible à mettre en attente."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Durée du report. Elle doit faire partie des durées proposées par la cible."
+          "description": "Combien de temps. Cette durée doit faire partie de celles que la cible propose."
         },
         "person": {
           "name": "Personne",
-          "description": "Pour qui reporter. Laissez vide pour reporter pour toute l'audience de la cible."
+          "description": "Pour qui. Laissez vide pour tous ceux que la cible prévient."
         }
       }
     },
     "unsnooze": {
-      "name": "Annuler un report",
-      "description": "Lève un report tout de suite, sans attendre qu'il expire.",
+      "name": "Annuler une mise en attente",
+      "description": "Remet tout de suite les messages en route, sans attendre la fin de la mise en attente.",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "L'identifiant de la cible à ne plus reporter."
+          "description": "L'identifiant court de la cible à remettre en route."
         },
         "person": {
           "name": "Personne",
-          "description": "De qui lever le report. Laissez vide pour toute l'audience de la cible."
+          "description": "Pour qui. Laissez vide pour tous ceux que la cible prévient."
         }
       }
     },
     "silence": {
-      "name": "Mettre une personne en silence",
-      "description": "Met quelqu'un en silence pendant un moment, pour toutes les cibles. Ses propres entités de silence ne sont pas touchées ; seul un message `critical` passe encore.",
+      "name": "Ne pas déranger quelqu'un",
+      "description": "Arrête de déranger quelqu'un pendant un moment, pour toutes les cibles. Ses propres horaires et interrupteurs ne sont pas touchés ; seule une alerte critique passe encore.",
       "fields": {
         "person": {
           "name": "Personne",
-          "description": "La personne à mettre en silence. Elle doit être dans la table du Standard de notification."
+          "description": "Qui ne pas déranger. Elle doit être dans la liste des personnes de la maison."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Durée du silence : de 1 minute à 1440 (un jour)."
+          "description": "Combien de temps : de 1 minute à 1440 (un jour)."
         }
       }
     },
     "unsilence": {
-      "name": "Lever un silence",
-      "description": "Lève tout de suite un silence posé par le service de silence. Ne fait rien si la personne n'est pas en silence de cette façon.",
+      "name": "Redéranger quelqu'un",
+      "description": "Annule tout de suite un « ne pas déranger » posé par l'action précédente. Ne fait rien si la personne n'a pas été mise en silence ainsi.",
       "fields": {
         "person": {
           "name": "Personne",
-          "description": "La personne dont il faut lever le silence."
+          "description": "Qui redevient joignable."
         }
       }
     },
     "explain": {
       "name": "Expliquer",
-      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette cible ? », personne par personne, sans rien envoyer. À appeler avec return_response.",
+      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette cible ? », personne par personne, sans rien envoyer. À appeler en demandant la réponse (return_response).",
       "fields": {
         "target": {
           "name": "Cible",
-          "description": "Le slug de la cible à évaluer."
+          "description": "L'identifiant court de la cible à examiner."
         },
         "priority": {
-          "name": "Priorité",
-          "description": "La priorité à utiliser pour l'évaluation. Laissez vide pour la priorité par défaut de la cible, exactement comme un vrai appel."
+          "name": "Importance",
+          "description": "L'importance à supposer. Laissez vide pour celle que la cible utilise par défaut, exactement comme un vrai message."
         },
         "person": {
           "name": "Personne",
-          "description": "Sur qui répondre. Laissez vide pour toute l'audience de la cible."
+          "description": "Sur qui répondre. Laissez vide pour tous ceux que la cible prévient."
         }
       }
     }
