@@ -176,8 +176,81 @@ def test_the_built_in_dashboard_notification_is_named_in_words():
 
 
 def test_any_other_service_is_at_least_readable():
-    """Underscores out, first letter up: `airplay_bedroom` reads as words."""
-    assert _output_label("airplay_bedroom", {}, TEXTS) == "Airplay bedroom"
+    """Underscores out, first letter up, own name kept in brackets.
+
+    ADR-0018 §2 amendment: a legacy service nobody registered through the
+    Companion app has no friendlier name to hide behind, so the raw one stays
+    -- somebody who has to go and change a configuration needs it.
+    """
+    assert (
+        _output_label("airplay_bedroom", {}, TEXTS)
+        == "Airplay bedroom (airplay_bedroom)"
+    )
+
+
+def test_the_audience_shows_the_name_it_actually_stores():
+    """There the value is `notify.<service>`, so that is what the brackets say."""
+    assert (
+        _output_label("airplay_bedroom", {}, TEXTS, identifier="notify.airplay_bedroom")
+        == "Airplay bedroom (notify.airplay_bedroom)"
+    )
+
+
+async def test_somebody_elses_phone_is_offered_by_its_device_name(
+    hass: HomeAssistant,
+) -> None:
+    """The three label kinds, read back off the `outputs` selector itself.
+
+    ADR-0018 §2 amendment 2026-09-07: every option carries a readable label,
+    not only the ones this person owns. Only the marker is reserved for those.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice_phone")
+    async_mock_service(hass, "notify", "airplay_bedroom")
+
+    options = _output_options(
+        hass,
+        [],
+        "their device",
+        {"mobile_app_alice_phone": "Alice's phone"},
+        TEXTS,
+    )
+
+    by_value = {option["value"]: option["label"] for option in options}
+    assert by_value["mobile_app_alice_phone"] == "Alice's phone (Home Assistant app)", (
+        "another person's phone is named the way its owner named it, and the "
+        f"`mobile_app_...` slug behind it is noise; got {by_value!r}"
+    )
+    assert by_value["airplay_bedroom"] == "Airplay bedroom (airplay_bedroom)", (
+        f"an unrelated legacy service still reads as words; got {by_value!r}"
+    )
+    assert "their device" not in by_value["mobile_app_alice_phone"], (
+        "the marker belongs to this person's own phones and to nothing else"
+    )
+
+
+async def test_no_output_option_is_left_showing_a_bare_service_name(
+    hass: HomeAssistant,
+) -> None:
+    """The whole point of the amendment: no chip reads like a slug."""
+    async_mock_service(hass, "notify", "mobile_app_bob_s_iphone")
+    async_mock_service(hass, "notify", "mobile_app_alice_phone")
+    async_mock_service(hass, "notify", "telegram_family")
+
+    options = _output_options(
+        hass,
+        ["mobile_app_bob_s_iphone"],
+        "their device",
+        {
+            "mobile_app_bob_s_iphone": "Bob's iPhone",
+            "mobile_app_alice_phone": "Alice's phone",
+        },
+        TEXTS,
+    )
+
+    for option in options:
+        assert option["label"] != option["value"], (
+            f"{option['value']} is offered with no label at all"
+        )
 
 
 async def test_the_audience_offers_people_by_name_and_speakers_in_words(
