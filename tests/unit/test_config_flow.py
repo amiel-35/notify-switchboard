@@ -97,16 +97,30 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
 async def _options_step(
     hass: HomeAssistant, entry: MockConfigEntry, step: str, user_input: Any = None
 ) -> Any:
-    """Open the options menu, pick `step`, and optionally submit `user_input`."""
+    """Open the options menu, pick `step`, and optionally submit `user_input`.
+
+    A submission that creates the entry updates `entry.options`, which fires the
+    update listener, which reloads the entry
+    (`__init__._async_update_options`). That reload is a task, so it is drained
+    here before returning: a test that ends with one still in flight leaves the
+    entry out of `ConfigEntryState.LOADED` at the moment
+    `pytest-homeassistant-custom-component`'s `hass` fixture unloads what it
+    finds loaded, and the `Switchboard` set up a moment later -- on a
+    Home Assistant that has already stopped -- arms its midnight counter reset
+    with nobody left to cancel it ("Lingering timer after test ...
+    Switchboard._async_reset_counters", roughly two runs in ten under load).
+    """
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": step}
     )
     if user_input is None:
         return result
-    return await hass.config_entries.options.async_configure(
+    result = await hass.config_entries.options.async_configure(
         result["flow_id"], user_input
     )
+    await hass.async_block_till_done()
+    return result
 
 
 async def test_adding_a_person_then_a_target(hass: HomeAssistant) -> None:

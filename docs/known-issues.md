@@ -4,10 +4,6 @@ Findings from the tester or reviewer that were explicitly accepted by the
 orchestrator instead of blocking a release. Each entry: date, sprint, finding,
 why accepted, planned resolution.
 
-Entries carrying a **Resolved by Sprint 3** line are settled by ADR-0017 and
-pinned by `tests/acceptance/test_s3_*.py`; they are removed from this file
-once 0.3.0 actually ships the code, not before.
-
 ## 2026-09-06 — S1 — `alert` leaves an un-cancellable repeat timer in tests
 
 `tests/acceptance/test_s1_actions.py::test_acknowledge_action_turns_off_the_row_alert_when_allowed`
@@ -115,7 +111,7 @@ Accepted for S1 because it is now only the *second* resolution path:
 the whole audience — never the wrong person alone. Planned resolution:
 capture one real callback on the dev instance and pin its shape in a test.
 
-**Narrowed, not resolved, by Sprint 3** (ADR-0017 §4). Still unverified — that
+**Narrowed, not resolved, in 0.3.0** (ADR-0017 §4). Still unverified — that
 needs a physical phone and stays out of scope. What changes is its status: the
 `user_id` link becomes the *canonical* one in the contract rather than merely
 the first tried, the `device_id` lookup is documented as a fallback and logged
@@ -125,29 +121,37 @@ instead of silently landing in the audience-wide fallback.
 `tests/acceptance/test_s3_callbacks.py` pins that a resolvable `user_id` is
 never overridden by a `device_id` pointing elsewhere.
 
-## 2026-09-07 — S1 — entity display names are hard-coded in English
+## 2026-09-07 — S3 — `Entity.suggested_object_id` does not freeze the id here
 
-`sensor.py`, `binary_sensor.py` and `event.py` pass literal English names
-("Routed today", "Silenced", …) to the entity constructors, so a French or
-Spanish user sees English entity names even though every other string of the
-integration is translated. Only the router-added Companion button labels go
-through `async_get_translations`.
+ADR-0017 §2 names `Entity.suggested_object_id`
+(`homeassistant/helpers/entity.py`, property at line 747) as the override that
+keeps the frozen English entity ids while the friendly names follow the
+instance language. Implementing it showed that, in core 2026.9.1, it does not
+do that for an entity that has both `has_entity_name` and a device — which is
+every entity of this integration:
 
-Accepted for S1: the fix is to drop `_attr_name` in favour of
-`_attr_translation_key` plus an `entity` section in `strings.json`, which
-touches every entity and every translation file at once. Still open after S2,
-which added no entity and was scoped to the five UI services and the per-row
-texts (`docs/sprints/sprint-2-brief.md`). Planned resolution: a dedicated
-commit in S3, before more entities exist.
+- `_async_derive_object_ids` (`homeassistant/helpers/entity_platform.py`,
+  lines 1296-1329) leaves `is_base` True on the `entity.suggested_object_id`
+  path, so the value is passed to the registry as `object_id_base`, not as
+  `suggested_object_id`;
+- `object_id_base` **is** composed with the device name
+  (`homeassistant/helpers/entity_registry.py`, `_async_generate_entity_id` ->
+  `_async_get_full_entity_name`), which yielded
+  `sensor.switchboard_switchboard_routed_today` when this was tried.
 
-**Resolved by Sprint 3** (ADR-0017 §2), with one addition the original entry
-did not see: dropping `_attr_name` for `_attr_translation_key` and nothing
-else *renames every entity id* on a French or Spanish install, because `fr`
-and `es` are `NATIVE_ENTITY_IDS` languages and
-`EntityPlatform.async_load_translations` builds object ids from that
-language's names. The frozen ids are held by `Entity.suggested_object_id`.
-Pinned by `tests/acceptance/test_s3_entities.py` and by the new
-language-parametrised case in `tests/acceptance/test_contract.py`.
+Only `internal_integration_suggested_object_id` — what the platform records
+when an entity sets `self.entity_id` itself
+(`homeassistant/helpers/entity_platform.py`, lines 886-909) — reaches the
+registry as the `suggested_object_id` that "has priority over
+`object_id_base`" and "will not be prefixed with the device name".
+
+Accepted, not a defect of the integration: ADR-0017 §2 explicitly allows the
+`self.entity_id` route ("Either way the requirement is behavioural") and the
+acceptance tests assert the behaviour, not the mechanism. 0.3.0 therefore keeps
+setting `self.entity_id`, as 0.1.0 and 0.2.0 already did, and `entity.py`
+carries the reasoning above so nobody "modernises" it back. Planned
+resolution: an editorial correction to ADR-0017 §2 next time that ADR is
+touched.
 
 ## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per row
 
@@ -187,31 +191,6 @@ This entry exists so the follow-up is not lost:
 Neither issue has been filed against home-assistant/core yet. Planned
 resolution: file (2) and link the issue number here; (1) is now a
 nice-to-have rather than a gap.
-
-## 2026-09-07 — S2 — the contract and the tests' README order `done_message`
-differently
-
-`docs/contract.md` §"Per-row texts" and `docs/ADR/0016-…` §3 both put the
-row's `done_message` template **ahead of** the alert's own `done_message`
-attribute, while `tests/acceptance/README.md` ("v0.2 addendum") and
-`docs/sprints/sprint-2-brief.md` item 8 describe it the other way round, the
-same way `message` is ordered. No acceptance test pins it, since no scenario
-has both a row template and an alert attribute.
-
-Resolved in favour of the two normative documents (contract + ADR): the row's
-template wins for `done_message`, the alert's attribute wins for `message`.
-Because a real `AlertEntity` exposes neither attribute (see above), the two
-orders are indistinguishable on any real alert today; the choice only matters
-for a synthetic `alert.*`-shaped entity. Recorded here so a future reader does
-not read the asymmetry as a bug. Planned resolution: one sentence in whichever
-document is wrong, next time the contract is amended.
-
-**Resolved by Sprint 3** (ADR-0017 §6): the contract's order is authoritative,
-`tests/acceptance/test_s3_done_message.py` pins both chains — including the
-scenario that never existed before, a row template *and* an alert attribute at
-once — and the two prose documents that had it backwards
-(`tests/acceptance/README.md` "v0.2 addendum",
-`docs/sprints/sprint-2-brief.md` item 8) are corrected in 0.3.0.
 
 ## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
 
@@ -264,3 +243,14 @@ A configured silence entity that goes `off` well before the wake time does not
 trigger an early flush either: `_async_silence_changed` refreshes
 `binary_sensor.<p>_silenced` but does not re-arm the deferral timer. The message
 waits for the wake time, which is the documented promise.
+
+## 2026-09-07 — S3 — two repairs that cannot clear themselves
+
+Every repair this integration raises is deleted when its cause goes away, with
+two exceptions that are ignorable in the UI rather than defects:
+`unknown_target_<slug>` stays until the routing table is reloaded, so fixing
+the *caller* instead of adding the row leaves it up, and `missing_output_<x>`
+clears on the first call that succeeds, so an output that is still configured
+but never called again keeps its warning. Neither can be observed by the
+router — nothing tells it a service call it never sees would work now — so
+both are safe to dismiss in Repairs.

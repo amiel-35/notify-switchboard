@@ -38,7 +38,7 @@ class DeliveryEvent(SwitchboardGlobalEntity, EventEntity):
 
     def __init__(self, switchboard: Switchboard) -> None:
         """Initialise `event.switchboard_delivery`."""
-        super().__init__(switchboard, "delivery", "Delivery")
+        super().__init__(switchboard, "delivery")
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to the switchboard's delivery signal."""

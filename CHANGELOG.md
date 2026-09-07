@@ -7,6 +7,117 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.3.0 — debts and robustness (contract v0.3 addendum, ADR-0017). No new
+user-facing concept: no TTL, no summary, no escalation, no new option key.
+
+### Added
+
+- **Translated entity names, frozen entity ids.** Every entity of the
+  integration is now named through an `entity.<platform>.<key>.name` string in
+  `strings.json` and in `translations/{en,fr,es}.json`, so a French or Spanish
+  instance reads French or Spanish names. The **entity ids do not change, in
+  any language** — `binary_sensor.<person>_silenced`,
+  `sensor.<person>_last_notification`, `sensor.<person>_active_snoozes`,
+  `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`,
+  `sensor.switchboard_deferred_today` and `event.switchboard_delivery` stay
+  exactly as documented, so no `alert:`, automation or card breaks. This is not
+  automatic: `fr` and `es` are `NATIVE_ENTITY_IDS` languages, on which core
+  builds object ids out of the *localized* name, which is why the ids are
+  pinned explicitly (see `custom_components/notify_switchboard/entity.py`).
+- **`sensor.switchboard_deferred_today` is a frozen public name.** It has
+  existed in code since 0.1.0; it now sits in `docs/contract.md` next to its
+  two siblings and is pinned by the contract test. Nothing about the entity
+  changes.
+- **A `person_without_user_id` repair.** Raised once per person who is in the
+  audience of a row that adds Companion buttons (`allow_acknowledge`, or a
+  non-empty `snooze_minutes`) and whose `person.*` is not linked to a Home
+  Assistant user — the link Notify Switchboard needs to tell *who* pressed a
+  button. Severity warning, not fixable from the repair itself (the link is
+  made in Settings → People), translated, and deleted on the next reload once
+  the link exists.
+
+### Changed
+
+- **Fan-out is parallel and bounded.** Every (person, output) delivery of one
+  routing decision is now attempted concurrently, each wrapped in a 30 second
+  per-output timeout (`dispatcher.OUTPUT_TIMEOUT_SECONDS`). A phone that is off
+  the network no longer holds back everybody else's notification, and the wall
+  time of a decision is bounded by its slowest single output rather than by the
+  sum of them all. A timed-out or failing output is accounted for exactly as a
+  failed delivery already was: same repair, same `delivery_failed` drop reason
+  when *every* output of a person failed, same counter, same `dropped` event.
+  No new drop reason and no new event type. The **order** of the resulting
+  `event.switchboard_delivery` events is now explicitly not promised; the
+  counts and the per-person outcomes still are.
+- **`person.user_id` is the canonical link for Companion callbacks.** A
+  callback whose `context.user_id` matches a `person.*` is attributed to that
+  person, whatever the event's `device_id` says. The `device_id` lookup remains
+  as a fallback only and is logged at DEBUG as such; it has still never been
+  observed on a real device (`docs/known-issues.md`).
+- **The five `notify_switchboard.*` actions are registered in `async_setup`**
+  (quality-scale rule `action-setup`) and therefore exist whether or not a
+  config entry is loaded. An automation that names one of them no longer fails
+  its own validation at startup with "action not found" because an entry
+  happened to be unloaded. Called while no entry is loaded, each raises a
+  translated `ServiceValidationError` (`no_loaded_entry`). Unloading an entry
+  removes their ability to act, not the actions themselves.
+- **`quality_scale.yaml` tells the truth.** Every rule of every tier is
+  assessed: `action-setup`, `docs-actions`, `entity-translations` and `brands`
+  become `done`, and silver, gold and platinum are assessed rather than left
+  out.
+
+### Fixed
+
+- **A lingering midnight timer when Home Assistant stops.** Config entries are
+  not unloaded on shutdown, so nothing ran the switchboard's teardown: the
+  daily counter reset armed by `async_track_time_change`, the
+  `mobile_app_notification_action` bus listener and the state trackers all
+  stayed attached to a loop that was going away. `EVENT_HOMEASSISTANT_STOP` now
+  detaches everything, not just the deferral and silence timers. This was
+  visible as an intermittent "Lingering timer after test …
+  `Switchboard._async_reset_counters`" in the config-flow tests.
+- **An ERROR with a traceback at every shutdown.** The teardown above kept the
+  `EVENT_HOMEASSISTANT_STOP` unsub in the same list as the others and called it
+  again from `async_shutdown`, after core's one-time listener had already
+  removed it — so every single stop logged "Unable to remove unknown job
+  listener" with a `ValueError`. The stop unsub now has its own slot and is
+  called exactly once, whichever of the two paths runs.
+- **`unknown_target` and `missing_output` repairs that never went away.** The
+  issue registry is persisted and neither of those two was ever deleted, so the
+  warning outlived the very change it asked for. Creating the missing routing
+  row now clears its `unknown_target` repair on the reload; an output clears
+  its `missing_output` repair on the first call that succeeds — restart or
+  not, the deletion no longer depends on an in-memory counter — or when it is
+  removed from every person's outputs.
+- **A person lost from the counters.** When one person's delivery raised an
+  unexpected error, the fan-out logged it and moved on without counting that
+  person at all — neither routed nor dropped. It is now counted as
+  `delivery_failed`, the same as any other delivery that reached nobody.
+- **Per-person devices are named after the person.** The virtual device used
+  the person's object_id titled (`person.alice` → "Alice"), ignoring the
+  friendly name a user set in the UI ("Alice Martin"). It now reads the
+  `friendly_name` attribute, falling back to the old titled form when there is
+  none — or no state at all yet.
+- **`quality_scale.yaml` parses.** One unquoted comment containing ": " made
+  the whole self-assessment file invalid YAML. A unit test now parses it and
+  checks it assesses exactly hassfest's rule set for 2026.9.1.
+
+### Documentation
+
+- `docs/contract.md` gains a "v0.3 addendum (ADR-0017)" block; ADR-0017 records
+  the four decisions and the one non-guarantee.
+- The `done_message` fallback order is stated identically everywhere it appears
+  (`docs/contract.md` is authoritative): the row's `done_message` template, then
+  the alert's own `done_message` attribute, then the translated
+  `common.back_to_normal`. `tests/acceptance/README.md` and
+  `docs/sprints/sprint-2-brief.md`, which had it backwards, are corrected;
+  `tests/acceptance/test_s3_done_message.py` pins it.
+- `docs/known-issues.md`: the two entries this release resolves are removed, and
+  one is added about what `Entity.suggested_object_id` actually does in core
+  2026.9.1.
+- `README.md` no longer says the quickstart and the blueprints are planned, and
+  links `docs/how-this-is-built.md`.
+
 ## [0.2.0] - 2026-09-07
 
 Router 0.2.0 — UI services (contract v0.2 addendum, ADR-0016).

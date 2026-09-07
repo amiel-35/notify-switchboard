@@ -72,9 +72,13 @@ on every real alert.
 8. **Per-row optional texts** — `message`, `done_message`, `default_title`
    (ADR-0016), all absent/`None` by default. `message`/`done_message` are
    templates rendered with the row's alert's current state exposed as
-   `alert`; observer mode prefers them over the alert's own attribute (still
-   checked first, for forward compatibility) and over the row `name` /
-   translated `common.back_to_normal`, in that order. `default_title` is
+   `alert`. The two chains are deliberately **not** symmetrical, and this item
+   originally described `done_message` the wrong way round (corrected in 0.3.0,
+   ADR-0017 §6; `docs/contract.md` is authoritative): on `idle -> on` the
+   alert's own `message` attribute wins, then the row's `message` template,
+   then the row `name`; on `on|off -> idle` the row's `done_message` template
+   wins, then the alert's own `done_message` attribute, then the translated
+   `common.back_to_normal`. `default_title` is
    used as the outgoing `title` whenever no title is otherwise available —
    a caller who omitted `title` on a legacy `notify.switchboard[_<slug>]`
    call, and every observer-mode-generated message (which never had a

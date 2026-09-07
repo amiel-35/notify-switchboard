@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, time, timedelta
 from typing import Any
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import homeassistant.helpers.device_registry as dr
@@ -11,6 +12,7 @@ import homeassistant.helpers.entity_registry as er
 import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import (
@@ -22,9 +24,12 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.notify_switchboard import async_migrate_entry
 from custom_components.notify_switchboard.const import DOMAIN
 from custom_components.notify_switchboard.diagnostics import (
+    _redact_options,
     async_get_config_entry_diagnostics,
 )
 from custom_components.notify_switchboard.dispatcher import (
+    OUTPUT_TIMEOUT_SECONDS,
+    Switchboard,
     companion_service_name,
     next_wake_time,
 )
@@ -781,6 +786,19 @@ async def test_diagnostics_redacts_default_data_values_but_keeps_the_keys(
     assert entry.options["targets"][0]["default_data"]["channel"] == "Alarms"
 
 
+def test_diagnostics_redaction_survives_options_without_a_target_list() -> None:
+    """A dump must never raise on the shape of what it is dumping.
+
+    `_redact_options` walks `options["targets"]`; a migration in flight, or an
+    entry whose options were hand-written, can leave that key absent or not a
+    list. The dump returns the options unchanged instead of failing.
+    """
+    assert _redact_options({"default_target": "leak"}) == {"default_target": "leak"}
+    assert _redact_options({"targets": None}) == {"targets": None}
+    # Non-dict rows in an otherwise valid list are passed through as-is.
+    assert _redact_options({"targets": ["nope"]}) == {"targets": ["nope"]}
+
+
 async def test_snoozes_expire_and_feed_the_person_sensor(
     hass: HomeAssistant, freezer: Any
 ) -> None:
@@ -1173,6 +1191,229 @@ async def test_a_successful_call_clears_the_failure_counter(
     assert entry.runtime_data.switchboard.failing_outputs == {}
 
 
+async def test_a_delivery_that_raises_is_counted_as_a_failed_delivery(
+    hass: HomeAssistant,
+) -> None:
+    """The fan-out guard must account for the person it just lost.
+
+    `_async_deliver_all` gathers with `return_exceptions=True`, so an
+    unexpected error in one person's delivery does not abort the others -- but
+    logging it and moving on made that person vanish from the counters
+    entirely: neither routed nor dropped, with `sensor.switchboard_*` silently
+    disagreeing with what actually went out.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    ok = async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("person.bob", "home")
+    await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [make_target("leak", audience=["person.alice", "person.bob"])],
+        "leak",
+    )
+
+    original = Switchboard._async_deliver
+
+    async def _boom(self, routed, message, title):
+        if routed.person == "person.alice":
+            raise RuntimeError("boom")
+        await original(self, routed, message, title)
+
+    with patch.object(Switchboard, "_async_deliver", _boom):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    # Bob still got his notification: one failure never aborts the fan-out.
+    assert len(ok) == 1
+    assert hass.states.get("sensor.switchboard_routed_today").state == "1"
+    dropped = hass.states.get("sensor.switchboard_dropped_today")
+    assert dropped.state == "1"
+    assert dropped.attributes["reasons"] == {"delivery_failed": 1}
+
+
+async def test_the_unknown_target_repair_is_cleared_once_the_row_exists(
+    hass: HomeAssistant,
+) -> None:
+    """Adding the missing row is the fix; the warning has to go with it.
+
+    The issue registry is persisted, so without this the `unknown_target`
+    repair stayed on the user's dashboard forever after they created the row
+    it asked for.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify",
+        "switchboard",
+        {"message": "m", "target": ["fontaine"]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    registry = ir.async_get(hass)
+    assert (DOMAIN, "unknown_target_fontaine") in registry.issues
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak"), make_target("fontaine")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "unknown_target_fontaine") not in registry.issues
+
+
+async def test_an_unknown_target_still_unknown_keeps_its_repair(
+    hass: HomeAssistant,
+) -> None:
+    """A reload that changed something else must not silence the warning."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify",
+        "switchboard",
+        {"message": "m", "target": ["fontaine"]},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak"), make_target("porte")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "unknown_target_fontaine") in ir.async_get(hass).issues
+
+
+async def test_the_missing_output_repair_is_cleared_when_it_answers(
+    hass: HomeAssistant,
+) -> None:
+    """An output that delivers again is not missing any more."""
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    async_mock_service(hass, "notify", "mobile_app_ghost")
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
+async def test_the_missing_output_repair_is_cleared_after_a_reload(
+    hass: HomeAssistant,
+) -> None:
+    """The repair outlives the process that raised it; the fix must too.
+
+    The issue registry is persisted (`issue_registry.async_schedule_save`)
+    while `failing_outputs` is in-memory. After a restart -- a reload here --
+    the counter is empty, so a success that only deletes the issue when the
+    counter had crossed the threshold leaves the repair on screen for good,
+    for an output that works.
+    """
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    # The output is still configured, so setup does not clear the repair: only
+    # a successful call can say it is wrong.
+    await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+    assert entry.runtime_data.switchboard.failing_outputs == {}
+
+    async_mock_service(hass, "notify", "mobile_app_ghost")
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
+async def test_the_missing_output_repair_is_cleared_when_it_is_removed(
+    hass: HomeAssistant,
+) -> None:
+    """Dropping the dead output from the person's row also fixes the cause."""
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_ghost"])],
+        [make_target("leak")],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    for _ in range(4):
+        await hass.services.async_call(
+            "notify", "switchboard_leak", {"message": "m"}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert (DOMAIN, "missing_output_mobile_app_ghost") in registry.issues
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [make_target("leak")],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert (DOMAIN, "missing_output_mobile_app_ghost") not in registry.issues
+
+
 async def test_one_working_output_out_of_two_is_still_a_delivery(
     hass: HomeAssistant,
 ) -> None:
@@ -1347,3 +1588,245 @@ async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
 
     assert [call.data["message"] for call in calls] == ["critical"]
     assert switchboard.store.deferrals == {}
+
+
+# ---------------------------------------------------------------------------
+# Sprint 3: shutdown, fan-out and the person_without_user_id repair
+# ---------------------------------------------------------------------------
+
+
+async def test_stopping_home_assistant_detaches_every_listener(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression: a config entry is not unloaded when Home Assistant stops.
+
+    Nothing else runs `async_shutdown`, so a `_async_stop_event` that only
+    cancelled the deferral timers left the midnight counter reset armed by
+    `async_track_time_change` (and the bus/state listeners) attached to a loop
+    that is about to go away. Under load that surfaced as an intermittent
+    "Lingering timer after test ... Switchboard._async_reset_counters" in the
+    config-flow tests, whose options steps reload the entry.
+
+    Second regression, on the same path: the `async_listen_once` unsub must
+    not be detached twice. Core's `_OneTimeListener.__call__`
+    (`homeassistant/core.py`, lines 1470-1478) removes the listener before it
+    runs the callback, so a `_stop_unsub` still held in `_unsubs` is called a
+    second time by `async_shutdown` and `EventBus._async_remove_listener`
+    (`homeassistant/core.py`, lines 1823-1843) logs "Unable to remove unknown
+    job listener" with a `ValueError` traceback -- an ERROR on *every* real
+    Home Assistant shutdown.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"], wake_time="07:00:00")],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard._unsubs
+
+    caplog.clear()
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+
+    assert "Unable to remove unknown job listener" not in caplog.text
+    assert switchboard._unsubs == []
+    assert switchboard._deferral_unsubs == {}
+    assert switchboard._silence_unsubs == {}
+    assert switchboard._stop_unsub is None
+
+
+async def test_unloading_the_entry_detaches_the_stop_listener_once(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other order: unload first, then shut Home Assistant down.
+
+    `async_shutdown` runs on the unload path, so it is the one that has to
+    detach the stop listener; firing `EVENT_HOMEASSISTANT_STOP` afterwards
+    must then reach nothing at all.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"], wake_time="07:00:00")],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    caplog.clear()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+
+    assert "Unable to remove unknown job listener" not in caplog.text
+    assert switchboard._stop_unsub is None
+
+
+async def test_a_person_device_is_named_after_the_person(hass: HomeAssistant) -> None:
+    """The virtual device carries the person's friendly name, not their slug.
+
+    A `person.*` entity is renamed in the UI without its entity id following,
+    so `person.alice` may well be "Alice Martin". Titling the object_id gave
+    "Alice", which is a different person's name as far as the user is
+    concerned -- and `has_entity_name` puts that word in front of every
+    entity of the device.
+    """
+    hass.states.async_set("person.alice", "home", {"friendly_name": "Alice Martin"})
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.alice"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Alice Martin"
+
+
+async def test_a_person_device_falls_back_to_the_object_id(
+    hass: HomeAssistant,
+) -> None:
+    """No state yet (a restart races person setup): keep the old form."""
+    entry = await install(
+        hass,
+        [make_person("person.jean_luc", ["mobile_app_jl"])],
+        [make_target("leak", audience=["person.jean_luc"])],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.jean_luc"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Jean Luc"
+
+
+async def test_a_person_device_ignores_a_state_without_a_friendly_name(
+    hass: HomeAssistant,
+) -> None:
+    """`State.name` does not title the object_id; the fallback has to.
+
+    `State.name` is `friendly_name or object_id.replace("_", " ")`
+    (`homeassistant/core.py`, `State.name`) -- lower case. A person whose
+    entity carries no friendly name must still be named "Jean Luc", not
+    "jean luc", since `has_entity_name` prefixes every entity with it.
+    """
+    hass.states.async_set("person.jean_luc", "home")
+    entry = await install(
+        hass,
+        [make_person("person.jean_luc", ["mobile_app_jl"])],
+        [make_target("leak", audience=["person.jean_luc"])],
+        "leak",
+    )
+
+    device = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{entry.entry_id}:person.jean_luc"), entry.entry_id
+    )
+    assert device is not None
+    assert device.name == "Jean Luc"
+
+
+async def test_the_output_timeout_is_thirty_seconds(hass: HomeAssistant) -> None:
+    """ADR-0017 §3 fixes the value, not only the name."""
+    assert OUTPUT_TIMEOUT_SECONDS == 30
+
+
+async def test_a_recursive_output_is_refused_at_runtime(hass: HomeAssistant) -> None:
+    """Contract §"Output": an output pointing back at the router never runs.
+
+    The config flow refuses it too, but a hand-edited options file reaches the
+    dispatcher, and there the refusal has to be synchronous -- calling it would
+    recurse rather than fail.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert (
+        await switchboard._async_call_output(
+            "switchboard_leak", "Water", None, {}, "leak"
+        )
+        is False
+    )
+
+
+async def test_the_repair_is_deleted_for_a_person_who_left_the_table(
+    hass: HomeAssistant,
+) -> None:
+    """A `repairs` issue outlives its process; a person removed from the table
+    would otherwise keep a warning nobody can act on.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("person.bob", "home")
+
+    entry = await install(
+        hass,
+        [
+            make_person("person.alice", ["mobile_app_alice"]),
+            make_person("person.bob", ["mobile_app_bob"]),
+        ],
+        [
+            make_target(
+                "leak", audience=["person.alice", "person.bob"], snooze_minutes=[15]
+            )
+        ],
+        "leak",
+    )
+    registry = ir.async_get(hass)
+    raised = {
+        issue_id
+        for (domain, issue_id), issue in registry.issues.items()
+        if domain == DOMAIN and issue.translation_key == "person_without_user_id"
+    }
+    assert raised == {
+        "person_without_user_id_person.alice",
+        "person_without_user_id_person.bob",
+    }
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "persons": [make_person("person.alice", ["mobile_app_alice"])],
+            "targets": [
+                make_target("leak", audience=["person.alice"], snooze_minutes=[15])
+            ],
+            "default_target": "leak",
+        },
+    )
+    await hass.async_block_till_done()
+
+    remaining = {
+        issue_id
+        for (domain, issue_id), issue in registry.issues.items()
+        if domain == DOMAIN and issue.translation_key == "person_without_user_id"
+    }
+    assert remaining == {"person_without_user_id_person.alice"}
+
+
+async def test_a_person_with_no_state_at_all_counts_as_unlinked(
+    hass: HomeAssistant,
+) -> None:
+    """`person.*` missing entirely: there is no `user_id` to resolve either."""
+    entry = await install(
+        hass,
+        [make_person("person.ghost", ["mobile_app_ghost"])],
+        [make_target("leak", audience=["person.ghost"], allow_acknowledge=True)],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    assert switchboard._person_user_id("person.ghost") is None
+    assert switchboard._persons_needing_a_user_id() == ["person.ghost"]

@@ -12,9 +12,18 @@ logs a refusal, while a service call has a caller and raises
 itself is not duplicated: every handler below delegates to the `Switchboard`
 methods that the Companion path already uses.
 
+From v0.3 (ADR-0017 §5) the five are registered in `async_setup`, once, for the
+integration -- the quality-scale rule `action-setup`. An automation that names
+one of them should fail its own validation only when the action genuinely does
+not exist, not because a config entry happened to be unloaded. The handlers
+therefore look the loaded entry up at call time instead of capturing a
+`Switchboard` in a closure, and refuse with a translated
+`ServiceValidationError` (`no_loaded_entry`) when there is none.
+
 Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/core.py: `ServiceRegistry.async_register` (schema=), ServiceCall
-- homeassistant/core.py: `ServiceRegistry.async_remove`, `has_service`
+- homeassistant/core.py: `ServiceRegistry.has_service`
+- homeassistant/config_entries.py: `ConfigEntries.async_loaded_entries` (line 2227)
 - homeassistant/helpers/config_validation.py: entity_id, positive_int
 - homeassistant/exceptions.py: ServiceValidationError (raised by the Switchboard)
 
@@ -33,6 +42,7 @@ from typing import TYPE_CHECKING
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -40,12 +50,12 @@ from .const import (
     ATTR_PERSON,
     ATTR_TARGET,
     DOMAIN,
+    ERROR_NO_LOADED_ENTRY,
     SERVICE_ACKNOWLEDGE,
     SERVICE_SILENCE,
     SERVICE_SNOOZE,
     SERVICE_UNSILENCE,
     SERVICE_UNSNOOZE,
-    UI_SERVICES,
 )
 
 if TYPE_CHECKING:
@@ -79,11 +89,30 @@ UNSILENCE_SCHEMA = vol.Schema({vol.Required(ATTR_PERSON): cv.entity_id})
 
 
 @callback
-def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> None:
-    """Register the five UI services for the (single) config entry.
+def async_loaded_switchboard(hass: HomeAssistant) -> Switchboard:
+    """Return the loaded entry's `Switchboard`, or refuse the call.
 
-    `manifest.json` declares `single_config_entry: true`, so one switchboard
-    owns the domain's services outright and no per-entry dispatch is needed.
+    `manifest.json` declares `single_config_entry: true`, so there is never
+    more than one to choose from and no per-entry dispatch is needed. Looking it
+    up here rather than capturing it in a closure is what lets the services live
+    in `async_setup`: an unloaded entry removes their ability to act, not their
+    existence (ADR-0017 §5).
+    """
+    for entry in hass.config_entries.async_loaded_entries(DOMAIN):
+        return entry.runtime_data.switchboard  # type: ignore[no-any-return]
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=ERROR_NO_LOADED_ENTRY,
+    )
+
+
+@callback
+def async_register_services(hass: HomeAssistant) -> None:
+    """Register the five UI services, once, for the integration.
+
+    Called from `async_setup`, so an automation referencing one of them
+    validates at startup whether or not a config entry is loaded
+    (quality-scale rule `action-setup`).
     """
 
     async def _acknowledge(call: ServiceCall) -> None:
@@ -91,12 +120,12 @@ def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> No
         # attributes `alert.turn_off` to whoever owns the context, so a card
         # tap shows up as that person acknowledging rather than as the
         # integration doing it on its own.
-        await switchboard.async_service_acknowledge(
+        await async_loaded_switchboard(hass).async_service_acknowledge(
             call.data[ATTR_TARGET], call.context.user_id, call.context
         )
 
     async def _snooze(call: ServiceCall) -> None:
-        await switchboard.async_service_snooze(
+        await async_loaded_switchboard(hass).async_service_snooze(
             call.data[ATTR_TARGET],
             call.data[ATTR_MINUTES],
             call.data.get(ATTR_PERSON),
@@ -105,17 +134,19 @@ def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> No
         )
 
     async def _unsnooze(call: ServiceCall) -> None:
-        await switchboard.async_service_unsnooze(
+        await async_loaded_switchboard(hass).async_service_unsnooze(
             call.data[ATTR_TARGET], call.data.get(ATTR_PERSON)
         )
 
     async def _silence(call: ServiceCall) -> None:
-        await switchboard.async_service_silence(
+        await async_loaded_switchboard(hass).async_service_silence(
             call.data[ATTR_PERSON], call.data[ATTR_MINUTES]
         )
 
     async def _unsilence(call: ServiceCall) -> None:
-        await switchboard.async_service_unsilence(call.data[ATTR_PERSON])
+        await async_loaded_switchboard(hass).async_service_unsilence(
+            call.data[ATTR_PERSON]
+        )
 
     hass.services.async_register(
         DOMAIN, SERVICE_ACKNOWLEDGE, _acknowledge, schema=ACKNOWLEDGE_SCHEMA
@@ -130,14 +161,3 @@ def async_register_services(hass: HomeAssistant, switchboard: Switchboard) -> No
     hass.services.async_register(
         DOMAIN, SERVICE_UNSILENCE, _unsilence, schema=UNSILENCE_SCHEMA
     )
-
-
-@callback
-def async_unregister_services(hass: HomeAssistant) -> None:
-    """Remove the five UI services, so an unload leaves none dangling.
-
-    The closures above hold the unloaded entry's `Switchboard`; a service left
-    behind would keep writing to a store nothing reloads.
-    """
-    for service in UI_SERVICES:
-        hass.services.async_remove(DOMAIN, service)

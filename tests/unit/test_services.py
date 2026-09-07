@@ -50,6 +50,7 @@ from custom_components.notify_switchboard.services import (
     SNOOZE_SCHEMA,
     UNSILENCE_SCHEMA,
     UNSNOOZE_SCHEMA,
+    async_loaded_switchboard,
 )
 from custom_components.notify_switchboard.store import SwitchboardStorage
 
@@ -155,10 +156,15 @@ def test_unsnooze_and_unsilence_schemas() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_services_are_removed_on_unload_and_come_back_on_reload(
+async def test_services_survive_an_unload_and_act_again_after_a_reload(
     hass: HomeAssistant,
 ) -> None:
-    """No dangling service may survive an unload: its closure holds a dead entry."""
+    """v0.3 (ADR-0017 §5): unloading removes the ability to act, not the actions.
+
+    0.2.0 unregistered them, because their closures held the unloaded entry's
+    `Switchboard`. They now resolve the loaded entry at call time, so nothing
+    dangles and an automation naming one of them keeps validating.
+    """
     entry = await install(
         hass,
         [make_person("person.alice", ["mobile_app_alice"])],
@@ -171,12 +177,29 @@ async def test_services_are_removed_on_unload_and_come_back_on_reload(
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     for service in UI_SERVICES:
-        assert not hass.services.has_service(DOMAIN, service)
+        assert hass.services.has_service(DOMAIN, service)
+
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+        )
+    assert err.value.translation_key == "no_loaded_entry"
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    for service in UI_SERVICES:
-        assert hass.services.has_service(DOMAIN, service)
+    await hass.services.async_call(
+        DOMAIN, "unsilence", {"person": "person.alice"}, blocking=True
+    )
+
+
+async def test_a_service_call_without_the_integration_set_up_finds_no_entry(
+    hass: HomeAssistant,
+) -> None:
+    """`async_loaded_switchboard` is the single refusal point, and it is reachable."""
+    with pytest.raises(ServiceValidationError) as err:
+        async_loaded_switchboard(hass)
+    assert err.value.translation_domain == DOMAIN
+    assert err.value.translation_key == "no_loaded_entry"
 
 
 async def test_a_reload_rebinds_the_services_to_the_new_switchboard(
@@ -630,6 +653,63 @@ async def test_an_unparsable_silence_row_is_dropped_rather_than_fatal(
 
     assert list(entry.runtime_data.switchboard.store.silences) == ["person.alice"]
     assert hass.states.get("binary_sensor.alice_silenced").state == "on"
+
+
+async def test_an_unparsable_snooze_or_deferral_row_is_dropped_too(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """The same tolerance as `silences`, for the other two lists.
+
+    A snooze with no slug and a deferral with no message body are dropped one
+    by one; the well-formed rows next to them still load.
+    """
+    good_until = (dt_util.utcnow() + timedelta(minutes=30)).isoformat()
+    hass_storage["notify_switchboard.data"] = {
+        "version": 1,
+        "minor_version": 3,
+        "key": "notify_switchboard.data",
+        "data": {
+            "snoozes": [
+                {"person": "person.alice", "slug": "leak", "expires_at": good_until},
+                {"person": "person.alice", "expires_at": good_until},  # no slug
+                {"person": "", "slug": "leak", "expires_at": good_until},  # no person
+                {"person": "person.alice", "slug": "leak"},  # no `expires_at`
+            ],
+            "deferrals": [
+                {
+                    "person": "person.alice",
+                    "slug": "leak",
+                    "tag": "t",
+                    "message": "kept",
+                    "queued_at": good_until,
+                },
+                {"person": "person.alice", "slug": "leak", "tag": "u"},  # no message
+                {"person": "person.alice"},  # no slug either
+            ],
+            "silences": [],
+        },
+    }
+
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    store = entry.runtime_data.switchboard.store
+    assert list(store.snoozes) == [("person.alice", "leak")]
+    assert list(store.deferrals) == [("person.alice", "leak", "t")]
+    assert store.deferrals[("person.alice", "leak", "t")].message == "kept"
+
+
+async def test_the_store_refuses_to_read_a_document_from_the_future(
+    hass: HomeAssistant,
+) -> None:
+    """A downgrade is data loss, so the migration raises instead of guessing."""
+    store = SwitchboardStorage(hass, 1, "notify_switchboard.test", minor_version=3)
+    with pytest.raises(ValueError, match="Cannot downgrade"):
+        await store._async_migrate_func(2, 1, {"snoozes": [], "deferrals": []})
 
 
 async def test_the_migration_leaves_a_document_already_at_minor_3_alone(
