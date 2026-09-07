@@ -354,7 +354,7 @@ is this release, and the two S7 rows have nothing to do with each other.
 |---|---|---|
 | Router S0-S2 | Foundations, the router itself, the UI services and the per-row texts | Shipped (0.1.0, 0.2.0) |
 | Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | **Done — 0.3.0** |
-| Router S4 | Zero-config: propose a routing table from the `person.*` entities and the `alert:` blocks that already exist, so a fresh install is useful before anything is typed | Next |
+| Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` row, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | In progress |
 | Router S5 | Night: turn `wake_time` into a real quiet-hours model (per-person windows, a digest of what was deferred) rather than a single instant | Planned |
 | Router S6 | Escalation: what happens when nobody acknowledges — a second person, a louder output, a delay per row | Planned |
 | Router S7 | Places: route on where somebody is, not only on whether they are home | Planned |
@@ -425,3 +425,4 @@ for its own concurrent fixes — works in its own
 | [0015](ADR/0015-refusals-raise-service-validation-error.md) | A refused notification raises `ServiceValidationError`, never fails silently |
 | [0016](ADR/0016-ui-services-and-row-texts.md) | UI services (acknowledge/snooze/silence) and per-row message texts |
 | [0017](ADR/0017-debts-and-robustness.md) | Debts and robustness — frozen ids under any language, parallel fan-out, canonical callbacks, services without an entry |
+| [0018](ADR/0018-zero-config-and-explainability.md) | Zero-config and explainability — `explain`, discovered Companion outputs, a managed default row, consistency repairs |
