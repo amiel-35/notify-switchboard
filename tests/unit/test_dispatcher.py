@@ -263,8 +263,8 @@ async def test_audience_member_absent_from_persons_is_a_counted_drop(
     assert dropped.attributes["reasons"] == {"unknown_person": 1}
 
 
-async def test_non_companion_output_gets_no_buttons(hass: HomeAssistant) -> None:
-    """Only `mobile_app_*` outputs receive Companion actions."""
+async def test_non_companion_output_gets_no_router_keys(hass: HomeAssistant) -> None:
+    """Only `mobile_app_*` outputs receive the keys the router adds itself."""
     calls = async_mock_service(hass, "notify", "telegram_family")
     hass.states.async_set("person.alice", "home")
     await install(
@@ -289,6 +289,9 @@ async def test_non_companion_output_gets_no_buttons(hass: HomeAssistant) -> None
     data = calls[0].data.get("data", {})
     assert "actions" not in data
     assert "authenticationRequired" not in data
+    # ADR-0019 §6, amendment 2026-09-07 (2): the default tag is a router key
+    # like the other two, so it stops at the outputs that read a tag.
+    assert "tag" not in data
 
 
 # ---------------------------------------------------------------------------
@@ -1775,7 +1778,7 @@ async def test_a_recursive_output_is_refused_at_runtime(hass: HomeAssistant) -> 
 
     assert (
         await switchboard._async_call_output(
-            "switchboard_leak", "Water", None, {}, "leak"
+            "switchboard_leak", "Water", None, {}, "leak", router_tag=True
         )
         is False
     )

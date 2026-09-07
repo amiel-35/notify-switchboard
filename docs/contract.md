@@ -21,8 +21,10 @@
 > v0.5 addendum (ADR-0019): two more drop reasons (`expired`, `not_notified`),
 > one global option and `data` key (`ttl_minutes`), one optional per-person key
 > (`summary`), one optional routing-table row key (`clear_done`), one more
-> `data` key (`switchboard_done`), and the default `tag` / `notification_id` a
-> message carries when the caller supplies none. The four
+> `data` key (`switchboard_done`), and the default `tag` a
+> message carries on Companion outputs when the caller supplies none, with
+> `notification_id` on `persistent_notification`; other outputs receive the
+> caller's data only. The four
 > `event.switchboard_delivery` event types are unchanged. Everything above and
 > below stays the v0 / v0.2 / v0.3 / v0.4 text, unchanged.
 
@@ -381,9 +383,23 @@ none:
 | the `done` message of row `<slug>` | `switchboard-<slug>-done` |
 | a wake-time summary | `switchboard-summary` |
 
-`data.notification_id` defaults to the message's effective `tag` and is added
-for the `persistent_notification` output only. A caller-supplied `tag` or
-`notification_id` always wins.
+These defaults are keys the **router** adds, so they only reach the outputs
+that read them:
+
+- the default `tag` is added on `mobile_app_*` outputs, and on the bare
+  `persistent_notification` output, where it is the source of the id below;
+- `data.notification_id` defaults to the message's effective `tag` and is added
+  for the `persistent_notification` output only;
+- `actions` and `authenticationRequired` are added on `mobile_app_*` outputs
+  only, as they always have been.
+
+Every other output receives exactly the caller's `data` merged with the row's
+`default_data`, and nothing the router added: the router is a proxy
+(ADR-0002), and an output that validates its `data` must not be forced to
+tolerate keys it never asked for.
+
+A caller-supplied `tag` or `notification_id` always wins and, being the
+caller's own key rather than one the router invented, reaches every output.
 
 ### Closing an episode on the channels it used
 

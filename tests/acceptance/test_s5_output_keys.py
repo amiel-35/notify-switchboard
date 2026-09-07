@@ -2,8 +2,8 @@
 
 ADR-0019 §6, amendment 2026-09-07 (2). The router is a pure proxy (ADR-0002):
 the caller's `data`, merged under the row's `default_data`, is what an output
-receives. The three keys the router adds for itself are scoped to the output
-that documents them:
+receives. The keys the router adds for itself are scoped to the outputs that
+document them:
 
 - `tag`, `actions`, `authenticationRequired` -> `mobile_app_*` outputs
   (`tag` also travels to `persistent_notification`, where it is the source of
@@ -51,6 +51,7 @@ def _entry(hass):
                 "leak",
                 "Leak",
                 audience=["person.alice"],
+                alert_entity="alert.leak",
                 allow_acknowledge=True,
                 snooze_minutes=[15],
                 default_data={"channel": "family"},

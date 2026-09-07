@@ -459,6 +459,57 @@ core, not here; the config-entry reload that
 `test_s5_episode.py::test_the_episode_recipients_survive_a_reload` performs is
 not affected, because the `alert.*` entity survives it.
 
+#### Amendment 2026-09-07 (2)
+
+**A key the router adds goes only to the outputs that read it.** The first
+paragraph of §6 said "every message the router sends acquires a deterministic
+identity" and 0.5.0 read that literally: `data.tag` was written onto the
+shared payload and therefore reached **every** output of every person. That is
+wrong, and ADR-0002 is why — the router is a pure proxy. What a caller puts in
+`data` travels untouched; what the *router* puts there is a key the caller
+never asked for, and it belongs only where it means something.
+
+The rule, applied per output in `_async_call_output`, exactly as
+`notification_id` already was:
+
+| Key | Added on |
+|---|---|
+| `tag` (the default of the table above) | `mobile_app_*`, plus the bare `persistent_notification` where it is the source of the id |
+| `actions`, `authenticationRequired` | `mobile_app_*` |
+| `notification_id` | the bare `persistent_notification` |
+
+Everything else an output receives is the caller's `data` merged with the
+row's `default_data`, and nothing more.
+
+This is not a matter of tidiness. The sibling adapters of this suite refuse an
+unknown `data` key **by design**: AirPlay Notifier validates its `data` with a
+voluptuous schema and voluptuous rejects extra keys by default
+(`PREVENT_EXTRA`), and Assist Satellite Notifier checks each key against an
+explicit `ALLOWED_DATA_KEYS`; both raise `ServiceValidationError` on a
+refusal, per ADR-0015. So from 0.5.0 a routing row whose person output is
+`notify.airplay_*` or `notify.satellite_*` failed on *every* call, with the
+router counting a failed output and — where that was the person's only output
+— a `delivery_failed` drop. Cast Notifier tolerates extra keys, which is why
+the household running this suite did not see it. Asking those adapters to
+tolerate the router's keys would be the wrong fix twice over: it would make
+every future router key their problem, and it would push the switchboard's
+private vocabulary into adapters that have their own.
+
+What does **not** change: a caller-supplied `data.tag` is the caller's own key
+and still reaches every output, exactly like `channel` or `volume`; the
+`(person, target, tag)` de-duplication, the episode record's `tags`, the
+closing sequence of §6 and the `switchboard-summary` tag of amendment (b) all
+keep reasoning about the message's **effective** tag, which is still computed
+for every message — it is only what leaves through a non-Companion,
+non-`persistent_notification` output that is narrower. Both the clear
+(`mobile_app_*`) and the dismiss (`persistent_notification`) address outputs
+that were sent the tag, so both still find their notification. `explain` and
+diagnostics report the decision, not the payload, and are untouched.
+
+Released as 0.5.1, a fix: no public name, option, event type or reason
+changes, and the only behaviour that disappears is a key that could not be
+read by the outputs it was reaching.
+
 ## What does not change
 
 - Every v0 / v0.2 / v0.3 / v0.4 frozen name; the **four**
@@ -501,6 +552,9 @@ not affected, because the `alert.*` entity survives it.
 - `docs/known-issues.md`: the 2026-09-07 S2 entry "a deferral now re-checks
   silence, but only silence" is resolved in both its halves (§3 and §4). It is
   marked, not deleted.
+- `docs/contract.md`'s v0.5 addendum and its "The default `tag` and
+  `notification_id`" section say which output each router-added key reaches
+  (amendment 2026-09-07 (2)); `docs/ARCHITECTURE.md` and `README.md` follow.
 - A future ADR is needed to: give `ttl_minutes` a per-row scope, make the
   summary's line format configurable, add a fifth `event.switchboard_delivery`
   type for a clear, let `explain` predict an expiry, or extend episodes to

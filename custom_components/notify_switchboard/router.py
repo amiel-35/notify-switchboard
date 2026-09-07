@@ -451,15 +451,27 @@ def default_tag(slug: str, *, done: bool = False) -> str:
     return f"{TAG_PREFIX}{slug}{DONE_TAG_SUFFIX if done else ''}"
 
 
+def caller_tag(data: Mapping[str, Any]) -> str | None:
+    """Return the `data.tag` the caller wrote, or None when there is not one.
+
+    Worth telling apart from the router's own default because the two do not
+    travel to the same outputs (ADR-0019 §6, amendment 2026-09-07 (2)): a key
+    the caller wrote is proxied to every output, a key the router added goes
+    only to the outputs that read it. An empty tag is not a name, so it counts
+    as absent here exactly as it does in `effective_tag`.
+    """
+    caller = data.get(ATTR_TAG)
+    if caller is not None and str(caller):
+        return str(caller)
+    return None
+
+
 def effective_tag(slug: str, data: Mapping[str, Any]) -> str:
     """Return the tag a message will actually travel with.
 
     A caller-supplied `data.tag` always wins; the default only fills a gap.
     """
-    caller = data.get(ATTR_TAG)
-    if caller is not None and str(caller):
-        return str(caller)
-    return default_tag(slug, done=is_done_message(data))
+    return caller_tag(data) or default_tag(slug, done=is_done_message(data))
 
 
 def _minutes(raw: Any) -> int | None:

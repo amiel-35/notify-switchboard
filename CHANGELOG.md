@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.5.1 — a fix on top of the 0.5.0 notes below, which are in `main` but
+not tagged. No public name, option, event type or drop reason changes.
+
+### Fixed
+
+- **A key the router adds no longer reaches outputs that cannot read it.**
+  0.5.0 wrote the default `data.tag` onto the shared payload, so **every**
+  output of every person received it — a speaker adapter, a Telegram bot, an
+  e-mail notifier, none of which have any use for a Companion tag. The router
+  is a pure proxy (ADR-0002): an output receives the caller's `data` merged
+  with the row's `default_data`, plus only the keys that output reads. The
+  default `tag` is now written on `mobile_app_*` outputs and on the bare
+  `persistent_notification` (where it is the source of `notification_id`);
+  `actions` and `authenticationRequired` stay Companion-only, as they already
+  were. A `tag` **the caller** set is the caller's own key and still reaches
+  every output.
+
+  This was not cosmetic. The sibling adapters of this suite refuse an unknown
+  `data` key by design — AirPlay Notifier validates its `data` with a
+  voluptuous schema (`PREVENT_EXTRA` by default), Assist Satellite Notifier
+  checks an explicit `ALLOWED_DATA_KEYS` — and both raise
+  `ServiceValidationError` on a refusal, so from 0.5.0 a routing row whose
+  person output was `notify.airplay_*` or `notify.satellite_*` failed on every
+  single call. Cast Notifier tolerates extra keys, which is why it went
+  unnoticed. Everything the router reasons about internally is unchanged: the
+  effective tag is still computed for every message, still recorded into the
+  episode, still the `(person, target, tag)` de-duplication key, and both the
+  Companion clear and the `persistent_notification` dismiss still find their
+  notification.
+
+### Documentation
+
+- `docs/ADR/0019-night-catch-up-and-closing-the-loop.md` gains the amendment
+  **2026-09-07 (2)** with the rule and its rationale; the v0.5 addendum of
+  `docs/contract.md` and its "The default `tag` and `notification_id`" section,
+  `docs/ARCHITECTURE.md` and `README.md` say which output each router-added key
+  reaches.
+- `tests/acceptance/test_s5_output_keys.py` pins it: one message, three
+  outputs, three different payloads — and a caller's own `tag` on all three.
+
+---
+
 Router 0.5.0 — night, catch-up and closing the loop (contract v0.5 addendum,
 ADR-0019), on top of the router 0.4.0 and 0.3.0 changes further down, which are
 in `main` but not tagged either. 0.4.0 made the first hour of use bearable;
