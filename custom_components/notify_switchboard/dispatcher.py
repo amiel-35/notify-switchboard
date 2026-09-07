@@ -174,6 +174,8 @@ class Switchboard:
         )
 
         self._unsubs: list[CALLBACK_TYPE] = []
+        # Kept out of `_unsubs` on purpose: see `_async_stop_event`.
+        self._stop_unsub: CALLBACK_TYPE | None = None
         self._deferral_unsubs: dict[str, CALLBACK_TYPE] = {}
         # One timer per temporarily silenced person, so `binary_sensor.
         # <p>_silenced` goes back to `off` on its own when the silence lifts
@@ -246,10 +248,8 @@ class Switchboard:
 
         # Config entries are not unloaded when Home Assistant stops, so timers
         # have to be cancelled explicitly or they outlive the event loop.
-        self._unsubs.append(
-            self.hass.bus.async_listen_once(
-                EVENT_HOMEASSISTANT_STOP, self._async_stop_event
-            )
+        self._stop_unsub = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, self._async_stop_event
         )
 
         # A restart may have spanned somebody's wake time: deliver what is
@@ -276,7 +276,17 @@ class Switchboard:
         `async_shutdown`: without this, the midnight counter reset armed by
         `async_track_time_change`, the bus listener and the state trackers all
         outlive the event loop they were scheduled on.
+
+        The stop listener itself is already gone by the time this runs --
+        `_OneTimeListener.__call__` (`homeassistant/core.py`, lines 1470-1478)
+        removes it *before* calling us -- so its unsub is dropped here rather
+        than left for `async_shutdown` to call a second time. Calling it twice
+        reaches `EventBus._async_remove_listener` (lines 1823-1843), which
+        logs "Unable to remove unknown job listener" with a `ValueError`
+        traceback: an ERROR on every single Home Assistant shutdown. That is
+        also why the unsub lives in its own slot instead of in `_unsubs`.
         """
+        self._stop_unsub = None
         self.async_shutdown()
 
     @callback
@@ -293,6 +303,9 @@ class Switchboard:
     def async_shutdown(self) -> None:
         """Detach every listener (called when the config entry unloads)."""
         self.async_cancel_timers()
+        if self._stop_unsub is not None:
+            self._stop_unsub()
+            self._stop_unsub = None
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
