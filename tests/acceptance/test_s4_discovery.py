@@ -169,11 +169,14 @@ async def test_the_persons_own_phones_come_first_and_are_labelled(
     assert "mobile_app_phone_one" in options[0]["label"], (
         "the label still has to name the service it selects"
     )
-    for option in options[1:]:
-        assert option["label"] == option["value"], (
-            f"{option['value']} does not belong to this person and must carry "
-            f"no label of its own; got {option['label']!r}"
-        )
+    marker_free = [option for option in options[1:]]
+    for option in marker_free:
+        # 0.7.1 (ADR-0018 §2, amendment 2026-09-07): every option carries a
+        # readable label; only the person's own phones carry the "this
+        # person's device" marker. The value stays the raw service name.
+        assert option["label"], f"{option['value']} must carry a readable label"
+        assert option["label"] != "", "labels are never empty"
+        assert "mobile_app_phone_one" not in option["label"] or option is options[0]
 
 
 @pytest.mark.parametrize("language", ["en", "fr", "es"])

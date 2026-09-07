@@ -188,7 +188,13 @@ integration's own** (`switchboard`, `switchboard_<slug>`), read from
 
 The services that belong to *this* person's phones come **first**, and their
 `label` carries a translated marker (`common.this_persons_device`) next to the
-service name; every other option's `label` is the service name itself. The
+service name. **Amendment 2026-09-07 (0.7.1, plain-language pass):** every other
+option also carries a readable label — the device name for another person's
+phone, a translated "Home Assistant notifications" for the bare
+`persistent_notification`, the service name humanised (underscores to spaces,
+capitalised, raw name in brackets when it differs) for anything else; the
+first version of this ADR said "the service name itself", which left raw
+identifiers on screen. The `value` stays the raw service name. The
 link is exact, not a name heuristic:
 
 1. the `person.*` entity publishes the Home Assistant user it is linked to as
