@@ -226,7 +226,7 @@ behaviour:
    the question). This doesn't affect Sprint 1 pass/fail, but the
    `notify.mobile_app_*`-prefix check in brief item 5 ("only services whose
    name starts with `notify.mobile_app_`") should be revisited once a real
-   Companion device is wired up in S2/inflexion-01, since it may simply
+   Companion device is wired up on the development instance in S2, since it may
    never match in practice with the modern integration.
 3. **`unknown_target` repairs issue exact `issue_id`/`translation_key` is not
    specified.** `test_s1_routing.py::test_unknown_target_is_dropped_and_raises_one_repairs_issue`
@@ -254,3 +254,101 @@ Lint the test files themselves with:
 ```bash
 "$HA_VENV/bin/python" -m ruff check tests/acceptance
 ```
+
+---
+
+## Sprint 3 (`test_s3_*.py`, and the v0.3 additions to `test_contract.py`)
+
+Executable specification for the v0.3 addendum, against `docs/contract.md`
+§"v0.3 addendum (ADR-0017)", `docs/ADR/0017-debts-and-robustness.md` and
+`docs/sprints/sprint-3-brief.md`. Same discipline as S1 and S2: written
+before the implementation, and the coding agent must make them pass without
+modifying them. Every S1 and S2 file keeps passing unmodified — Sprint 3 adds
+no user-facing concept and no options key.
+
+| File | What it pins |
+|---|---|
+| `test_s3_entities.py` | Friendly names follow `hass.config.language`; entity ids stay the frozen English ones in `fr` as in `en`; every entity has an `entity.<platform>.<key>.name` in en/fr/es; `sensor.switchboard_deferred_today` exists. |
+| `test_s3_fanout.py` | All (person, output) deliveries of one decision run concurrently; each is bounded by `dispatcher.OUTPUT_TIMEOUT_SECONDS`; a timeout or an exception is accounted for exactly as a failed delivery already was. |
+| `test_s3_callbacks.py` | `context.user_id` ↔ `person.user_id` resolves the acting person even when `device_id` is absent or points at somebody else; one `person_without_user_id` repair per unlinked person in a button-bearing row, deleted on reload once linked. |
+| `test_s3_services.py` | The five UI services exist after `async_setup`, with no config entry; calling one then raises `ServiceValidationError` with translation key `no_loaded_entry`. |
+| `test_s3_done_message.py` | The `done_message` fallback order, and the deliberate asymmetry with `message`. |
+| `test_contract.py` | `sensor.switchboard_deferred_today`, and the entity-id freeze under `fr` / `es` / `en`. |
+
+### Switching the instance language
+
+`hass.config.language = "fr"` **before** the config entry is set up, exactly
+as core's own tests do it (`$HA_CORE_SRC/tests/components/holiday/test_calendar.py`
+line 164, `$HA_CORE_SRC/tests/components/google_assistant_sdk/test_helpers.py`,
+`$HA_CORE_SRC/tests/components/assist_pipeline/test_pipeline.py` line 407).
+Plain assignment, not `hass.config.async_update(...)`: the entity platform
+reads `hass.config.language` once, in
+`EntityPlatform.async_load_translations`, when the platform is set up, so the
+language must be in place before `async_setup` of the entry and nothing needs
+to be re-fired afterwards.
+
+The **expected strings are never hard-coded**. The tests read them back from
+the integration's own translation files through
+`homeassistant.helpers.translation.async_get_translations(hass, language,
+category, {DOMAIN})` (`$HA_CORE_SRC/homeassistant/helpers/translation.py`,
+used the same way in `$HA_CORE_SRC/tests/helpers/test_translation.py`), for
+the categories `entity`, `issues`, `exceptions` and `common`. What is
+asserted is that the key exists, that it is non-empty, that the entity shows
+it, and — for `fr` and `es` — that it is not simply a copy of the English
+one. Choosing the actual wording is the coding agent's job, not the
+specification's.
+
+Why the language test matters rather than being a formality: `fr` and `es`
+are both members of `NATIVE_ENTITY_IDS`
+(`$HA_CORE_SRC/homeassistant/generated/languages.py`, line 75), and
+`EntityPlatform.async_load_translations`
+(`$HA_CORE_SRC/homeassistant/helpers/entity_platform.py`, lines 224-244)
+builds object ids from that language's names. Adding `_attr_translation_key`
+without also pinning the object id therefore *renames every entity* on a
+French or Spanish install. `Entity.suggested_object_id`
+(`$HA_CORE_SRC/homeassistant/helpers/entity.py`, line 748) is the documented
+override; see ADR-0017 §2.
+
+### Patching the fan-out timeout
+
+`test_s3_fanout.py` patches
+`custom_components.notify_switchboard.dispatcher.OUTPUT_TIMEOUT_SECONDS`
+(30 s in production) down to a fraction of a second. The constant's **name
+and module are part of the specification** — ADR-0017 §3 fixes them precisely
+so the timeout is testable without waiting 30 s. The timing assertions are
+written to sit between the parallel cost and the sequential cost of the same
+scenario (roughly a factor of four apart), so they separate the two
+implementations rather than measuring the machine.
+
+### Assumptions added by Sprint 3
+
+7. **The repair's `issue_id` is not pinned**, in the same spirit as
+   assumption 3 of Sprint 1 and as `test_s1_routing.py`'s `unknown_target`
+   assertion: the contract fixes no id. What `test_s3_callbacks.py` asserts
+   is the `translation_key` (`person_without_user_id`), the severity
+   (`warning`), `is_fixable is False`, *how many* issues exist for a given
+   configuration, and that each one names its person somewhere in its
+   `issue_id` or its `translation_placeholders`.
+8. **The `person.*` `user_id` link is set as a plain state attribute** by the
+   tests (`hass.states.async_set("person.alice", "home", {"user_id": ...})`),
+   never through the real `person` integration — the same choice Sprint 1
+   made for presence. Core writes exactly that attribute
+   (`$HA_CORE_SRC/homeassistant/components/person/__init__.py`, line 650,
+   `PersonEntityStateAttribute.USER_ID`).
+9. **`ServiceNotFound` is a subclass of `ServiceValidationError`**
+   (`$HA_CORE_SRC/homeassistant/exceptions.py`), so a bare
+   `pytest.raises(ServiceValidationError)` would be satisfied by a service
+   that is not registered at all. `test_s3_services.py` asserts
+   `hass.services.has_service(...)` first and the `translation_key` after;
+   any future test of a refusal should do the same.
+
+### `test_s3_done_message.py` is green from the start, on purpose
+
+Unlike the other four S3 files it passes against 0.2.0. The 0.2.0 *code*
+already implements the contract's order; what disagrees with it is prose —
+the "v0.2 addendum" section of this very README and
+`docs/sprints/sprint-2-brief.md` item 8, both of which describe the
+`done_message` chain the other way round (`docs/known-issues.md`,
+2026-09-07). ADR-0017 §6 settles it in favour of `docs/contract.md` and
+ADR-0016; the coding agent corrects the two prose documents, and this test
+exists so that nobody later "fixes" the code to match them.

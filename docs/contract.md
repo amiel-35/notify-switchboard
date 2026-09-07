@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.2 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.3 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -7,6 +7,11 @@
 > `unsnooze`, `silence`, `unsilence`) and three new optional per-row texts
 > (`message`, `done_message`, `default_title`). Everything else below is the
 > v0 text, unchanged.
+>
+> v0.3 addendum (ADR-0017): one more frozen name
+> (`sensor.switchboard_deferred_today`), the fan-out guarantees, the callback
+> resolution order, and the availability of the five services without a loaded
+> entry. Everything above and below stays the v0 / v0.2 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -18,7 +23,7 @@
 | Notify entity (degraded path) | `notify.switchboard` entity, `notify.send_message` with `message` + `title` only |
 | Event entity | `event.switchboard_delivery` with fixed `event_types`: `routed`, `dropped`, `acknowledged`, `snoozed` |
 | Per-person entities | `binary_sensor.<person>_silenced`, `sensor.<person>_last_notification`, `sensor.<person>_active_snoozes` (unique_id = `<entry_id>:<person entity_id>:<kind>`) |
-| Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today` |
+| Global entities | `sensor.switchboard_routed_today`, `sensor.switchboard_dropped_today`, `sensor.switchboard_deferred_today` (v0.3, ADR-0017) |
 | UI services (v0.2, ADR-0016) | `notify_switchboard.acknowledge`, `notify_switchboard.snooze`, `notify_switchboard.unsnooze`, `notify_switchboard.silence`, `notify_switchboard.unsilence` |
 
 ## Input (legacy service call)
@@ -111,6 +116,74 @@ Three optional fields on a routing-table row, all absent/`None` by default:
 These exist because a core `alert.*` exposes no `message`/`done_message`
 state attribute at all (`docs/known-issues.md`); the row, not the alert, is
 now the documented source of this text.
+
+## v0.3 addendum (ADR-0017)
+
+### Names
+
+`sensor.switchboard_deferred_today` is a frozen public name, alongside
+`sensor.switchboard_routed_today` and `sensor.switchboard_dropped_today` (see
+the table above). It counts the messages queued for a person's `wake_time`
+since local midnight: a deferral is neither routed nor dropped, and nothing
+else exposes it.
+
+Entity **ids** are frozen in the English form listed in the names table, in
+every instance language; the **friendly names** are translated into the
+instance language. A `fr` or `es` instance therefore shows a translated name
+on `sensor.switchboard_routed_today`, never a translated entity id.
+
+### Fan-out guarantees
+
+All (person, output) deliveries of one routing decision are attempted
+**concurrently**, each bounded by a per-output timeout of 30 seconds.
+
+- A timeout, a missing service or an exception on one output never delays and
+  never prevents any other output, of the same person or of another.
+- A failed or timed-out output is recorded exactly as a failed delivery
+  already was: the same repair after several consecutive failures, and — when
+  *every* output of a person failed — the same `delivery_failed` drop reason,
+  the same `sensor.switchboard_dropped_today` increment and the same `dropped`
+  `event.switchboard_delivery` payload. No new drop reason, no new event type.
+- **Counts are promised; order is not.** The relative order of the
+  `event.switchboard_delivery` events of one decision, and the order in which
+  outputs are called, are unspecified.
+- The wall time of one routing decision is bounded by its slowest single
+  output, not by the sum of its outputs.
+
+### Callback resolution order
+
+For a `mobile_app_notification_action` callback, the acting person is resolved
+in this order:
+
+1. `context.user_id` matched against the `user_id` state attribute of a
+   `person.*` in the row's audience. This is the canonical link and is used
+   whenever it resolves, whatever the event's `device_id` says.
+2. The event's `device_id`, looked up in the device registry — a fallback,
+   logged at DEBUG as such.
+3. Neither resolves: the action applies to every person in the row's audience,
+   as already documented.
+
+A person who is in the audience of a row that adds Companion buttons
+(`allow_acknowledge`, or a non-empty `snooze_minutes`) and whose `person.*`
+carries no `user_id` raises one `person_without_user_id` repair, deleted when
+the link is made and the entry reloaded.
+
+### Service availability
+
+The five `notify_switchboard.*` services of v0.2 exist as soon as the
+integration is set up, whether or not a config entry is loaded. Called while
+no entry is loaded, each raises `ServiceValidationError` with the translation
+key `no_loaded_entry`. Their fields, effects and refusals are otherwise
+exactly as documented above.
+
+### Per-row texts: the `done_message` order is the one written above
+
+For the `on|off → idle` transition: the row's `done_message` template, then
+the alert's own `done_message` attribute, then the translated
+`common.back_to_normal` — in that order. (For `message`, on `idle → on`, the
+alert's own attribute still comes first.) ADR-0017 settles a disagreement
+between this document and two non-normative ones; this document is
+authoritative.
 
 ## Observer mode (plan B, ADR-007)
 

@@ -4,6 +4,10 @@ Findings from the tester or reviewer that were explicitly accepted by the
 orchestrator instead of blocking a release. Each entry: date, sprint, finding,
 why accepted, planned resolution.
 
+Entries carrying a **Resolved by Sprint 3** line are settled by ADR-0017 and
+pinned by `tests/acceptance/test_s3_*.py`; they are removed from this file
+once 0.3.0 actually ships the code, not before.
+
 ## 2026-09-06 — S1 — `alert` leaves an un-cancellable repeat timer in tests
 
 `tests/acceptance/test_s1_actions.py::test_acknowledge_action_turns_off_the_row_alert_when_allowed`
@@ -111,6 +115,16 @@ Accepted for S1 because it is now only the *second* resolution path:
 the whole audience — never the wrong person alone. Planned resolution:
 capture one real callback on the dev instance and pin its shape in a test.
 
+**Narrowed, not resolved, by Sprint 3** (ADR-0017 §4). Still unverified — that
+needs a physical phone and stays out of scope. What changes is its status: the
+`user_id` link becomes the *canonical* one in the contract rather than merely
+the first tried, the `device_id` lookup is documented as a fallback and logged
+at DEBUG as such, and a person who cannot be resolved through `user_id` while
+sitting in a button-bearing row now raises a `person_without_user_id` repair
+instead of silently landing in the audience-wide fallback.
+`tests/acceptance/test_s3_callbacks.py` pins that a resolvable `user_id` is
+never overridden by a `device_id` pointing elsewhere.
+
 ## 2026-09-07 — S1 — entity display names are hard-coded in English
 
 `sensor.py`, `binary_sensor.py` and `event.py` pass literal English names
@@ -125,6 +139,15 @@ touches every entity and every translation file at once. Still open after S2,
 which added no entity and was scoped to the five UI services and the per-row
 texts (`docs/sprints/sprint-2-brief.md`). Planned resolution: a dedicated
 commit in S3, before more entities exist.
+
+**Resolved by Sprint 3** (ADR-0017 §2), with one addition the original entry
+did not see: dropping `_attr_name` for `_attr_translation_key` and nothing
+else *renames every entity id* on a French or Spanish install, because `fr`
+and `es` are `NATIVE_ENTITY_IDS` languages and
+`EntityPlatform.async_load_translations` builds object ids from that
+language's names. The frozen ids are held by `Entity.suggested_object_id`.
+Pinned by `tests/acceptance/test_s3_entities.py` and by the new
+language-parametrised case in `tests/acceptance/test_contract.py`.
 
 ## 2026-09-07 — S1 — `authenticationRequired` cannot be overridden per row
 
@@ -182,6 +205,13 @@ orders are indistinguishable on any real alert today; the choice only matters
 for a synthetic `alert.*`-shaped entity. Recorded here so a future reader does
 not read the asymmetry as a bug. Planned resolution: one sentence in whichever
 document is wrong, next time the contract is amended.
+
+**Resolved by Sprint 3** (ADR-0017 §6): the contract's order is authoritative,
+`tests/acceptance/test_s3_done_message.py` pins both chains — including the
+scenario that never existed before, a row template *and* an alert attribute at
+once — and the two prose documents that had it backwards
+(`tests/acceptance/README.md` "v0.2 addendum",
+`docs/sprints/sprint-2-brief.md` item 8) are corrected in 0.3.0.
 
 ## 2026-09-07 — S2 — the UI services are not admin-restricted, by design
 

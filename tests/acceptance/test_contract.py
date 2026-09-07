@@ -10,9 +10,17 @@ Extended for the v0.2 addendum (ADR-0016): the contract change that sprint
 explicitly authorized was adding the five `notify_switchboard.*` UI services,
 so this file is allowed to grow an assertion that they exist after setup —
 the same discipline that guards the v0 names.
+
+Extended again for the v0.3 addendum (ADR-0017): the two changes that sprint
+authorized are `sensor.switchboard_deferred_today` entering the frozen names,
+and the frozen entity ids being frozen *in every instance language* — `fr`
+and `es` are `NATIVE_ENTITY_IDS` languages, so translating the entity names
+without care renames the ids on exactly those instances.
 """
 
 from __future__ import annotations
+
+import pytest
 
 from custom_components.notify_switchboard.const import DOMAIN
 
@@ -53,6 +61,8 @@ async def test_services_and_entities_exist_after_setup(
     # --- global diagnostic entities ---
     assert hass.states.get("sensor.switchboard_routed_today") is not None
     assert hass.states.get("sensor.switchboard_dropped_today") is not None
+    # v0.3 addendum (ADR-0017): the deferral counter is a frozen name too.
+    assert hass.states.get("sensor.switchboard_deferred_today") is not None
 
     # --- per-person entities (contract §3.5) ---
     for person_slug in ("alice", "bob"):
@@ -98,4 +108,38 @@ async def test_ui_services_exist_after_setup(hass, enable_custom_integrations, i
     for service in ("acknowledge", "snooze", "unsnooze", "silence", "unsilence"):
         assert hass.services.has_service(DOMAIN, service), (
             f"{DOMAIN}.{service} must exist after setup (contract v0.2, ADR-0016)"
+        )
+
+
+# v0.3 addendum (ADR-0017): the frozen names are frozen in every language.
+FROZEN_ENTITY_IDS = (
+    "binary_sensor.alice_silenced",
+    "event.switchboard_delivery",
+    "sensor.alice_active_snoozes",
+    "sensor.alice_last_notification",
+    "sensor.switchboard_deferred_today",
+    "sensor.switchboard_dropped_today",
+    "sensor.switchboard_routed_today",
+)
+
+
+@pytest.mark.parametrize("language", ["fr", "es", "en"])
+async def test_frozen_entity_ids_do_not_depend_on_the_instance_language(
+    hass, enable_custom_integrations, install, language
+):
+    """v0.3 addendum (ADR-0017): translated names, English ids, in any language."""
+    hass.config.language = language
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+
+    await install(entry)
+
+    for entity_id in FROZEN_ENTITY_IDS:
+        assert hass.states.get(entity_id) is not None, (
+            f"{entity_id} is a frozen public name and must exist verbatim on "
+            f"a '{language}' instance (docs/contract.md, ADR-0011/ADR-0017)"
         )
