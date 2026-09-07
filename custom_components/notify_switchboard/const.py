@@ -24,7 +24,11 @@ STORAGE_VERSION: Final = 1
 # instead of waiting a whole day.
 # Minor 3 (v0.2, ADR-0016) adds the `silences` list: the temporary, router-owned
 # per-person silences set by `notify_switchboard.silence`.
-STORAGE_MINOR_VERSION: Final = 3
+# Minor 4 (v0.5, ADR-0019 §5) adds the `episodes` list: one record per routing
+# table row whose `alert_entity` has fired, holding who was actually told, which
+# outputs were called and under which tags. The migration inserts an empty list,
+# because an upgrade must not invent an episode.
+STORAGE_MINOR_VERSION: Final = 4
 
 # ---------------------------------------------------------------------------
 # Options shape (`entry.options`), normative -- see tests/acceptance/README.md
@@ -39,6 +43,11 @@ CONF_OUTPUTS: Final = "outputs"
 CONF_SILENCE_ENTITIES: Final = "silence_entities"
 CONF_WAKE_TIME: Final = "wake_time"
 
+# v0.5 addendum (ADR-0019 §2): an optional per-person key whose default is
+# **on**, so it is written into the row only when it is `False`. Every person
+# row written before 0.5.0 keeps the exact dict it had and means "summarise".
+CONF_SUMMARY: Final = "summary"
+
 # Target (routing table) row keys.
 CONF_SLUG: Final = "slug"
 CONF_CLASS: Final = "class"
@@ -50,6 +59,12 @@ CONF_ALLOW_ACKNOWLEDGE: Final = "allow_acknowledge"
 CONF_SNOOZE_MINUTES: Final = "snooze_minutes"
 CONF_DEFAULT_DATA: Final = "default_data"
 CONF_OBSERVER_MODE: Final = "observer_mode"
+
+# v0.5 addendum (ADR-0019 §6): an optional row key, absent means false, written
+# into the row only when true. When it is on, the row's `done` message is
+# cleared from the Companion outputs that received it once the episode is
+# closed, instead of living in the notification centre for a week.
+CONF_CLEAR_DONE: Final = "clear_done"
 
 # v0.4 addendum (ADR-0018 §4): the only new options key of 0.4.0. Optional on
 # every row, absent means false, so no storage migration is needed. While it is
@@ -72,6 +87,21 @@ ATTR_PRIORITY: Final = "priority"
 ATTR_SOURCE_ENTITY: Final = "source_entity"
 ATTR_TAG: Final = "tag"
 
+# v0.5 addendum (ADR-0019). `ttl_minutes` is both a global option key and a
+# per-call `data` key -- deliberately the same string, because it is the same
+# quantity read at two scopes. `switchboard_done` marks a "back to normal"
+# message a caller sends itself (the blueprints will use it); `notification_id`
+# is the key the legacy `notify.persistent_notification` service reads.
+ATTR_TTL_MINUTES: Final = "ttl_minutes"
+CONF_TTL_MINUTES: Final = ATTR_TTL_MINUTES
+ATTR_SWITCHBOARD_DONE: Final = "switchboard_done"
+ATTR_NOTIFICATION_ID: Final = "notification_id"
+
+# Every `data` key in this namespace belongs to the switchboard itself, which
+# is what makes a wake-time summary able to carry "only its own keys" without
+# enumerating them (ADR-0019 §2).
+SWITCHBOARD_DATA_PREFIX: Final = "switchboard_"
+
 # Companion-specific keys the router adds to `data` (contract "Buttons").
 ATTR_ACTIONS: Final = "actions"
 ATTR_AUTHENTICATION_REQUIRED: Final = "authenticationRequired"
@@ -90,6 +120,24 @@ ATTR_USER_ID: Final = "user_id"
 # ADR-0018 §6). Public: a caller, an automation or a Companion channel may
 # rely on it to tell a test from the real thing.
 TEST_MESSAGE_TAG: Final = "switchboard-test"
+
+# The deterministic identity every outgoing message acquires when the caller
+# supplies no `data.tag` (contract v0.5, ADR-0019 §6). All three values are
+# public: a Companion channel or an automation may key on them.
+TAG_PREFIX: Final = "switchboard-"
+DONE_TAG_SUFFIX: Final = "-done"
+SUMMARY_TAG: Final = f"{TAG_PREFIX}summary"
+
+# The literal `mobile_app` reads as "remove the notification bearing this tag"
+# (`homeassistant/components/mobile_app/const.py`, `CLEAR_NOTIFICATION`).
+# Spelled out here rather than imported, exactly like `ATTR_USER_ID`, so the
+# integration keeps no dependency on the `mobile_app` component.
+CLEAR_NOTIFICATION_MESSAGE: Final = "clear_notification"
+
+# The bare legacy service name of the "write it on the dashboard" output, i.e.
+# `notify.persistent_notification`. It is the one output core documents as
+# reading `data.notification_id`, so it is the only one the router adds it for.
+PERSISTENT_NOTIFICATION_OUTPUT: Final = "persistent_notification"
 
 # The routing-table row the first person creates on an empty table
 # (ADR-0018 §4). Its name is translated (`common.default_target_name`); its
@@ -115,6 +163,17 @@ VALID_PRIORITIES: Final[tuple[str, ...]] = (
     PRIORITY_HIGH,
     PRIORITY_CRITICAL,
 )
+
+# Time-to-live defaults, in minutes, per priority (contract v0.5, ADR-0019 §1).
+# `None` means "never expires", and so does an absent key of
+# `entry.options["ttl_minutes"]`. `critical` has no entry and cannot be given
+# one: a critical message bypasses silence everywhere, so it is never deferred,
+# so it can never expire.
+DEFAULT_TTL_MINUTES: Final[dict[str, int | None]] = {
+    PRIORITY_INFO: 120,
+    PRIORITY_NORMAL: 720,
+    PRIORITY_HIGH: None,
+}
 
 # Priorities that require unlocking the phone before an action runs.
 AUTHENTICATED_PRIORITIES: Final[frozenset[str]] = frozenset(
@@ -150,6 +209,12 @@ DROP_RECURSION: Final = "recursion"
 DROP_UNKNOWN_TARGET: Final = "unknown_target"
 DROP_NO_OUTPUTS: Final = "no_outputs"
 DROP_DELIVERY_FAILED: Final = "delivery_failed"
+
+# v0.5 addendum (ADR-0019). Two more reasons, no new event type: both travel in
+# the existing `dropped` `event.switchboard_delivery` and both count towards
+# `sensor.switchboard_dropped_today`.
+DROP_EXPIRED: Final = "expired"
+DROP_NOT_NOTIFIED: Final = "not_notified"
 
 # `not_in_audience` is recorded in the decision for diagnostics but is not a
 # drop for the user: the contract says such a person is "not considered".

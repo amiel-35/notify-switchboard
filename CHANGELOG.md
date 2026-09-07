@@ -7,6 +7,151 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Router 0.5.0 — night, catch-up and closing the loop (contract v0.5 addendum,
+ADR-0019), on top of the router 0.4.0 and 0.3.0 changes further down, which are
+in `main` but not tagged either. 0.4.0 made the first hour of use bearable;
+this release makes the *night* bearable, and closes what the router opens. Two
+new drop reasons, three optional options keys, two `data` keys and one store
+migration — no new action, no new event type, no renamed name.
+
+### Added
+
+- **A time to live on a deferred message.** A message held for somebody's wake
+  time is a promise that it is *late*, not that it is eternal. Each priority
+  now has a life span, counted from the moment the message was queued and read
+  **at the flush** rather than frozen at queue time: `info` 120 min, `normal`
+  720 min, `high` none, `critical` not applicable (it is never held back). The
+  new global option `ttl_minutes` changes the policy, per priority, through a
+  **Time to live** step in the options; `data.ttl_minutes` changes it for one
+  call, and `data.ttl_minutes: 0` means "keep this one whatever the household
+  policy says". A message whose time has run out leaves the queue and is
+  dropped with the new reason **`expired`** — counted, evented, in the
+  `reasons` attribute — instead of announcing at 07:00 that the front door was
+  open at 23:31.
+- **One summary at the wake time.** Eleven deferred messages used to be eleven
+  notifications, eleven sounds and eleven banners, in a burst, at the exact
+  moment somebody opens their eyes. When more than one message survives for a
+  person, they now get **one** notification per output: a translated title
+  carrying the number of lines, one line per message in queue order, and
+  messages sharing a `tag` collapsed to the most recent one, across rows. Its
+  `data` is *built*, not merged — `tag: switchboard-summary`, the union of the
+  switchboard's own `switchboard_*` keys, and nothing else: no caller key, no
+  row default data and **no Companion buttons**, which on a digest of three
+  alerts could only acknowledge an arbitrary one of them. The new per-person
+  option `summary` (**Summarise the night**, on by default, written into the
+  row only when it is off) turns it back into one notification per message. A
+  digest is a delivery like any other, so it is recorded into every episode
+  that contributed a line to it, under the tag `switchboard-summary`: the
+  person a digest woke is told when the alert ends, and the digest is cleared
+  with it.
+- **Episodes, and a "back to normal" that goes to the right people.** For every
+  routing-table row that names an `alert_entity` — in observer mode or not —
+  the router now remembers one **episode**: from that alert's `idle → on` to
+  its return to `idle`, which persons actually received at least one of its
+  messages, which `notify.*` outputs answered, and under which tags. It is
+  persisted with the snoozes and the deferrals (`Store` minor version 3 → 4,
+  migration inserts an empty list), so a restart in the middle of a leak does
+  not widen the done message. A **done** message — observer mode's own, or any
+  call carrying the new documented key **`data.switchboard_done: true`** —
+  reaches only those persons; everybody else in the audience is dropped with
+  the new reason **`not_notified`**. A row with no `alert_entity` has no
+  episodes, so the key changes nothing there.
+- **Every message has a name, so a notification can be replaced and cleared.**
+  `data.tag` now defaults to `switchboard-<slug>`, `switchboard-<slug>-done`
+  for a done message and `switchboard-summary` for a digest; a caller's own tag
+  always wins. `data.notification_id` mirrors the effective tag and is added
+  for the bare `persistent_notification` output only — the one core documents
+  as reading it (`homeassistant/components/notify/__init__.py`, the
+  `persistent_notification` service handler) — so a repeat updates the
+  dashboard notification instead of stacking a second one.
+- **Closing the loop when an episode ends.** After the done message has gone
+  out, every `mobile_app_*` output the episode reached is called with
+  `message: clear_notification` and the episode's tag (core's own literal,
+  `homeassistant/components/mobile_app/const.py`, `CLEAR_NOTIFICATION`; the
+  Companion app on the device is what removes the notification), and
+  `persistent_notification.dismiss` is called for the matching id when that
+  output was reached. The done message keeps a tag of its own so it survives
+  that clear; the new optional row key **`clear_done`** (**Clear the
+  back-to-normal message**, off by default) extends the clear to it. A clear is
+  **not a message**: it is not counted, it fires no `event.switchboard_delivery`,
+  no routing rule applies to it, it is bounded by the same
+  `OUTPUT_TIMEOUT_SECONDS` as any other output call, and a failure is logged
+  and swallowed. The whole closing sequence is **observer mode only**
+  (ADR-0019 §6, amendment (a)): a row driven by its alert's own `notifiers:`
+  list sends its "back to normal" before the state reaches `idle`, so clearing
+  there would wipe the message that just arrived. Nothing else narrows it — in
+  particular the clear does not ask what wrote the `alert.*` state.
+
+### Changed
+
+- **A flush re-runs the whole decision, not just the silence.** Until 0.4.0 a
+  queued message re-checked exactly one thing before going out
+  (`docs/known-issues.md`, 2026-09-07). From 0.5.0 the flush runs the same
+  `router.decide` an inbound call runs, over the world as it is at that moment,
+  with the message's **original** priority written back into the rebuilt
+  request — so a row whose `default_priority` changed overnight cannot silently
+  re-grade it. Somebody who left the house under a `home_only` row is dropped
+  with `presence`, somebody who snoozed the row at 02:00 with `snoozed`,
+  somebody whose row was deleted with `unknown_target`. `silenced` is the one
+  outcome that still **holds** the message and re-arms the flush: the night is
+  not over, which is the whole point of a deferral.
+- **The night ends when it ends.** The router was already subscribed to every
+  person's configured `silence_entities`; it refreshed a binary sensor and
+  returned. Now, when the **last** active one turns `off` and no temporary
+  `notify_switchboard.silence` is running, that person's queue is flushed on
+  the spot, through the same code path (so the time to live, the re-decision
+  and the summary all apply). `wake_time` stays the upper bound: nothing waits
+  longer than it used to. A person with a night schedule *and* a Focus sensor
+  needs both off — one of two lifting is not the end of a night.
+- Both entry points into a flush now go through a task of the config entry's
+  own, so a flush never runs inside the timer sweep or the state write that
+  triggered it. Unloading the entry **waits** for that task rather than
+  cancelling it — `_async_process_on_unload` cancels only `_background_tasks`
+  and gives `_tasks` ten seconds — which is what a flush wants, since it takes
+  messages out of the store before delivering them and saves once at the end. A
+  flush that has not begun by then stands down instead of running against
+  listeners that are already detached, and nothing re-arms a deferral timer
+  past that point.
+- **A flush is visible in the diagnostics.** Every message a flush re-decides
+  now writes its own `decision_log` entry, in the shape an inbound call writes,
+  with `flush: true` to tell the two decisions on the same message apart; a
+  message still held by the silence appears there too. And a refusal that comes
+  back *beside* a delivery — `recursion`, when one of a person's outputs is a
+  `notify.switchboard*` service — is counted at the flush as it always was on
+  the live path, instead of being discarded with the rest of the decision.
+- The router subscribes to **every row's** `alert_entity`, not only to the
+  observed ones, because every such row has episodes. Only the *routing* half
+  of the handler is still reserved to observer mode.
+- `sensor.switchboard_dropped_today` gains `expired` and `not_notified` in its
+  `reasons`; the four `event.switchboard_delivery` event types are unchanged
+  and both new reasons travel in the existing `dropped` event.
+- `strings.json` and `translations/{en,fr,es}.json` gain the summary strings
+  (`common.summary_title` with its `{count}`, `common.summary_line`,
+  `common.summary_line_untitled`), a `detail` sentence for each new reason, and
+  the three new options fields.
+- The options flow's working copy is built key by key rather than copied, so
+  every optional key has to be named in it: `ttl_minutes`, new in this version,
+  is carried through explicitly, and an unrelated edit — a person's outputs, a
+  row's audience — cannot drop the household's expiry policy. (Nothing shipped
+  ever lost it: there was no `ttl_minutes` to lose before 0.5.0.)
+
+### Documentation
+
+- `docs/ADR/0019-night-catch-up-and-closing-the-loop.md`, the v0.5 addendum of
+  `docs/contract.md`, and `tests/acceptance/test_s5_*.py`.
+- `docs/ARCHITECTURE.md`: the deferral lifecycle is redrawn with two entry
+  points and four outcomes, and gains a section on episodes and the clears.
+- `README.md`: "The night", "Closing the loop", and a table of every `data` key
+  a caller can set.
+- `docs/blueprints.md`: how to mark a "back to normal" message with
+  `switchboard_done` (the blueprints themselves are unchanged).
+- `docs/known-issues.md`: the 2026-09-07 S2 entry is resolved in both halves,
+  and one new entry records what Sprint 5 could not close — an episode left
+  open across a real Home Assistant restart, because core's `AlertEntity` never
+  re-reads its watched entity (ADR-0019 §6, amendment (d)).
+
+---
+
 Router 0.4.0 — zero-config and explainability (contract v0.4 addendum,
 ADR-0018), on top of the router 0.3.0 changes further down, which are in `main`
 but not tagged either. Every feature here is discovery, defaults and diagnosis

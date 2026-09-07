@@ -127,6 +127,29 @@ automation:
         tag: washing_machine
 ```
 
+## Marking a "back to normal" message (v0.5, ADR-0019 §5)
+
+None of the three blueprints shipped here sends one today, but an `alert:`
+block or an automation of your own often does. From 0.5.0, add
+`switchboard_done: true` to such a call's `data` and it becomes the row's
+**done** message: it reaches only the people the row's current episode
+actually reached, and everybody else in the audience is dropped with the
+reason `not_notified` rather than being told that something they never heard
+about is over.
+
+```yaml
+action: notify.switchboard_leak
+data:
+  message: "Back to normal"
+  data:
+    switchboard_done: true
+```
+
+It only changes anything on a row that names an `alert_entity`: a row without
+one has no episodes, so such a message routes to the whole audience like any
+other. Changing the blueprints themselves to use the key is a separate,
+smaller change.
+
 ## How to import
 
 Click a badge above (needs the [My Home Assistant](https://my.home-assistant.io/)

@@ -9,8 +9,9 @@ testable (brief item 3).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from homeassistant.const import STATE_HOME, STATE_NOT_HOME, STATE_ON
@@ -21,11 +22,14 @@ from .const import (
     ACTION_NAMESPACE,
     ACTION_SNOOZE,
     ATTR_PRIORITY,
+    ATTR_SWITCHBOARD_DONE,
     ATTR_TAG,
+    ATTR_TTL_MINUTES,
     CONF_ALERT_ENTITY,
     CONF_ALLOW_ACKNOWLEDGE,
     CONF_AUDIENCE,
     CONF_CLASS,
+    CONF_CLEAR_DONE,
     CONF_DEFAULT_DATA,
     CONF_DEFAULT_PRIORITY,
     CONF_DEFAULT_TARGET,
@@ -40,12 +44,16 @@ from .const import (
     CONF_SILENCE_ENTITIES,
     CONF_SLUG,
     CONF_SNOOZE_MINUTES,
+    CONF_SUMMARY,
     CONF_TARGETS,
     CONF_WAKE_TIME,
     DEFAULT_PRESENCE_RULE,
     DEFAULT_PRIORITY,
+    DEFAULT_TTL_MINUTES,
+    DONE_TAG_SUFFIX,
     DROP_NO_OUTPUTS,
     DROP_NOT_IN_AUDIENCE,
+    DROP_NOT_NOTIFIED,
     DROP_PRESENCE,
     DROP_RECURSION,
     DROP_SILENCED,
@@ -56,6 +64,9 @@ from .const import (
     PRESENCE_AWAY_ONLY,
     PRESENCE_HOME_ONLY,
     PRIORITY_CRITICAL,
+    SUMMARY_TAG,
+    SWITCHBOARD_DATA_PREFIX,
+    TAG_PREFIX,
     VALID_PRESENCE_RULES,
     VALID_PRIORITIES,
 )
@@ -86,6 +97,10 @@ class PersonConfig:
     outputs: tuple[str, ...] = ()
     silence_entities: tuple[str, ...] = ()
     wake_time: time | None = None
+    # v0.5 addendum (ADR-0019 §2). Absent in the options means True, so every
+    # person row written before 0.5.0 keeps behaving as it does today -- except
+    # that a wake time now delivers one digest instead of a burst.
+    summary: bool = True
 
     @property
     def object_id(self) -> str:
@@ -119,6 +134,10 @@ class TargetConfig:
     # changes nothing about routing: it only tells the options flow that this
     # row's audience is the router's to keep in sync.
     managed: bool = False
+    # v0.5 addendum (ADR-0019 §6). Absent means False: the "back to normal"
+    # message rings and then stays on the phone, which is why it never shares
+    # the episode's own tag.
+    clear_done: bool = False
 
     @property
     def service_name(self) -> str:
@@ -165,6 +184,11 @@ class NotificationRequest:
         tag = self.data.get(ATTR_TAG)
         return str(tag) if tag is not None else None
 
+    @property
+    def is_done(self) -> bool:
+        """Return True when this call marks itself as a "back to normal"."""
+        return is_done_message(self.data)
+
 
 @dataclass(frozen=True, slots=True)
 class RoutingContext:
@@ -178,6 +202,11 @@ class RoutingContext:
     # Temporary, router-owned silences (person -> expiry), ADR-0016. Defaults to
     # empty so every Sprint 1 caller of `decide` keeps its exact behaviour.
     temporary_silences: dict[str, datetime] = field(default_factory=dict)
+    # Who each row's current episode actually reached (v0.5, ADR-0019 §5). A
+    # slug is a key of this mapping **iff** its row names an `alert_entity`, so
+    # an absent key means "this row has no episodes" and an empty set means
+    # "this episode reached nobody". Only a `done` message reads it.
+    episode_recipients: dict[str, frozenset[str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,6 +271,8 @@ def parse_person(raw: dict[str, Any]) -> PersonConfig:
             str(entity) for entity in raw.get(CONF_SILENCE_ENTITIES) or ()
         ),
         wake_time=parse_wake_time(raw.get(CONF_WAKE_TIME)),
+        # Absent means "summarise": the key is only written when it is False.
+        summary=bool(raw.get(CONF_SUMMARY, True)),
     )
 
 
@@ -272,6 +303,7 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
         done_message=_optional_text(raw.get(CONF_DONE_MESSAGE)),
         default_title=_optional_text(raw.get(CONF_DEFAULT_TITLE)),
         managed=bool(raw.get(CONF_MANAGED)),
+        clear_done=bool(raw.get(CONF_CLEAR_DONE)),
     )
 
 
@@ -393,6 +425,179 @@ def split_outputs(
     return usable, recursive
 
 
+# ---------------------------------------------------------------------------
+# v0.5 primitives: identity, time-to-live and the `done` marker (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+def is_done_message(data: Mapping[str, Any]) -> bool:
+    """Return True when a call marks itself as a "back to normal" (§5).
+
+    `data.switchboard_done: true` is the public, documented key a blueprint
+    sets on the message it sends itself; observer mode sets the same key on the
+    message it generates, so both paths are one rule downstream.
+    """
+    return bool(data.get(ATTR_SWITCHBOARD_DONE))
+
+
+def default_tag(slug: str, *, done: bool = False) -> str:
+    """Return the deterministic `data.tag` of a message on row `slug` (§6).
+
+    A notification you cannot name is one you can never clear. The `done`
+    message deliberately does **not** share the episode's tag: `clear_done`
+    defaults to off, and a "back to normal" carrying `switchboard-<slug>` could
+    not be kept on the phone while the episode's own notifications are cleared.
+    """
+    return f"{TAG_PREFIX}{slug}{DONE_TAG_SUFFIX if done else ''}"
+
+
+def effective_tag(slug: str, data: Mapping[str, Any]) -> str:
+    """Return the tag a message will actually travel with.
+
+    A caller-supplied `data.tag` always wins; the default only fills a gap.
+    """
+    caller = data.get(ATTR_TAG)
+    if caller is not None and str(caller):
+        return str(caller)
+    return default_tag(slug, done=is_done_message(data))
+
+
+def _minutes(raw: Any) -> int | None:
+    """Return a usable number of minutes, or None when there is not one.
+
+    A bool is not a duration even though Python says it is an `int`, and a
+    string, a `None` or an object is a configuration mistake rather than a
+    promise the router should try to honour.
+    """
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    return int(raw)
+
+
+def resolve_ttl(
+    priority: str, data: Mapping[str, Any], mapping: Mapping[str, Any] | None = None
+) -> timedelta | None:
+    """Return the time-to-live of a deferred message, or None for "never" (§1).
+
+    Read at **flush** time, from the deferral's stored priority and stored
+    `data`, never frozen at queue time: the mapping is a household policy, not a
+    per-message promise, so shortening `info` at 02:00 means it for what is
+    already waiting.
+
+    Precedence: `data.ttl_minutes` (where `0` means "this message never
+    expires", the caller's opt-out in the other direction), then
+    `entry.options["ttl_minutes"]`, then `DEFAULT_TTL_MINUTES`. An absent key
+    means the default; an explicit `null` means never. `critical` is absent
+    from the defaults and can be given no entry, so it never expires -- which
+    is moot, since a critical message is never deferred in the first place.
+    """
+    per_call = _minutes(data.get(ATTR_TTL_MINUTES))
+    if per_call is not None:
+        return None if per_call <= 0 else timedelta(minutes=per_call)
+
+    if mapping is not None and priority in mapping:
+        configured: Any = mapping[priority]
+    else:
+        configured = DEFAULT_TTL_MINUTES.get(priority)
+
+    minutes = _minutes(configured)
+    if minutes is None or minutes <= 0:
+        return None
+    return timedelta(minutes=minutes)
+
+
+def collapse_by_tag(items: list[tuple[str, Any]]) -> list[Any]:
+    """Collapse `(tag, item)` pairs to the last item of each tag (§2).
+
+    `items` is in queue order, newest last, and the survivor of a collapsed
+    group keeps the position of its **latest** member -- which is also the one
+    that is kept, since a summary line has to say what is true now rather than
+    what was true first. The key is the effective tag alone, across rows: two
+    rows a caller deliberately tagged the same are one line, not two.
+    """
+    last: dict[str, int] = {}
+    for index, (tag, _item) in enumerate(items):
+        last[tag] = index
+    keep = set(last.values())
+    return [item for index, (_tag, item) in enumerate(items) if index in keep]
+
+
+def summary_data(payloads: list[Mapping[str, Any]]) -> dict[str, Any]:
+    """Build a summary's `data`: built, not merged (§2).
+
+    Only the switchboard's own keys survive -- the frozen `switchboard-summary`
+    tag and the union of the `switchboard_*` keys of the collapsed survivors,
+    later message wins. No caller key, no row `default_data`, no `priority`,
+    and explicitly no `actions` and no `authenticationRequired`: three rows'
+    worth of `data` cannot be merged without contradicting each other, and an
+    Acknowledge button on a digest of three alerts would acknowledge an
+    arbitrary one of them.
+    """
+    data: dict[str, Any] = {ATTR_TAG: SUMMARY_TAG}
+    for payload in payloads:
+        for key, value in payload.items():
+            if key.startswith(SWITCHBOARD_DATA_PREFIX):
+                data[key] = value
+    return data
+
+
+def _decide_for_person(
+    table: RoutingTable,
+    target: TargetConfig,
+    person_id: str,
+    context: RoutingContext,
+    *,
+    priority: str,
+    bypass: bool,
+    payload: dict[str, Any],
+) -> tuple[RoutedDelivery | None, tuple[DroppedDelivery, ...]]:
+    """Apply contract §"Routing decision" to one person of one row.
+
+    Extracted from `decide` so that each of the two loops stays readable, and
+    so the order of the rules -- audience, presence, silence, snooze, outputs --
+    lives in exactly one place. A person can produce both a drop and a delivery
+    (`recursion` alongside the usable outputs), which is why the refusals come
+    back as a tuple rather than as a single reason.
+    """
+    slug = target.slug
+    person = table.persons.get(person_id)
+    if person is None:
+        # The row names somebody the switchboard does not know about; the
+        # options flow rejects this, a hand-edited file may not. Unlike
+        # `not_in_audience` this *is* a loss: the row expected that person to be
+        # notified and nobody was, so it is counted.
+        return None, (DroppedDelivery(person_id, slug, DROP_UNKNOWN_PERSON),)
+
+    if not presence_allows(target.presence_rule, context.person_states.get(person_id)):
+        return None, (DroppedDelivery(person_id, slug, DROP_PRESENCE),)
+
+    if not bypass and is_silenced(person, context):
+        return None, (DroppedDelivery(person_id, slug, DROP_SILENCED),)
+
+    if not bypass and snooze_is_active(person_id, slug, context):
+        return None, (DroppedDelivery(person_id, slug, DROP_SNOOZED),)
+
+    usable, recursive = split_outputs(person.outputs)
+    refusals: tuple[DroppedDelivery, ...] = ()
+    if recursive:
+        refusals = (DroppedDelivery(person_id, slug, DROP_RECURSION),)
+    if not usable:
+        if not recursive:
+            refusals = (DroppedDelivery(person_id, slug, DROP_NO_OUTPUTS),)
+        return None, refusals
+
+    return (
+        RoutedDelivery(
+            person=person_id,
+            slug=slug,
+            outputs=usable,
+            priority=priority,
+            data=dict(payload),
+        ),
+        refusals,
+    )
+
+
 def decide(
     table: RoutingTable, request: NotificationRequest, context: RoutingContext
 ) -> RoutingDecision:
@@ -409,48 +614,33 @@ def decide(
         priority = resolve_priority(target, request.data)
         bypass = priority == PRIORITY_CRITICAL
         payload = merge_data(target, request.data)
+        # A `done` message reaches only the persons the episode it closes
+        # actually reached (ADR-0019 §5). `None` means "this row has no
+        # episodes", which is every row that names no `alert_entity`, and is
+        # what keeps `not_notified` unreachable for a household that never
+        # wrote an `alert:` block.
+        recipients = context.episode_recipients.get(slug) if request.is_done else None
 
         for person_id in target.audience:
-            person = table.persons.get(person_id)
-            if person is None:
-                # The row names somebody the switchboard does not know about;
-                # the options flow rejects this, a hand-edited file may not.
-                # Unlike `not_in_audience` this *is* a loss: the row expected
-                # that person to be notified and nobody was, so it is counted.
-                dropped.append(DroppedDelivery(person_id, slug, DROP_UNKNOWN_PERSON))
+            if recipients is not None and person_id not in recipients:
+                # Filtered before the rest of the decision runs: "back to
+                # normal" is a strange thing to receive about a problem you
+                # never heard of.
+                dropped.append(DroppedDelivery(person_id, slug, DROP_NOT_NOTIFIED))
                 continue
 
-            if not presence_allows(
-                target.presence_rule, context.person_states.get(person_id)
-            ):
-                dropped.append(DroppedDelivery(person_id, slug, DROP_PRESENCE))
-                continue
-
-            if not bypass and is_silenced(person, context):
-                dropped.append(DroppedDelivery(person_id, slug, DROP_SILENCED))
-                continue
-
-            if not bypass and snooze_is_active(person_id, slug, context):
-                dropped.append(DroppedDelivery(person_id, slug, DROP_SNOOZED))
-                continue
-
-            usable, recursive = split_outputs(person.outputs)
-            if recursive:
-                dropped.append(DroppedDelivery(person_id, slug, DROP_RECURSION))
-            if not usable:
-                if not recursive:
-                    dropped.append(DroppedDelivery(person_id, slug, DROP_NO_OUTPUTS))
-                continue
-
-            routed.append(
-                RoutedDelivery(
-                    person=person_id,
-                    slug=slug,
-                    outputs=usable,
-                    priority=priority,
-                    data=dict(payload),
-                )
+            delivery, refusals = _decide_for_person(
+                table,
+                target,
+                person_id,
+                context,
+                priority=priority,
+                bypass=bypass,
+                payload=payload,
             )
+            dropped.extend(refusals)
+            if delivery is not None:
+                routed.append(delivery)
 
         for person_id in table.persons:
             if person_id not in target.audience:

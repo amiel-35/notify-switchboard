@@ -302,6 +302,17 @@ carries a **time-to-live** (ADR-0019 §1), which is scoped per priority and per
 call but not per row. A household that wants "this row's messages are worth
 waking up for, that one's are not" has to say it through the priority.
 
+Two consequences of the resolution are worth recording next to it. The flush is
+now handed to a task of the config entry's own (`_async_schedule_flush`) rather
+than run inside the timer callback or the state write that triggered it: it
+calls `notify.*` services, re-runs the whole decision and writes the store, and
+scheduling it also gives the midnight counter reset and a flush that come due at
+the same instant a defined order. And a summary counts **one routed message per
+line**, not one per notification sent: a deferral that was counted in
+`sensor.switchboard_deferred_today` when it was queued has to reappear in
+`routed_today` or `dropped_today` at its flush, or the day's figures would stop
+adding up.
+
 ## 2026-09-07 — S3 — two repairs that cannot clear themselves
 
 Every repair this integration raises is deleted when its cause goes away, with
@@ -321,3 +332,32 @@ defining the missing `alert:` block and reloading clears it. This entry is kept
 as it is — the two older cases are unchanged — so that the distinction stays on
 the record: a repair this integration adds should be able to clear itself, and
 the two that cannot are the exception rather than the pattern.
+
+## 2026-09-07 — S5 — an episode left open across a real Home Assistant restart
+
+ADR-0019 §5 persists an open episode so that a restart in the middle of a leak
+does not widen the `done` message to people the alert never reached. What it
+cannot do is re-open the alert. Core's `AlertEntity.__init__`
+(`homeassistant/components/alert/entity.py`) starts with `_firing = False` and
+subscribes only to *future* changes of its watched entity — it never reads that
+entity's current state — so after a real restart the `alert.*` is `idle` even
+though the leak is still running. The router therefore sees no `on → idle`
+transition: the persisted open episode is never closed and lingers until that
+row's next `idle → on` opens a fresh one.
+
+Accepted, and recorded as amendment (d) of ADR-0019 §6. The stale record is
+harmless — the only thing it can do is narrow a `done` message that will not be
+sent — and the fix belongs to core rather than here. The config-entry reload
+that `test_s5_episode.py::test_the_episode_recipients_survive_a_reload`
+performs is not affected: the `alert.*` entity survives it, so a later
+`→ idle` still arrives. Planned resolution: an upstream issue asking
+`AlertEntity` to read its watched entity's state at `async_added_to_hass`.
+
+## 2026-09-07 — S5 — a flushed deferral can leave the day's figures short
+
+A deferral counted in `sensor.switchboard_deferred_today` whose person has left
+the row's audience overnight re-decides at the flush to `not_in_audience` — the
+one drop reason `UNCOUNTED_DROP_REASONS` deliberately does not count — and so
+leaves the queue without reappearing in `routed_today` or `dropped_today`,
+which is accepted rather than a defect because it is exactly what the live path
+already does with that decision.

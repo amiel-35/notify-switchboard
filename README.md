@@ -42,7 +42,13 @@ On a Companion output it adds an **Acknowledge** button (when the row is tied
 to an `alert.*` and allows it) and one **Snooze** button per configured
 duration. Acknowledging turns that alert off, and only an alert listed in the
 routing table. A message silenced during someone's night is not lost: it is
-queued and delivered at their wake time.
+queued and delivered at their wake time — as **one** summary rather than a
+burst, and only if it is still worth delivering (see "The night" below).
+
+Every outgoing message also carries a name of its own: `data.tag` defaults to
+`switchboard-<slug>`, so a repeat updates the notification instead of stacking
+a second one, and on the `persistent_notification` output the matching
+`data.notification_id` is added too. Your own `tag` always wins.
 
 ## Install
 
@@ -92,6 +98,66 @@ alert:
     notifiers:
       - switchboard_leak
 ```
+
+## The night
+
+A person with a **wake time** and a silence entity has a queue. Since 0.5.0
+that queue behaves like something a human wakes up to.
+
+- **Nothing waits for ever.** Each priority has a time to live, counted from
+  the moment the message was queued: 2 h for `info`, 12 h for `normal`, none
+  for `high`. A message whose time has run out is dropped with the reason
+  `expired` instead of announcing at 07:00 that the front door was open at
+  23:31. The **Time to live** step in the options changes the policy;
+  `data: {ttl_minutes: 30}` changes it for one call, and `ttl_minutes: 0`
+  means "keep this one whatever the policy says". A `critical` message is
+  never held back, so it never expires.
+- **One notification, not eleven.** More than one message surviving for the
+  same person becomes a single notification per output: a title carrying the
+  count, one line per message, and messages sharing a `tag` collapsed to the
+  most recent one. A digest carries no Acknowledge or Snooze button, because
+  it could only act on an arbitrary one of the messages it lists. Turn
+  **Summarise the night** off on a person to get them one by one instead.
+- **The decision is taken again, not remembered.** At the flush the router
+  re-runs the whole decision — audience, presence, snooze, silence — with the
+  message's original priority. Somebody who left the house under a `home_only`
+  row gets `presence`, somebody who snoozed the row at 02:00 gets `snoozed`,
+  and nothing is delivered blindly on the strength of a decision taken hours
+  earlier. Still silenced is the one outcome that keeps the message queued.
+- **The night ends when it ends.** When the last of a person's silence
+  entities turns `off` and no `notify_switchboard.silence` is running, their
+  queue goes out there and then. The wake time stays the upper bound: nothing
+  waits longer than it used to.
+
+## Closing the loop
+
+A leak that was fixed at 03:20 used to leave its 03:00 notification on every
+phone for ever, and to tell "back to normal" to the two people who slept
+through the whole thing.
+
+For every row tied to an `alert.*`, the router now remembers one **episode**:
+from the alert's `idle → on` to its return to `idle`, who was actually told,
+which notify services answered, and under which tag. It survives a restart.
+
+- The **back-to-normal message reaches only those people**; everybody else in
+  the audience is dropped with the reason `not_notified`. That applies to
+  observer mode's own message and to any call you mark yourself with
+  `data: {switchboard_done: true}` — the documented key for an `alert:` block
+  or a blueprint that sends its own.
+- When an observer row's episode ends, the notifications it sent are
+  **cleared**: a `clear_notification` push to each Companion service the
+  episode reached, and a `persistent_notification.dismiss` for the matching
+  id. The back-to-normal message keeps a tag of its own
+  (`switchboard-<slug>-done`) so it survives that clear; turn **Clear the
+  back-to-normal message** on for the row if you would rather it tidied itself
+  away too.
+- A clear is not a message: it is not counted, it fires no event, and no
+  routing rule applies to it.
+- A **summary counts as having told you**: if a night's digest carried a line
+  about the leak, you get the back-to-normal message and the digest is cleared
+  with the episode. One digest carries one tag for all its lines, so the first
+  of those alerts to end clears the whole digest — the price of one
+  notification instead of eleven.
 
 ## Services
 
@@ -148,6 +214,17 @@ Three optional fields per row, all empty by default:
 - **Default title** — the title used when the caller gives none, and for every
   message observer mode sends.
 
+## `data` keys a caller can set
+
+| Key | Meaning |
+|---|---|
+| `priority` | `info` / `normal` / `high` / `critical`; overrides the row's default. Only `critical` bypasses silence and snoozes. |
+| `source_entity` | The entity the message is about. Diagnostics and voice deny-lists read it. |
+| `tag` | De-duplicates a deferral and names the notification. Defaults to `switchboard-<slug>`. |
+| `ttl_minutes` | How long this message is still worth delivering once it has been held back. `0` means never expires. |
+| `switchboard_done` | Marks this call as the "back to normal" of the row's current episode, so it only reaches the people that episode reached. |
+| anything else | Merged over the row's default data, caller wins, and passed to the outputs untouched. |
+
 ## Translations
 
 The interface ships in English, French and Spanish — including the entity
@@ -177,11 +254,13 @@ deferral, observer mode, the diagnostic entities, the six services above, a
 temporary per-person silence, the per-row message texts, translated entity
 names, a parallel fan-out bounded by a per-output timeout, `person.user_id` as
 the canonical link for Companion callbacks, actions that exist whether or not
-the config entry is loaded, and — since 0.4.0 — discovered Companion outputs
-and Focus sensors, a managed `default` row, `notify_switchboard.explain`, two
-consistency repairs and a test message from the options menu.
+the config entry is loaded, discovered Companion outputs and Focus sensors, a
+managed `default` row, `notify_switchboard.explain`, two consistency repairs, a
+test message from the options menu, and — since 0.5.0 — a time to live on a
+deferral, one wake-time summary, a full re-decision at the flush, an early
+flush when the silence really ends, episodes and cleared notifications.
 
-Next: a real quiet-hours model (S5), escalation (S6) and places (S7).
+Next: escalation (S6) and places (S7).
 
 ## Documentation
 

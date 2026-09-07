@@ -17,7 +17,12 @@
     "detail_no_outputs": "No hay ningún servicio notify configurado para {person}, así que no hay adónde enviarlo.",
     "detail_not_in_audience": "{person} no está en la audiencia del destino {target}.",
     "detail_unknown_person": "El destino {target} nombra a {person}, que no está en la tabla de Notify Switchboard.",
-    "detail_recursion": "Todos los servicios notify configurados para {person} apuntan de vuelta a Notify Switchboard, lo que causaría una recursión."
+    "detail_recursion": "Todos los servicios notify configurados para {person} apuntan de vuelta a Notify Switchboard, lo que causaría una recursión.",
+    "summary_title": "{count} mensajes mientras no estabas",
+    "summary_line": "• {title} — {message}",
+    "summary_line_untitled": "• {message}",
+    "detail_expired": "Un mensaje en espera para {person} se descartaría en cuanto se agote su tiempo de vida.",
+    "detail_not_notified": "{person} no recibió nada durante el último episodio del destino {target}, así que el mensaje de vuelta a la normalidad no es para él."
   },
   "entity": {
     "binary_sensor": {
@@ -73,7 +78,8 @@
           "remove_target": "Eliminar un destino",
           "general": "Destino predeterminado",
           "test_person": "Probar una persona",
-          "test_target": "Probar un destino"
+          "test_target": "Probar un destino",
+          "ttl": "Tiempo de vida"
         }
       },
       "person": {
@@ -119,7 +125,8 @@
           "observer_mode": "Modo observador",
           "message": "Plantilla de mensaje",
           "done_message": "Plantilla de vuelta a la normalidad",
-          "default_title": "Título por defecto"
+          "default_title": "Título por defecto",
+          "clear_done": "Borrar el mensaje de vuelta a la normalidad"
         },
         "data_description": {
           "slug": "En minúsculas, sin espacios. Cambiarlo rompe todas las alertas que usan el servicio anterior.",
@@ -135,7 +142,8 @@
           "observer_mode": "Vigilar el estado de la alerta en lugar de esperar a ser llamado como notifier.",
           "message": "Plantilla opcional usada en modo observador cuando la alerta se dispara. El estado de la alerta está disponible como alert, por ejemplo {{ alert.attributes.level }}. Déjala vacía para enviar el nombre.",
           "done_message": "Plantilla opcional usada en modo observador cuando la alerta vuelve a reposo. Déjala vacía para enviar el texto traducido de vuelta a la normalidad.",
-          "default_title": "Título usado cuando quien llama no da ninguno, y para todos los mensajes que envía el modo observador."
+          "default_title": "Título usado cuando quien llama no da ninguno, y para todos los mensajes que envía el modo observador.",
+          "clear_done": "Quitar la notificación de vuelta a la normalidad de los teléfonos que la recibieron, una vez cerrado el episodio. Desactivado por defecto: suena y se queda."
         }
       },
       "edit_target": {
@@ -169,12 +177,14 @@
         "data": {
           "outputs": "Servicios notify",
           "silence_entities": "Entidades de silencio",
-          "wake_time": "Hora de despertar"
+          "wake_time": "Hora de despertar",
+          "summary": "Resumir la noche"
         },
         "data_description": {
           "outputs": "Elige entre los servicios notify de esta instancia o escribe uno que aún no exista: se tolera y se reintenta.",
           "silence_entities": "Cualquier entidad cuyo estado on signifique silencio: un schedule, un input_boolean, un sensor binario. Un sensor Focus de iPhone se propone automáticamente.",
-          "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse."
+          "wake_time": "Fin del silencio nocturno. Un mensaje descartado durante el silencio se entrega entonces en lugar de perderse.",
+          "summary": "Una sola notificación a la hora de despertar con todo lo retenido, en lugar de una por mensaje. Activado por defecto."
         }
       },
       "target_saved": {
@@ -204,6 +214,20 @@
       "test_result": {
         "title": "Resultado de la prueba",
         "description": "El mensaje se ha enviado. Esto es lo que el enrutador decidió para cada persona:\n\n{result}"
+      },
+      "ttl": {
+        "title": "Tiempo de vida",
+        "description": "Cuánto tiempo sigue mereciendo la pena entregar un mensaje retenido hasta la hora de despertar. Deja un campo vacío para que los mensajes de esa prioridad no caduquen nunca. Critical no aparece: nunca se retiene, así que nunca caduca.",
+        "data": {
+          "info": "Info",
+          "normal": "Normal",
+          "high": "Alta"
+        },
+        "data_description": {
+          "info": "Minutos que un mensaje info sigue siendo útil tras ser retenido. Por defecto: 120.",
+          "normal": "Minutos que un mensaje normal sigue siendo útil tras ser retenido. Por defecto: 720.",
+          "high": "Minutos que un mensaje de prioridad alta sigue siendo útil. Vacío por defecto: nunca caduca."
+        }
       }
     },
     "error": {

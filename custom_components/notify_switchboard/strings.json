@@ -17,7 +17,12 @@
     "detail_no_outputs": "No notify service is configured for {person}, so there is nowhere to send this.",
     "detail_not_in_audience": "{person} is not in the audience of the target {target}.",
     "detail_unknown_person": "The target {target} names {person}, who is not in the Notify Switchboard table.",
-    "detail_recursion": "Every notify service configured for {person} points back at Notify Switchboard, which would recurse."
+    "detail_recursion": "Every notify service configured for {person} points back at Notify Switchboard, which would recurse.",
+    "summary_title": "{count} messages while you were away",
+    "summary_line": "• {title} — {message}",
+    "summary_line_untitled": "• {message}",
+    "detail_expired": "A message queued for {person} would be dropped once its time to live has run out.",
+    "detail_not_notified": "{person} was told nothing during the last run of the target {target}, so the back-to-normal message is not for them."
   },
   "entity": {
     "binary_sensor": {
@@ -73,7 +78,8 @@
           "remove_target": "Remove a target",
           "general": "Default target",
           "test_person": "Test a person",
-          "test_target": "Test a target"
+          "test_target": "Test a target",
+          "ttl": "Time to live"
         }
       },
       "person": {
@@ -119,7 +125,8 @@
           "observer_mode": "Observer mode",
           "message": "Message template",
           "done_message": "Back-to-normal template",
-          "default_title": "Default title"
+          "default_title": "Default title",
+          "clear_done": "Clear the back-to-normal message"
         },
         "data_description": {
           "slug": "Lowercase, no spaces. Renaming it breaks every alert that lists the old service.",
@@ -135,7 +142,8 @@
           "observer_mode": "Watch the alert's state instead of waiting to be called as a notifier.",
           "message": "Optional template used in observer mode when the alert goes off. The alert's state is available as alert, for example {{ alert.attributes.level }}. Leave empty to send the name.",
           "done_message": "Optional template used in observer mode when the alert returns to idle. Leave empty to send the translated back-to-normal text.",
-          "default_title": "Title used when the caller gives none, and for every message observer mode sends."
+          "default_title": "Title used when the caller gives none, and for every message observer mode sends.",
+          "clear_done": "Remove the back-to-normal notification from the phones that received it, once the episode is closed. Off by default: it rings, then it stays."
         }
       },
       "edit_target": {
@@ -169,12 +177,14 @@
         "data": {
           "outputs": "Notify services",
           "silence_entities": "Silence entities",
-          "wake_time": "Wake time"
+          "wake_time": "Wake time",
+          "summary": "Summarise the night"
         },
         "data_description": {
           "outputs": "Pick from the notify services this instance has, or type one that does not exist yet: it is tolerated and retried.",
           "silence_entities": "Any entity whose state on means silent: a schedule, an input_boolean, a binary sensor. An iPhone Focus sensor is proposed automatically.",
-          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost."
+          "wake_time": "End of the night silence. A message dropped while silent is delivered then instead of being lost.",
+          "summary": "One notification at the wake time listing everything that was held back, instead of one notification per message. On by default."
         }
       },
       "target_saved": {
@@ -204,6 +214,20 @@
       "test_result": {
         "title": "Test result",
         "description": "The message has been sent. Here is what the router decided for each person:\n\n{result}"
+      },
+      "ttl": {
+        "title": "Time to live",
+        "description": "How long a message held for somebody's wake time is still worth delivering. Leave a field empty for messages of that priority never to expire. Critical is not listed: it is never held back, so it can never expire.",
+        "data": {
+          "info": "Info",
+          "normal": "Normal",
+          "high": "High"
+        },
+        "data_description": {
+          "info": "Minutes an info message stays worth delivering after it was held back. Default: 120.",
+          "normal": "Minutes a normal message stays worth delivering after it was held back. Default: 720.",
+          "high": "Minutes a high message stays worth delivering. Empty by default: it never expires."
+        }
       }
     },
     "error": {

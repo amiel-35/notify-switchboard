@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, time, timedelta
 from typing import Any
 from unittest.mock import patch
@@ -13,7 +15,7 @@ import homeassistant.helpers.issue_registry as ir
 import homeassistant.util.dt as dt_util
 import pytest
 from homeassistant.const import EVENT_HOMEASSISTANT_STOP
-from homeassistant.core import Context, HomeAssistant
+from homeassistant.core import Context, HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -22,7 +24,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.notify_switchboard import async_migrate_entry
-from custom_components.notify_switchboard.const import DOMAIN
+from custom_components.notify_switchboard.const import DOMAIN, STORAGE_KEY
 from custom_components.notify_switchboard.diagnostics import (
     _redact_options,
     async_get_config_entry_diagnostics,
@@ -33,7 +35,7 @@ from custom_components.notify_switchboard.dispatcher import (
     companion_service_name,
     next_wake_time,
 )
-from custom_components.notify_switchboard.store import DeferredMessage
+from custom_components.notify_switchboard.store import DeferredMessage, Episode
 
 
 def make_person(entity_id: str, outputs: list[str], **overrides: Any) -> dict:
@@ -347,7 +349,14 @@ async def test_observer_back_to_normal_uses_the_home_assistant_language(
     hass.states.async_set("alert.observed", "idle")  # no done_message attribute
     await hass.async_block_till_done()
 
-    assert [call.data["message"] for call in calls] == [
+    # The `→ idle` transition also pushes a `clear_notification` to the
+    # Companion output the episode reached (ADR-0019 §6, amendment (a)): it is
+    # not a message, so it is filtered out here.
+    assert [
+        call.data["message"]
+        for call in calls
+        if call.data["message"] != "clear_notification"
+    ] == [
         "Observed",
         "Tout est revenu à la normale",
     ]
@@ -618,9 +627,12 @@ async def test_a_deferral_stored_before_queued_at_existed_is_migrated(
         ("person.alice", "leak", "t")
     ]
     assert stored.queued_at == dt_util.utcnow()
-    # Re-saved at the current minor version: the same load also ran the
-    # minor 3 step, which only adds an empty `silences` list.
-    assert hass_storage["notify_switchboard.data"]["minor_version"] == 3
+    # Re-saved at the current minor version: the same load also ran the minor
+    # 3 step, which only adds an empty `silences` list, and the minor 4 step,
+    # which only adds an empty `episodes` list -- an upgrade must not invent
+    # an episode (ADR-0019 §5).
+    assert hass_storage["notify_switchboard.data"]["minor_version"] == 4
+    assert entry.runtime_data.switchboard.store.episodes == {}
     assert hass_storage["notify_switchboard.data"]["data"]["silences"] == []
 
 
@@ -1221,7 +1233,9 @@ async def test_a_delivery_that_raises_is_counted_as_a_failed_delivery(
     async def _boom(self, routed, message, title):
         if routed.person == "person.alice":
             raise RuntimeError("boom")
-        await original(self, routed, message, title)
+        # `_async_deliver` answers with the outputs it reached (v0.5,
+        # ADR-0019 §5), so the stand-in has to hand that answer back.
+        return await original(self, routed, message, title)
 
     with patch.object(Switchboard, "_async_deliver", _boom):
         await hass.services.async_call(
@@ -1472,8 +1486,14 @@ async def test_a_deferral_is_kept_when_the_person_is_still_silenced_at_wake_time
         [make_target("leak")],
         "leak",
     )
+    # `high` has no time-to-live (v0.5, ADR-0019 §1), so what this test
+    # observes two days later is the silence rule of ADR-0016 and not the
+    # 720 min a `normal` message would have run out of in between.
     await hass.services.async_call(
-        "notify", "switchboard_leak", {"message": "night"}, blocking=True
+        "notify",
+        "switchboard_leak",
+        {"message": "night", "data": {"priority": "high"}},
+        blocking=True,
     )
     await hass.async_block_till_done()
     assert len(entry.runtime_data.switchboard.store.deferrals) == 1
@@ -1982,3 +2002,536 @@ async def test_the_alert_grace_timer_is_cancelled_when_the_entry_unloads(
         for (domain, _issue_id), issue in ir.async_get(hass).issues.items()
         if domain == DOMAIN and issue.translation_key == "alert_entity_missing"
     ], "a cancelled grace check must not fire after the entry is gone"
+
+
+# ---------------------------------------------------------------------------
+# v0.5: episodes, the wake-time summary and the clears (ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+def test_an_episode_survives_a_round_trip_through_the_store() -> None:
+    """Sets are written as sorted lists and read back as sets."""
+    episode = Episode(
+        slug="leak",
+        persons={"person.bob", "person.alice"},
+        outputs={"persistent_notification", "mobile_app_alice"},
+        tags={"switchboard-leak"},
+        is_open=True,
+    )
+    raw = episode.as_dict()
+
+    assert raw == {
+        "slug": "leak",
+        "persons": ["person.alice", "person.bob"],
+        "outputs": ["mobile_app_alice", "persistent_notification"],
+        "tags": ["switchboard-leak"],
+        "open": True,
+    }
+    assert Episode.from_dict(raw) == episode
+
+
+def test_an_episode_row_without_a_slug_is_dropped() -> None:
+    """A hand-edited `.storage` file must not stop the entry from loading."""
+    assert Episode.from_dict({"persons": ["person.alice"]}) is None
+    assert Episode.from_dict({"slug": ""}) is None
+
+
+async def test_an_unusable_episode_row_is_skipped_at_load(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """The same tolerance the snoozes and the deferrals already have."""
+    hass_storage["notify_switchboard.data"] = {
+        "version": 1,
+        "minor_version": 4,
+        "key": "notify_switchboard.data",
+        "data": {
+            "snoozes": [],
+            "deferrals": [],
+            "silences": [],
+            "episodes": [{"persons": ["person.alice"]}, {"slug": "leak"}],
+        },
+    }
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+
+    assert list(entry.runtime_data.switchboard.store.episodes) == ["leak"]
+
+
+async def test_a_summary_whose_every_output_failed_is_a_drop_per_line(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A digest that reached nobody loses nothing: each line is accounted for.
+
+    The single-message path already turns "every output failed" into a
+    `delivery_failed` drop; a summary has to do the same once per line, or the
+    figures would say two messages went out when none did.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    async_mock_service(
+        hass, "notify", "mobile_app_alice", raise_exception=HomeAssistantError("nope")
+    )
+    hass.states.async_set("person.alice", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    await install(
+        hass,
+        [
+            make_person(
+                "person.alice",
+                ["mobile_app_alice"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("a"), make_target("b")],
+        "a",
+    )
+
+    for slug in ("a", "b"):
+        await hass.services.async_call(
+            "notify", f"switchboard_{slug}", {"message": slug}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.switchboard_routed_today").state == "0"
+    assert hass.states.get("sensor.switchboard_dropped_today").state == "2"
+
+
+async def test_a_summary_records_the_episodes_that_contributed_a_line(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A digest is a delivery, so §5 records it into the episodes it summarises.
+
+    ADR-0019 §6, amendment (b). Bob is silenced while the leak fires, so his
+    message is deferred; at his wake time it goes out as one of two lines of a
+    digest tagged `switchboard-summary`. He *was* told about the leak, so the
+    `done` message must reach him (the `not_notified` filter of §5 must not
+    drop him) and the digest's own tag must be among the tags cleared when the
+    episode closes.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    calls = async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+                summary=True,
+            )
+        ],
+        [
+            make_target(
+                "leak",
+                alert_entity="alert.leak",
+                observer_mode=True,
+                audience=["person.bob"],
+            ),
+            make_target("post", audience=["person.bob"]),
+        ],
+        "leak",
+    )
+
+    hass.states.async_set("alert.leak", "idle")
+    await hass.async_block_till_done()
+    hass.states.async_set("alert.leak", "on")  # opens the episode
+    await hass.async_block_till_done()
+    for slug in ("leak", "post"):
+        await hass.services.async_call(
+            "notify", f"switchboard_{slug}", {"message": slug}, blocking=True
+        )
+        await hass.async_block_till_done()
+    assert calls == [], "silenced: nothing left yet"
+
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert len(calls) == 1, "one digest, two lines"
+    assert calls[0].data["data"]["tag"] == "switchboard-summary"
+
+    hass.states.async_set("alert.leak", "idle")
+    await hass.async_block_till_done()
+
+    messages = [call.data["message"] for call in calls]
+    assert "clear_notification" in messages, (
+        "the summary's tag belongs to the episode, so it is cleared with it"
+    )
+    clears = [call for call in calls if call.data["message"] == "clear_notification"]
+    assert {call.data["data"]["tag"] for call in clears} == {"switchboard-summary"}
+    assert messages[1] != "clear_notification", (
+        "Bob was told about the leak by the digest, so the done message "
+        "reaches him before the clear"
+    )
+
+
+async def test_a_flush_pending_at_unload_neither_delivers_nor_re_arms(
+    hass: HomeAssistant, hass_storage: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Unloading does not cancel a pending flush -- the flush stands down.
+
+    `ConfigEntry.async_create_task` puts the task in `_tasks`, and
+    `_async_process_on_unload` (`homeassistant/config_entries.py`) *awaits*
+    those for up to ten seconds; only `_background_tasks` are cancelled. So a
+    flush scheduled a moment before the entry unloads runs after
+    `async_shutdown` has already detached every listener. It must not deliver
+    on a dead entry, and above all it must not re-arm a deferral timer that
+    `async_cancel_timers` can no longer cancel.
+    """
+    calls = async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak", audience=["person.bob"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "drip"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert calls == []
+
+    switchboard = entry.runtime_data.switchboard
+    # The early flush of §4 is scheduled synchronously by the state write, with
+    # `eager_start=False`: the task exists but has not run when unload starts.
+    hass.states.async_set("input_boolean.night", "off")
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert calls == [], "a dead entry delivers nothing"
+    assert switchboard._deferral_unsubs == {}, (
+        "re-arming here would leak a timer async_cancel_timers can never reach"
+    )
+    assert "Traceback" not in caplog.text
+
+    # The same flag guards the two schedulers, for the other case core creates:
+    # a flush that had *already begun* when the unload started, and that runs
+    # its tail -- the re-arm and, through it, another flush -- afterwards.
+    switchboard._async_schedule_deferral("person.bob")
+    switchboard._async_schedule_flush("person.bob")
+    await hass.async_block_till_done()
+    assert switchboard._deferral_unsubs == {}
+    assert calls == []
+
+
+async def test_a_flush_running_at_unload_saves_before_the_outputs_not_after(
+    hass: HomeAssistant, hass_storage: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A flush that outlives its entry writes the store *before* delivering.
+
+    `OUTPUT_TIMEOUT_SECONDS` is thirty seconds and `_async_process_on_unload`
+    (`homeassistant/config_entries.py`) gives an entry task ten: a flush stuck
+    on one hanging output outlives the unload that waited for it. Its tail then
+    runs on a released `Switchboard`, whose store a reloaded entry -- an
+    options edit during a slow flush -- may already have replaced over the same
+    file. `await self.store.async_save()` there writes a dead instance's state
+    over the live one.
+
+    The `_shutdown` flag covers the flush that has *not* begun and the re-arm;
+    it did not cover this tail. So the durable half of a flush -- the deferrals
+    leaving the queue -- is written as soon as they are popped, before the
+    first output is awaited, and the tail stands down like the two schedulers
+    already do.
+    """
+    began = asyncio.Event()
+    release = asyncio.Event()
+    delivered: list[ServiceCall] = []
+
+    async def _hanging_output(call: ServiceCall) -> None:
+        began.set()
+        await release.wait()
+        delivered.append(call)
+
+    hass.services.async_register("notify", "mobile_app_bob", _hanging_output)
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak", audience=["person.bob"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "drip"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert delivered == []
+
+    switchboard = entry.runtime_data.switchboard
+    assert switchboard.store.deferrals != {}
+
+    saves: list[None] = []
+    original_save = switchboard.store.async_save
+
+    async def _counting_save() -> None:
+        saves.append(None)
+        await original_save()
+
+    switchboard.store.async_save = _counting_save  # type: ignore[method-assign]
+
+    # The early flush of ADR-0019 §4 begins on the entry's own task, pops the
+    # queue, and hangs on the output.
+    hass.states.async_set("input_boolean.night", "off")
+    async with asyncio.timeout(5):
+        await began.wait()
+
+    assert switchboard.store.deferrals == {}, "the flush has taken the queue"
+    assert len(saves) == 1, (
+        "the deferrals left the queue before the first output was awaited, so "
+        "the store has to be written there -- not only after a delivery that "
+        "may outlive the entry"
+    )
+    assert hass_storage[STORAGE_KEY]["data"]["deferrals"] == [], (
+        "the file still queues a message this flush has already taken"
+    )
+
+    # Unload while the output hangs, then let it answer: the tail runs with
+    # `_shutdown` set, which is exactly the window core leaves open.
+    unloading = hass.async_create_task(hass.config_entries.async_unload(entry.entry_id))
+    async with asyncio.timeout(5):
+        while not switchboard._shutdown:
+            await asyncio.sleep(0)
+
+    saves.clear()
+    release.set()
+    assert await unloading
+    await hass.async_block_till_done()
+
+    assert delivered != [], "the output did answer; this is the tail, not a timeout"
+    assert saves == [], (
+        "the tail of a flush that outlived its entry must not write the store: "
+        "a reloaded entry may already own the file"
+    )
+    assert switchboard._deferral_unsubs == {}
+    assert [
+        record for record in caplog.records if record.levelno >= logging.ERROR
+    ] == []
+    assert "Traceback" not in caplog.text
+
+
+async def test_a_flush_writes_its_outcomes_to_the_decision_log(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A flush is a decision, so it shows up in the diagnostics like one.
+
+    A message queued at 23:30 and delivered at 07:00 was decided twice: once
+    when it was deferred, once when it was flushed. Only the first used to
+    reach `decision_log`, so the dump a household reads to answer "why did
+    this arrive / why did it not" stopped at the moment the night began.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak", audience=["person.bob"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "drip"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    switchboard = entry.runtime_data.switchboard
+    assert len(switchboard.decision_log) == 1, "the deferral itself"
+
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert len(switchboard.decision_log) == 2
+    flushed = switchboard.decision_log[-1]
+    assert flushed["targets"] == ["leak"]
+    assert flushed["message"] == "drip"
+    assert flushed["routed"] == [{"person": "person.bob", "slug": "leak"}]
+    assert flushed["dropped"] == []
+    assert flushed["flush"] is True
+
+
+async def test_a_flush_logs_and_counts_a_recursion_refusal_beside_a_delivery(
+    hass: HomeAssistant, hass_storage: dict, freezer: Any
+) -> None:
+    """A person can be routed *and* refused, and the flush must say so.
+
+    `route_person` returns a `recursion` refusal alongside the usable outputs
+    when one of a person's outputs is a `notify.switchboard*` service. The live
+    path counts both; the flush used to return on the first routed item and
+    throw the refusal away, so a loop configured into the table was invisible
+    exactly on the path that runs while nobody is watching.
+    """
+    await hass.config.async_set_time_zone("Europe/Paris")
+    freezer.move_to(datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC))  # 23:30 Paris
+
+    async_mock_service(hass, "notify", "mobile_app_bob")
+    hass.states.async_set("person.bob", "home")
+    hass.states.async_set("input_boolean.night", "on")
+    entry = await install(
+        hass,
+        [
+            make_person(
+                "person.bob",
+                ["mobile_app_bob", "switchboard_leak"],
+                silence_entities=["input_boolean.night"],
+                wake_time="07:00:00",
+            )
+        ],
+        [make_target("leak", audience=["person.bob"])],
+        "leak",
+    )
+    await hass.services.async_call(
+        "notify", "switchboard_leak", {"message": "drip"}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    switchboard = entry.runtime_data.switchboard
+    before = switchboard.drop_reasons.get("recursion", 0)
+
+    freezer.move_to(datetime(2026, 9, 11, 5, 5, tzinfo=dt_util.UTC))  # 07:05 Paris
+    hass.states.async_set("input_boolean.night", "off")
+    async_fire_time_changed(hass, dt_util.utcnow())
+    await hass.async_block_till_done()
+
+    assert switchboard.drop_reasons.get("recursion", 0) == before + 1
+    flushed = switchboard.decision_log[-1]
+    assert flushed["routed"] == [{"person": "person.bob", "slug": "leak"}]
+    assert flushed["dropped"] == [
+        {"person": "person.bob", "slug": "leak", "reason": "recursion"}
+    ]
+    assert hass.states.get("sensor.switchboard_routed_today").state == "1"
+
+
+async def test_a_failing_clear_is_logged_and_swallowed(
+    hass: HomeAssistant, hass_storage: dict, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Failing to tidy up is never worth raising at whoever ended the alert."""
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    # Nothing registered: the clear is a no-op, not an error.
+    await switchboard._async_clear_notification("mobile_app_alice", "switchboard-leak")
+    assert "not registered" in caplog.text
+
+    async_mock_service(
+        hass, "notify", "mobile_app_alice", raise_exception=HomeAssistantError("gone")
+    )
+    await switchboard._async_clear_notification("mobile_app_alice", "switchboard-leak")
+    assert "Could not clear" in caplog.text
+
+
+async def test_the_clear_does_not_depend_on_what_backs_the_alert_state(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """Any observer row with an `alert_entity` is tidied up after.
+
+    ADR-0019 §6, amendment (a): the closing sequence is narrowed to observer
+    mode and to nothing else. In particular it does not ask what wrote the
+    `alert.*` state -- the `alert` integration, a template, or, here, a test.
+    The router observed that state and notified on the strength of it; refusing
+    to tidy up on the same evidence would be incoherent.
+    """
+    calls = async_mock_service(hass, "notify", "mobile_app_alice")
+    hass.states.async_set("person.alice", "home")
+    await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("observed", alert_entity="alert.observed", observer_mode=True)],
+        "observed",
+    )
+    assert "alert" not in hass.config.components, (
+        "the point of this test: the state below is synthetic"
+    )
+
+    hass.states.async_set("alert.observed", "idle")
+    await hass.async_block_till_done()
+    hass.states.async_set("alert.observed", "on")
+    await hass.async_block_till_done()
+    hass.states.async_set("alert.observed", "idle")
+    await hass.async_block_till_done()
+
+    clears = [call for call in calls if call.data["message"] == "clear_notification"]
+    assert len(clears) == 1
+    assert clears[0].data["data"]["tag"] == "switchboard-observed"
+
+
+async def test_a_deferral_whose_person_left_the_table_is_dropped_not_delivered(
+    hass: HomeAssistant, hass_storage: dict
+) -> None:
+    """The re-decision's last resort: nobody claims this message any more.
+
+    `_redecide` reads the outcome `router.decide` produced for this person. A
+    person the table no longer knows appears in neither list, so the message is
+    dropped rather than delivered on the strength of a decision made hours ago.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"])],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+    deferral = DeferredMessage(
+        person="person.mallory",
+        slug="leak",
+        tag="switchboard-leak",
+        message="orphan",
+    )
+
+    routed, reason, refusals = switchboard._redecide(
+        deferral, "person.mallory", switchboard.build_context()
+    )
+
+    assert routed is None
+    assert reason is None
+    assert refusals == ()

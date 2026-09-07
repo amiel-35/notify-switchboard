@@ -1,4 +1,4 @@
-# Quality scale self-assessment for Notify Switchboard (router 0.4.0).
+# Quality scale self-assessment for Notify Switchboard (router 0.5.0).
 #
 # Every rule of every tier is assessed: `done`, `todo` with a one-line reason,
 # or `exempt` with a one-line reason. Nothing is left "not assessed yet"
@@ -74,8 +74,10 @@ rules:
   docs-configuration-parameters:
     status: done
     comment: >-
-      Every options-flow field carries a data_description in strings.json;
-      README.md "Configuration" and docs/quickstart.md walk through them.
+      Every options-flow field carries a data_description in strings.json --
+      the three v0.5 ones (ttl_minutes, summary, clear_done) included;
+      README.md "Configuration", "The night" and "Closing the loop", and
+      docs/quickstart.md, walk through them.
   docs-installation-parameters:
     status: done
     comment: Setup takes no input; README.md "Install" says so and links the quickstart.
@@ -102,9 +104,10 @@ rules:
     comment: >-
       99% overall and at or above the 95% bar on every module, with an
       acceptance suite that is written before the code and never modified to
-      make it pass. The routing modules (router, validation) and most of the
-      rest are at 100%; the lowest is legacy.py at 97%, with config_flow.py and
-      dispatcher.py at 99% after the Sprint 4 additions.
+      make it pass. router.py, store.py, validation.py, const.py and most of
+      the rest are at 100% after the Sprint 5 additions; the lowest is
+      legacy.py at 97%, with config_flow.py and dispatcher.py at 99%. The
+      whole suite -- acceptance and unit -- is green.
 
   # -------------------------------------------------------------------- Gold
   devices:
@@ -199,13 +202,15 @@ rules:
       person_without_user_id, and the v0.4 person_without_outputs and
       alert_entity_missing), each deleted when its cause is gone -- the two
       that cannot know their own cause is gone are listed in
-      docs/known-issues.md.
+      docs/known-issues.md. v0.5 adds no repair: its two new drop reasons are
+      routing outcomes, not configuration gaps.
   stale-devices:
     status: todo
     comment: >-
       Removing a person from the routing table still leaves their virtual
-      device in the registry. Router S4 was scoped to discovery, defaults and
-      diagnosis and did not take it up; it stays open for a later sprint.
+      device in the registry. Neither Router S4 (discovery, defaults and
+      diagnosis) nor Router S5 (the night and closing the loop) was scoped to
+      take it up; it stays open for a later sprint.
 
   # ---------------------------------------------------------------- Platinum
   async-dependency:

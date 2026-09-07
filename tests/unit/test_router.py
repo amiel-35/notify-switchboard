@@ -9,6 +9,7 @@ import pytest
 from custom_components.notify_switchboard.const import (
     DROP_NO_OUTPUTS,
     DROP_NOT_IN_AUDIENCE,
+    DROP_NOT_NOTIFIED,
     DROP_PRESENCE,
     DROP_RECURSION,
     DROP_SILENCED,
@@ -31,7 +32,11 @@ from custom_components.notify_switchboard.router import (
     acknowledge_action,
     build_actions,
     build_routing_table,
+    collapse_by_tag,
     decide,
+    default_tag,
+    effective_tag,
+    is_done_message,
     is_recursive_output,
     merge_data,
     parse_action,
@@ -40,10 +45,12 @@ from custom_components.notify_switchboard.router import (
     parse_wake_time,
     presence_allows,
     resolve_priority,
+    resolve_ttl,
     snooze_action,
     snooze_is_active,
     split_outputs,
     state_is_on,
+    summary_data,
 )
 
 NOW = datetime(2026, 9, 6, 12, 0, tzinfo=UTC)
@@ -602,3 +609,155 @@ def test_action_ids_round_trip() -> None:
 def test_parse_action_rejects_anything_else(raw) -> None:
     """Forged or malformed action ids are ignored."""
     assert parse_action(raw) is None
+
+
+# ---------------------------------------------------------------------------
+# v0.5 primitives (contract v0.5, ADR-0019)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("priority", "data", "mapping", "expected"),
+    [
+        # The documented per-priority defaults, with no mapping at all.
+        (PRIORITY_INFO, {}, None, timedelta(minutes=120)),
+        (PRIORITY_NORMAL, {}, None, timedelta(minutes=720)),
+        (PRIORITY_HIGH, {}, None, None),
+        # `critical` has no entry and can be given none: never deferred, so
+        # never expired.
+        (PRIORITY_CRITICAL, {}, None, None),
+        # A mapping overrides the default for the priorities it names...
+        (PRIORITY_HIGH, {}, {"high": 5}, timedelta(minutes=5)),
+        # ...an explicit null means "never"...
+        (PRIORITY_INFO, {}, {"info": None}, None),
+        # ...a `0` in the mapping is read as null (it would mean "expired
+        # before it was queued")...
+        (PRIORITY_INFO, {}, {"info": 0}, None),
+        # ...and a priority the mapping does not name keeps its default.
+        (PRIORITY_INFO, {}, {"normal": 5}, timedelta(minutes=120)),
+        # The per-call key wins over both, in both directions.
+        (PRIORITY_HIGH, {"ttl_minutes": 5}, {"high": None}, timedelta(minutes=5)),
+        (PRIORITY_INFO, {"ttl_minutes": 0}, None, None),
+        # A value that is not a duration is a configuration mistake, not a
+        # promise: the mapping and then the default answer instead.
+        (PRIORITY_INFO, {"ttl_minutes": "soon"}, None, timedelta(minutes=120)),
+        (PRIORITY_INFO, {"ttl_minutes": True}, None, timedelta(minutes=120)),
+        (PRIORITY_INFO, {}, {"info": "soon"}, None),
+    ],
+)
+def test_resolve_ttl(priority, data, mapping, expected) -> None:
+    """`data.ttl_minutes`, then the option, then the documented default."""
+    assert resolve_ttl(priority, data, mapping) == expected
+
+
+def test_default_and_effective_tags() -> None:
+    """Every message gets a name; a caller's own always wins."""
+    assert default_tag("leak") == "switchboard-leak"
+    assert default_tag("leak", done=True) == "switchboard-leak-done"
+    assert effective_tag("leak", {}) == "switchboard-leak"
+    assert effective_tag("leak", {"switchboard_done": True}) == "switchboard-leak-done"
+    assert effective_tag("leak", {"tag": "mine"}) == "mine"
+    # An empty tag is not a name, so the default still fills the gap.
+    assert effective_tag("leak", {"tag": ""}) == "switchboard-leak"
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({}, False),
+        ({"switchboard_done": False}, False),
+        ({"switchboard_done": True}, True),
+    ],
+)
+def test_is_done_message(data, expected) -> None:
+    """`data.switchboard_done` is the public marker, and nothing else is."""
+    assert is_done_message(data) is expected
+    assert NotificationRequest(message="m", data=dict(data)).is_done is expected
+
+
+def test_collapse_by_tag_keeps_the_last_of_each_tag_in_place() -> None:
+    """A collapsed group is represented by its newest member, at its position."""
+    items = [("x", "first"), ("y", "second"), ("x", "third"), ("z", "fourth")]
+    assert collapse_by_tag(items) == ["second", "third", "fourth"]
+
+
+def test_summary_data_is_built_not_merged() -> None:
+    """Only the switchboard's own keys survive into a digest."""
+    assert summary_data(
+        [
+            {"tag": "x", "channel": "family", "actions": [{"action": "a"}]},
+            {"switchboard_done": True, "priority": "high"},
+            {"switchboard_done": False},
+        ]
+    ) == {"tag": "switchboard-summary", "switchboard_done": False}
+
+
+def test_a_done_message_reaches_only_the_episodes_recipients() -> None:
+    """`not_notified` is decided before the rest of the routing decision."""
+    table = RoutingTable(
+        persons={
+            "person.alice": PersonConfig("person.alice", ("mobile_app_alice",)),
+            "person.bob": PersonConfig("person.bob", ("mobile_app_bob",)),
+        },
+        targets={
+            "leak": TargetConfig(
+                slug="leak",
+                name="Leak",
+                alert_entity="alert.leak",
+                audience=("person.alice", "person.bob"),
+            )
+        },
+        default_target="leak",
+    )
+    context = RoutingContext(
+        now=datetime(2026, 9, 7, tzinfo=UTC),
+        person_states={"person.alice": "home", "person.bob": "home"},
+        episode_recipients={"leak": frozenset({"person.alice"})},
+    )
+    request = NotificationRequest(
+        message="All good", targets=("leak",), data={"switchboard_done": True}
+    )
+
+    decision = decide(table, request, context)
+
+    assert [item.person for item in decision.routed] == ["person.alice"]
+    assert ("person.bob", DROP_NOT_NOTIFIED) in [
+        (drop.person, drop.reason) for drop in decision.dropped
+    ]
+
+
+def test_an_ordinary_message_ignores_the_episode() -> None:
+    """Only a `done` message is filtered by who the episode reached."""
+    table = RoutingTable(
+        persons={"person.bob": PersonConfig("person.bob", ("mobile_app_bob",))},
+        targets={
+            "leak": TargetConfig(
+                slug="leak",
+                name="Leak",
+                alert_entity="alert.leak",
+                audience=("person.bob",),
+            )
+        },
+        default_target="leak",
+    )
+    context = RoutingContext(
+        now=datetime(2026, 9, 7, tzinfo=UTC),
+        person_states={"person.bob": "home"},
+        episode_recipients={"leak": frozenset()},
+    )
+
+    decision = decide(
+        table, NotificationRequest(message="Leak!", targets=("leak",)), context
+    )
+
+    assert [item.person for item in decision.routed] == ["person.bob"]
+
+
+def test_the_v05_person_and_row_keys_default_to_their_absent_meaning() -> None:
+    """`summary` absent means on; `clear_done` absent means off."""
+    assert parse_person({"entity_id": "person.alice"}).summary is True
+    assert (
+        parse_person({"entity_id": "person.alice", "summary": False}).summary is False
+    )
+    assert parse_target({"slug": "leak"}).clear_done is False
+    assert parse_target({"slug": "leak", "clear_done": True}).clear_done is True

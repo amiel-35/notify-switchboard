@@ -82,18 +82,9 @@ Decisions taken in Sprint 1, where the contract left room:
   `recursion` drop is recorded alongside.
 - **A silenced message with a `wake_time` is deferred, not dropped**, and is
   therefore not counted as a drop. Deferrals are de-duplicated on
-  `(person, target, tag)`; an untagged message de-duplicates on
-  `(person, target)`.
-- **Deferred deliveries re-check the silence, and nothing else.** `wake_time`
-  is a *prediction* that the night is over, not a promise: a schedule that runs
-  late, a `notify_switchboard.silence` set in the small hours or a restart
-  spanning the night would otherwise push the whole queue at somebody still
-  asleep. So `_async_flush_deferrals` re-reads `is_person_silenced` and keeps a
-  still-silenced message queued, re-arming for whichever comes first, the end of
-  the temporary silence or the next wake time (`_async_rearm_deferral`).
-  `critical` is delivered regardless, as it is everywhere else. The rest of the
-  decision — audience, presence, snooze — is **not** re-run: the queued message
-  goes straight to the person's outputs. See `docs/known-issues.md`.
+  `(person, target, tag)`; since 0.5.0 the `tag` half is always populated (the
+  row's default `switchboard-<slug>` when the caller supplies none), so an
+  untagged message still de-duplicates on `(person, target)` in practice.
 - **The next wake time is built from a date, never by adding 24 hours** to an
   aware datetime, so a message queued the night of a DST change fires at the
   right local hour (`dispatcher.next_wake_time`).
@@ -103,6 +94,103 @@ Decisions taken in Sprint 1, where the contract left room:
   `next_wake_time(queued_at, wake_time)` with `dt_util.now()` and flushes what
   is already late, instead of rescheduling it for the following day. The
   `(person, target, tag)` key still de-duplicates, so nothing is sent twice.
+
+### The deferral lifecycle (v0.5, ADR-0019)
+
+A deferral is a promise that a message is *late*, not that it is eternal, and
+not that the decision that queued it is still true. From 0.5.0 the queue has
+**three** entry points into a flush and four possible outcomes per message.
+Two of them -- the wake-time timer and the early flush of §4 -- reach it
+through `_async_schedule_flush` and therefore share one config-entry task; the
+third, the catch-up of overdue deferrals at setup, calls the flush inline.
+
+```
+                 silenced + wake_time
+inbound message ─────────────────────► queued  (deferred_today +1)
+                                         │
+              wake_time timer  ──────────┤
+              last silence entity off ───┤   (early flush, §4)
+              overdue at setup ──────────┘   (catch-up, inline)
+                                         │
+                        ┌────────────────┴────────────────┐
+                        │ 1. time-to-live (§1)            │
+                        │    queued_at + ttl <= now ?     │
+                        └────────────────┬────────────────┘
+                          yes │          │ no
+                     ┌────────▼───┐      │
+                     │  expired   │      │
+                     │  (dropped) │      │
+                     └────────────┘      │
+                        ┌────────────────▼────────────────┐
+                        │ 2. the whole decision again (§3)│
+                        │    router.decide, fresh context,│
+                        │    the message's own priority   │
+                        └────────────────┬────────────────┘
+              silenced │      routed │             │ any other reason
+          ┌────────────▼──┐  ┌───────▼──────┐  ┌───▼──────────────┐
+          │ kept + re-arm │  │  survivor    │  │ dropped for real │
+          └───────────────┘  └───────┬──────┘  │ (presence,       │
+                                     │         │  snoozed, ...)   │
+                        ┌────────────▼───────┐ └──────────────────┘
+                        │ 3. one or many (§2)│
+                        └────────────┬───────┘
+                     1 survivor,     │      2+ survivors and
+                     or summary off  │      summary on
+                        ┌────────────▼──┐   ┌──────────────────────┐
+                        │ delivered as  │   │ one summary per      │
+                        │ 0.4.0 did     │   │ output, tags collapsed│
+                        └───────────────┘   └──────────────────────┘
+```
+
+- **Both entry points go through one task.** `_async_schedule_flush` hands the
+  flush to a task of the config entry's own, so it never runs inside the timer
+  sweep or the state write that triggered it. Unloading the entry **waits** for
+  that task rather than cancelling it — `_async_process_on_unload`
+  (`homeassistant/config_entries.py`) cancels only `_background_tasks` and
+  gives `_tasks` ten seconds — which is what a flush wants, since it pops
+  deferrals from the store before delivering and saves once at the end. A
+  flush that has not begun by then stands down on the `_shutdown` flag
+  `async_shutdown` sets, and nothing re-arms a deferral timer past that point.
+- **The time-to-live is read at the flush**, from the deferral's stored
+  priority and stored `data` (`router.resolve_ttl`), never frozen at queue
+  time: `entry.options["ttl_minutes"]` is a household policy, so shortening
+  `info` at 02:00 means it for what is already waiting. `critical` is never
+  deferred, so it can never expire.
+- **A flush writes to `decision_log` like an inbound call.** A deferred
+  message is decided twice — once when it is queued, once when it is flushed —
+  and only the first used to reach the diagnostics, so `last_decisions` went
+  quiet over exactly the window it exists to explain. Each re-decided message
+  gets its own entry now, in `_async_apply`'s shape plus `flush: true`; a
+  message still held by the silence appears there too. And `_redecide` carries
+  back the refusals that come *beside* a delivery — `router.route_person`
+  returns a `recursion` drop alongside the usable outputs — so a loop
+  configured into the table is counted at the flush exactly as it is live,
+  instead of being lost when the first routed item returns.
+- **`silenced` is the one re-decision outcome that holds a message.** The
+  night is not over, which is the whole point of a deferral; the flush is
+  re-armed for whichever comes first, the end of a temporary silence or the
+  next wake time. Every other drop is real, carries the reason that says why,
+  and removes the message from the store.
+- **The summary is built, not merged**: `tag: switchboard-summary`, the union
+  of the `switchboard_*` keys of the collapsed survivors, and nothing else —
+  no caller key, no row `default_data`, and no Companion buttons, which on a
+  digest of three alerts could only act on an arbitrary one of them. Each
+  **line** counts as one routed message and fires one `routed` event, so the
+  daily figures still add up to what was queued.
+- **A digest is a delivery, so it is recorded into the episodes it
+  summarises** (ADR-0019 §6, amendment (b)): each kept line writes the person,
+  the outputs that answered and the tag `switchboard-summary` into its row's
+  open episode. Without it the person a digest woke would be filtered out of
+  the `done` message by the `not_notified` rule, and the digest would stay on
+  their phone after the alert ended.
+
+  The side effect is literal and deliberate: a digest carries **one** tag for
+  the several rows it collapses, so the first of those episodes to close
+  clears `switchboard-summary` and the whole digest goes with it — including
+  its lines about alerts that are still running. The alternative — one tag per
+  line — would need one notification per line, which is exactly what the
+  summary exists to avoid. The reading is the ADR's, not an accident: §5
+  records "the tag actually delivered", and a digest delivered exactly one.
 - **Snooze resolves the acting person from `context.user_id` first.** The
   Companion webhook re-fires the action event with the registration's own
   context (`homeassistant/components/mobile_app/webhook.py`,
@@ -224,6 +312,58 @@ quiet. When a configured night silence is also active, the message is deferred
 as before — nothing is lost. A temporary silence still running when that
 deferral comes due holds it back (both sources are read at flush time), and the
 flush is then re-armed for the end of the silence.
+
+### Episodes, and closing the loop (v0.5, ADR-0019 §5 and §6)
+
+An **episode** is one run of a row's `alert_entity`: it opens on that entity's
+`idle → on` transition and closes on its `→ idle` one. Episodes exist for
+every row that names an `alert_entity`, in observer mode or not, so the router
+subscribes to *every row's* alert rather than only to the observed ones.
+
+While an episode is open, each successful delivery records the person, the
+`notify.*` outputs that answered and the message's effective `data.tag`. The
+record is closed — not deleted — when the alert returns to `idle`, and reset
+when that row's **next** episode opens: a `done` message is by definition sent
+after the alert is already back to `idle`, so the recipients have to outlive
+the episode's end. Everything is persisted with the snoozes, the deferrals and
+the temporary silences (store minor version 4).
+
+A `done` message — observer mode's `on|off → idle` message, or any call
+carrying `data.switchboard_done: true` — reaches only the persons in that set;
+everybody else in the audience is dropped with `not_notified`, before the rest
+of the decision runs. A row with no `alert_entity` has no episodes at all, so
+that key routes to the whole audience there, exactly like any other message.
+
+**Every outgoing message carries a name.** `data.tag` defaults to
+`switchboard-<slug>`, `switchboard-<slug>-done` for a `done` message and
+`switchboard-summary` for a digest; a caller's own always wins.
+`data.notification_id` mirrors the effective tag and is added for the bare
+`persistent_notification` output only — the one core documents as reading it
+(`homeassistant/components/notify/__init__.py`, the `persistent_notification`
+service handler). The `done` message deliberately does **not** share the
+episode's tag: `clear_done` defaults to off, and a message carrying
+`switchboard-<slug>` could not be kept on the phone while the episode's own
+notifications are cleared.
+
+When an **observer** row's episode ends, in this order: the `done` message is
+routed (filtered as above); every `mobile_app_*` output the episode reached is
+called with `message: clear_notification` and the episode's tag
+(`homeassistant/components/mobile_app/const.py`, `CLEAR_NOTIFICATION` — core
+forwards the payload to the push relay and the Companion app is what removes
+the notification); `persistent_notification.dismiss` is called for the
+matching id when that output was reached; and, if the row carries
+`clear_done: true`, the `done` message is cleared the same way on the outputs
+that received it.
+
+**A clear is not a message.** It is not counted, it fires no
+`event.switchboard_delivery`, it is subject to no presence, silence, snooze or
+deferral rule, and it never creates a deferral of its own. It is bounded by
+the same `OUTPUT_TIMEOUT_SECONDS` as any other output call and a failure is
+logged and swallowed. Observer mode is the only narrowing (ADR-0019 §6,
+amendment (a)): the clear does not ask what backs the `alert.*` state, so a
+state written into the `alert` domain by a template, a script or a test is
+tidied up after exactly like one the `alert` integration owns — the router
+observed it and notified on the strength of it either way.
 
 ### Per-row texts and the template context
 
@@ -367,14 +507,17 @@ switchboard schedules is cancelled both on unload and on
 
 ## Persistence
 
-One `Store` (`notify_switchboard.data`, version 1, minor version 3) holds the
-snoozes (`(person, target) -> expiry`, expired lazily), the night deferrals and
-the temporary silences (`person -> until`, expired lazily too). Minor version 2
+One `Store` (`notify_switchboard.data`, version 1, minor version 4) holds the
+snoozes (`(person, target) -> expiry`, expired lazily), the night deferrals,
+the temporary silences (`person -> until`, expired lazily too) and the episodes
+(one per row that has an `alert_entity`). Minor version 2
 added `queued_at` to every deferral; the migration lives in
 `store.SwitchboardStorage._async_migrate_func` and stamps the existing rows
 with the migration time, so an upgrade never fires a backlog. Minor version 3
 added the `silences` list, which starts empty: an upgrade never invents a
-silence. Any row that will not parse is dropped rather than fatal — a
+silence. Minor version 4 added the `episodes` list, empty for the same reason —
+a restart in the middle of a leak must not turn "back to normal" into a message
+for people who slept through it. Any row that will not parse is dropped rather than fatal — a
 hand-edited `.storage` file must not stop the entry from loading. The recorder
 database is never touched.
 
@@ -413,7 +556,7 @@ is this release, and the two S7 rows have nothing to do with each other.
 | Router S0-S2 | Foundations, the router itself, the UI services and the per-row texts | Shipped (0.1.0, 0.2.0) |
 | Router S3 | Debts and robustness: translated entity names with frozen ids, parallel fan-out with a per-output timeout, `person.user_id` as the canonical callback link, actions registered in `async_setup` (ADR-0017) | Shipped (0.3.0) |
 | Router S4 | Zero-config and explainability: Companion outputs and Focus sensors discovered from the `mobile_app` entries, a managed `default` row, `notify_switchboard.explain`, consistency repairs, a test message from the options menu (ADR-0018) | **Done — 0.4.0** |
-| Router S5 | Night: turn `wake_time` into a real quiet-hours model (per-person windows, a digest of what was deferred) rather than a single instant | Planned |
+| Router S5 | Night: time-to-live on a deferral, one wake-time summary, a full re-decision at the flush, an early flush when the silence really ends, episodes and cleared notifications (ADR-0019) | Done (0.5.0) |
 | Router S6 | Escalation: what happens when nobody acknowledges — a second person, a louder output, a delay per row | Planned |
 | Router S7 | Places: route on where somebody is, not only on whether they are home | Planned |
 
