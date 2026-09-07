@@ -1358,6 +1358,7 @@ async def test_a_critical_deferral_is_delivered_even_if_the_silence_holds(
 
 async def test_stopping_home_assistant_detaches_every_listener(
     hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Regression: a config entry is not unloaded when Home Assistant stops.
 
@@ -1367,6 +1368,15 @@ async def test_stopping_home_assistant_detaches_every_listener(
     that is about to go away. Under load that surfaced as an intermittent
     "Lingering timer after test ... Switchboard._async_reset_counters" in the
     config-flow tests, whose options steps reload the entry.
+
+    Second regression, on the same path: the `async_listen_once` unsub must
+    not be detached twice. Core's `_OneTimeListener.__call__`
+    (`homeassistant/core.py`, lines 1470-1478) removes the listener before it
+    runs the callback, so a `_stop_unsub` still held in `_unsubs` is called a
+    second time by `async_shutdown` and `EventBus._async_remove_listener`
+    (`homeassistant/core.py`, lines 1823-1843) logs "Unable to remove unknown
+    job listener" with a `ValueError` traceback -- an ERROR on *every* real
+    Home Assistant shutdown.
     """
     entry = await install(
         hass,
@@ -1377,12 +1387,44 @@ async def test_stopping_home_assistant_detaches_every_listener(
     switchboard = entry.runtime_data.switchboard
     assert switchboard._unsubs
 
+    caplog.clear()
     hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
     await hass.async_block_till_done()
 
+    assert "Unable to remove unknown job listener" not in caplog.text
     assert switchboard._unsubs == []
     assert switchboard._deferral_unsubs == {}
     assert switchboard._silence_unsubs == {}
+    assert switchboard._stop_unsub is None
+
+
+async def test_unloading_the_entry_detaches_the_stop_listener_once(
+    hass: HomeAssistant,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other order: unload first, then shut Home Assistant down.
+
+    `async_shutdown` runs on the unload path, so it is the one that has to
+    detach the stop listener; firing `EVENT_HOMEASSISTANT_STOP` afterwards
+    must then reach nothing at all.
+    """
+    entry = await install(
+        hass,
+        [make_person("person.alice", ["mobile_app_alice"], wake_time="07:00:00")],
+        [make_target("leak")],
+        "leak",
+    )
+    switchboard = entry.runtime_data.switchboard
+
+    caplog.clear()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    hass.bus.async_fire(EVENT_HOMEASSISTANT_STOP)
+    await hass.async_block_till_done()
+
+    assert "Unable to remove unknown job listener" not in caplog.text
+    assert switchboard._stop_unsub is None
 
 
 async def test_the_output_timeout_is_thirty_seconds(hass: HomeAssistant) -> None:
