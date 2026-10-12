@@ -903,12 +903,15 @@ New, and a done message **for its priority only** — its default tag stays
 - a call to `notify.switchboard_<slug>`, or to `notify.switchboard` resolving
   to `<slug>`, made while the target's `alert_entity` is a Home Assistant
   `alert` entity that is **ending**: its live state already reads `idle`
-  while the state stored in the state machine still reads `on` or `off`. That
-  is the call core's `alert` makes for its `done_message`.
+  while the state stored in the state machine still reads `on` or `off`, and
+  the stored state reads `idle` once the call has yielded to the event loop
+  once. That is the call core's `alert` makes for its `done_message`.
 
 When the target names no `alert_entity`, when that entity is not a Home
-Assistant `alert` entity, or when the call arrives after the state machine
-already reads `idle`, the call is routed as in v0.8.
+Assistant `alert` entity, when the call arrives after the state machine
+already reads `idle`, or when the stored state is still not `idle` after the
+yield (an alert stuck by a `done_message` that failed to render), the call is
+routed as in v0.8: a real alarm is never downgraded.
 
 ### `target_advanced` holds ten fields
 
@@ -940,8 +943,16 @@ and these inputs, which are frozen:
 | `done_message` | sent with `data.switchboard_done: true` when the entity leaves that state; empty means nothing is sent |
 | `priority` | `default` (no `data.priority`: the target's own), `info`, `normal`, `high` or `critical` |
 
-Every call it makes carries `data.source_entity`. Neither trigger fires on a
-change from or to `unavailable` or `unknown`.
+Every call it makes carries `data.source_entity`. The start trigger fires
+from any state, `unavailable` and `unknown` included; the done trigger does not
+fire on a change to `unavailable` or `unknown`.
+
+### The confirmation of a target is shown after the target is written
+
+When the `target` or `target_edit` form is submitted and leads to a
+confirmation (`target_saved`, `target_ready`, `target_ready_manual`), the
+target is written to the options before that confirmation is shown. Closing
+the confirmation keeps it; its `advanced` box still opens `target_advanced`.
 
 ## Observer mode (plan B, ADR-007)
 

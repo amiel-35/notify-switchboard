@@ -67,7 +67,7 @@ def test_import_url_points_at_the_language_file_on_github() -> None:
     url = import_url("es")
     assert url.startswith("https://my.home-assistant.io/redirect/blueprint_import/")
     source = (
-        "https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/"
+        "https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/"
         f"custom_components/notify_switchboard/blueprints/es/{BLUEPRINT_FILE}"
     )
     assert url.endswith(f"?blueprint_url={quote(source, safe='')}")
@@ -261,3 +261,55 @@ def test_a_deferred_done_message_round_trips_its_flag() -> None:
     assert restored is not None
     assert restored.done is True
     assert DeferredMessage.from_dict(done.as_dict()).done is False  # type: ignore[union-attr]
+
+
+async def test_a_suspected_end_is_confirmed_only_by_a_stored_idle(
+    hass: HomeAssistant,
+) -> None:
+    """ADR-0023 §2.2, amended: the suspicion, then the proof after one yield."""
+    hass.states.async_set("binary_sensor.source", "off")
+    assert await async_setup_component(
+        hass,
+        "alert",
+        {
+            "alert": {
+                "leak": {
+                    "name": "Leak",
+                    "entity_id": "binary_sensor.source",
+                    "state": "on",
+                    "repeat": [60],
+                    "notifiers": [],
+                }
+            }
+        },
+    )
+    await hass.async_block_till_done()
+    entry = await _entry(hass, [_target("alert.leak")])
+    switchboard = entry.runtime_data.switchboard
+
+    # Stuck apart (a done template that failed): never confirmed.
+    hass.states.async_set("alert.leak", "on")
+    assert await switchboard._async_closing_slugs(("leak",)) == frozenset()
+
+    # Core writes `idle` while the handler yields: confirmed.
+    hass.loop.call_soon(hass.states.async_set, "alert.leak", "idle")
+    assert await switchboard._async_closing_slugs(("leak",)) == frozenset({"leak"})
+
+    # Nothing suspected: no yield, nothing confirmed.
+    assert await switchboard._async_closing_slugs(("unknown",)) == frozenset()
+
+
+def test_the_blueprint_ref_is_this_versions_release_tag() -> None:
+    """`source_url` and the import link follow the manifest, never `main`."""
+    import json  # noqa: PLC0415
+
+    manifest = json.loads(
+        (Path(automation_blueprint.__file__).parent / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert f"v{manifest['version']}" == automation_blueprint.BLUEPRINT_REF
+    for language in automation_blueprint.BLUEPRINT_LANGUAGES:
+        text = packaged_blueprint(language).read_text(encoding="utf-8")
+        assert f"/{automation_blueprint.BLUEPRINT_REF}/" in text
+        assert "/main/" not in text

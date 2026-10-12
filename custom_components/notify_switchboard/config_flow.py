@@ -84,6 +84,7 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 from collections.abc import Mapping
@@ -848,6 +849,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
         that silently re-adds a person the user has just removed is worse than
         no automation at all.
         """
+        self._prepare_options()
+        return self.async_create_entry(data=self._options)
+
+    def _prepare_options(self) -> None:
+        """Bring the working copy to the shape `_save` writes."""
         self._async_sync_managed_audiences()
         targets = self._targets
         slugs = [row[CONF_SLUG] for row in targets]
@@ -855,7 +861,23 @@ class SwitchboardOptionsFlow(OptionsFlow):
         if default_target not in slugs:
             default_target = slugs[0] if slugs else None
         self._options[CONF_DEFAULT_TARGET] = default_target
-        return self.async_create_entry(data=self._options)
+
+    @callback
+    def _async_write_now(self) -> None:
+        """Write the working copy to the entry without ending the flow.
+
+        The one place the flow writes before its last screen (ADR-0023 §1,
+        amended): a target confirmation the user may leave through a link.
+        A deep copy, because the working copy goes on being edited if the
+        `advanced` box is ticked, and the entry's options must not change
+        under Home Assistant's feet -- `async_update_entry` compares old and
+        new to decide whether to reload. The final `_save` of the flow then
+        writes the same options again, which is not a change.
+        """
+        self._prepare_options()
+        self.hass.config_entries.async_update_entry(
+            self.config_entry, options=copy.deepcopy(self._options)
+        )
 
     # ------------------------------------------------------------------
     # Menu
@@ -1478,7 +1500,16 @@ class SwitchboardOptionsFlow(OptionsFlow):
                         self._then_escalation = bool(user_input.get(CONF_ESCALATION))
                         return await self.async_step_target_advanced()
                     return await self.async_step_target_escalation()
+                # Correction round of 0.9 (ADR-0023 §1, amended): the target
+                # is written *now*, and the confirmation that follows is
+                # purely informative. It invites the user to leave -- open the
+                # blueprints, paste a block -- and leaving an options flow
+                # discards it: an alert that existed only in the flow would be
+                # lost, and an automation built meanwhile would call a service
+                # that does not exist.
                 self._pending_target = row
+                self._stage_target(row)
+                self._async_write_now()
                 return await self._async_show_target_confirmation()
 
         labels = await self._async_option_labels()

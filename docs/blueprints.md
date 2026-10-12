@@ -30,7 +30,7 @@ The file is yours from then on: it is never overwritten and never removed,
 not even when Notify Switchboard is. If it cannot be copied, the screen links
 to the import dialog instead:
 
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Famiel-35%2Fnotify-switchboard%2Fmain%2Fcustom_components%2Fnotify_switchboard%2Fblueprints%2Fen%2Falert_from_a_sensor.yaml)
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Famiel-35%2Fnotify-switchboard%2Fv0.9.0%2Fcustom_components%2Fnotify_switchboard%2Fblueprints%2Fen%2Falert_from_a_sensor.yaml)
 
 | Input | Required | Default | Notes |
 |---|---|---|---|
@@ -41,9 +41,15 @@ to the import dialog instead:
 | `done_message` | no | `""` | Sent with `switchboard_done: true` when the sensor leaves that state — never louder than the alert's `done_priority`. Empty means nothing is sent. |
 | `priority` | no | `default` | `default` sends none, so the alert's own applies; else `info` \| `normal` \| `high` \| `critical`. |
 
-Neither trigger fires on a change from or to `unavailable` / `unknown`, so a
-sensor dropping off the network neither sets the alert off nor announces its
-end. This path has no Acknowledge button and no reminders: for those, use a
+The start trigger fires from any state, so a leak that starts during a
+restart (`unknown → on`) or a sensor that comes back already wet
+(`unavailable → on`) sets the alert off. The done trigger ignores a change to
+`unavailable` / `unknown`: a sensor dropping off the network does not
+announce the end of anything. The file's `source_url` is pinned to this
+version's release tag, so **Re-import** never fetches a newer blueprint than
+the integration you run. In French and Spanish its name starts with the
+integration's name as those screens show it ("Standard de notification
+(Notify Switchboard) : …"). This path has no Acknowledge button and no reminders: for those, use a
 Home Assistant `alert:` (see [`docs/examples/`](examples/)).
 
 ```yaml

@@ -1,9 +1,10 @@
 blueprint:
-  name: "Notify Switchboard : déclencher une alerte depuis un capteur"
+  name: "Standard de notification (Notify Switchboard) : déclencher une alerte depuis un capteur"
   description: >-
     Quand le capteur choisi passe à l'état voulu, les personnes d'une alerte
     du Standard de notification sont prévenues. Si vous le souhaitez, elles le
-    sont encore une fois, sans bruit, quand tout revient à la normale.
+    sont encore une fois, sans réveiller personne, quand tout revient à la
+    normale.
 
 
     Le nom de l'alerte pour les automatisations est affiché sur l'écran
@@ -14,7 +15,7 @@ blueprint:
   author: Notify Switchboard
   homeassistant:
     min_version: 2024.10.0
-  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/custom_components/notify_switchboard/blueprints/fr/alert_from_a_sensor.yaml
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/custom_components/notify_switchboard/blueprints/fr/alert_from_a_sensor.yaml
   input:
     trigger_entity:
       name: Capteur à surveiller
@@ -26,9 +27,9 @@ blueprint:
     trigger_to:
       name: État qui déclenche l'alerte
       description: >-
-        Laissez « on » pour un capteur qui détecte quelque chose (une fuite,
-        une ouverture, un mouvement). Pour tout autre capteur, l'état tel
-        qu'il apparaît dans Outils de développement > États.
+        Laissez « on » : c'est ce que Home Assistant affiche comme
+        « Humide », « Ouvert » ou « Détecté ». Pour un autre genre de capteur,
+        l'état tel qu'il apparaît dans Outils de développement > États.
       default: "on"
       selector:
         text: {}
@@ -90,9 +91,6 @@ triggers:
   - trigger: state
     entity_id: !input trigger_entity
     to: !input trigger_to
-    not_from:
-      - unavailable
-      - unknown
     id: start
   - trigger: state
     entity_id: !input trigger_entity

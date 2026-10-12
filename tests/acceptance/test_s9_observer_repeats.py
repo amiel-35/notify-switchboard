@@ -147,9 +147,17 @@ def test_the_observer_mode_help_says_it_sends_no_reminders(language):
             f"{language}/{step_id}: the help of the recommended box must say "
             "it carries no reminders (ADR-0023 §3)"
         )
-        assert "notifiers" in help_text, (
-            f"{language}/{step_id}: and name the way that does"
+        assert "notifiers" not in help_text, (
+            f"{language}/{step_id}: a YAML key is not a word for this screen "
+            "(correction round); the next screen says how to get reminders"
         )
+
+
+@pytest.mark.parametrize("language", ["en", "fr", "es"])
+def test_no_screen_says_notifiers(language):
+    """The technical detail lives in the documents, not in the interface."""
+    text = (COMPONENT / "translations" / f"{language}.json").read_text(encoding="utf-8")
+    assert "notifiers" not in text
 
 
 @pytest.mark.parametrize("language", ["en", "fr", "es"])

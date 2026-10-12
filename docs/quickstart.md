@@ -56,8 +56,9 @@ stays so even if you rename it later.
   last screen puts the blueprint **Notify Switchboard: set an alert off from
   a sensor** in your blueprints (in your language) and links to them: click
   it, pick your sensor, type the automation name the screen shows
-  (`water_leak`), save. That automation also sends a quiet back-to-normal
-  message if you give it one. Below the link, the same screen still explains
+  (`water_leak`), save. That automation also sends a back-to-normal
+  message that wakes nobody, if you give it one. The alert is already saved
+  when that screen appears, so following its link loses nothing. Below the link, the same screen still explains
   the action `notify.switchboard_water_leak` for an automation of your own,
   and the `alert:` block to paste if you want reminders and an Acknowledge
   button (replace `binary_sensor.CHANGE_ME` with your sensor, restart, then

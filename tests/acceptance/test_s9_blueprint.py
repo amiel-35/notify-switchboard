@@ -54,8 +54,13 @@ INPUTS = [
     "done_message",
     "priority",
 ]
+# Correction round: pinned to this version's release tag, never `main`, so
+# "Re-import" cannot fetch a blueprint newer than the installed integration.
+VERSION = json.loads((COMPONENT / "manifest.json").read_text(encoding="utf-8"))[
+    "version"
+]
 RAW_BASE = (
-    "https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/"
+    f"https://raw.githubusercontent.com/amiel-35/notify-switchboard/v{VERSION}/"
     "custom_components/notify_switchboard/blueprints"
 )
 SENSOR = "binary_sensor.doorbell_button"
@@ -385,13 +390,19 @@ async def test_the_blueprints_done_message_is_a_quiet_done_message(
     )
 
 
-async def test_the_blueprint_ignores_a_sensor_that_drops_off_the_network(
+async def test_a_sensor_coming_back_wet_sets_the_alert_off_but_dropping_off_ends_nothing(
     hass, enable_custom_integrations, install, options_flow, mock_outputs, set_person
 ):
-    """`unavailable` neither sets the alert off nor announces its end."""
+    """Correction round: the start fires from `unknown`/`unavailable`, the end never to them.
+
+    A leak that starts during a restart (`unknown -> on`) or a Zigbee sensor
+    that comes back already wet (`unavailable -> on`) is a leak: staying quiet
+    there is the one mistake an alarm must not make. A sensor that drops off
+    the network, on the other hand, is not "back to normal".
+    """
     calls = mock_outputs(TABLET)
     set_person("person.alice", "home")
-    hass.states.async_set(SENSOR, "on")
+    hass.states.async_set(SENSOR, "off")
     result = await _manual_screen(hass, install, options_flow)
     await hass.config_entries.options.async_configure(result["flow_id"], {})
     await hass.async_block_till_done()
@@ -399,11 +410,116 @@ async def test_the_blueprint_ignores_a_sensor_that_drops_off_the_network(
         hass,
         trigger_entity=SENSOR,
         alert_name="doorbell",
+        message="Wet",
         done_message="Back to normal",
     )
 
-    for state in ("unavailable", "on", "unknown"):
+    for state in ("unknown", "on", "unavailable", "on", "unknown"):
         hass.states.async_set(SENSOR, state)
         await hass.async_block_till_done()
 
-    assert calls[TABLET] == []
+    assert [call.data["message"] for call in calls[TABLET]] == ["Wet", "Wet"], (
+        "`unknown -> on` and `unavailable -> on` set the alert off; "
+        "`on -> unavailable` and `on -> unknown` announce no end"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Correction round: the alert exists before the screen invites you to leave
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("user_input", "step_id"),
+    [
+        ({}, "target_ready_manual"),
+        ({"alert_entity": "alert.doorbell"}, "target_ready"),
+        ({"alert_entity": "alert.doorbell", "observer_mode": False}, "target_saved"),
+    ],
+)
+async def test_the_alert_is_saved_before_its_confirmation_is_shown(
+    hass, enable_custom_integrations, install, options_flow, user_input, step_id
+):
+    """Leaving through the blueprint link must not lose the alert.
+
+    Found on the dev instance: the confirmation is titled "Alert saved" and
+    links away, and an options flow left open saves nothing. The target is
+    now written when the form before it is submitted; the confirmation is
+    informative and its own submit only closes it.
+    """
+    entry = await install(_household(hass))
+
+    result = await options_flow(
+        entry,
+        "target",
+        {"name": "Doorbell", "audience": ["person.alice"], **user_input},
+    )
+    assert result["step_id"] == step_id
+    assert [row["slug"] for row in entry.options["targets"]] == ["doorbell"], (
+        "written before the confirmation is shown"
+    )
+
+    hass.config_entries.options.async_abort(result["flow_id"])
+    await hass.async_block_till_done()
+    assert [row["slug"] for row in entry.options["targets"]] == ["doorbell"]
+    assert hass.services.has_service("notify", "switchboard_doorbell"), (
+        "an automation built meanwhile calls a service that exists"
+    )
+
+
+async def test_submitting_the_confirmation_changes_nothing_more(
+    hass, enable_custom_integrations, install, options_flow
+):
+    entry = await install(_household(hass))
+    result = await options_flow(
+        entry, "target", {"name": "Doorbell", "audience": ["person.alice"]}
+    )
+    written = [dict(row) for row in entry.options["targets"]]
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options["targets"] == written
+
+
+async def test_the_advanced_box_still_opens_the_advanced_settings(
+    hass, enable_custom_integrations, install, options_flow
+):
+    entry = await install(_household(hass))
+    result = await options_flow(
+        entry, "target", {"name": "Doorbell", "audience": ["person.alice"]}
+    )
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"advanced": True}
+    )
+    assert result["step_id"] == "target_advanced"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"done_priority": "info"}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (row,) = entry.options["targets"]
+    assert row["slug"] == "doorbell"
+    assert row["done_priority"] == "info"
+
+
+@pytest.mark.parametrize("language", LANGUAGES)
+def test_the_advanced_texts_say_they_are_set_in_the_automation_without_an_alert(
+    language,
+):
+    """One rule per screen: without a Home Assistant alert, the blueprint decides.
+
+    The advanced `done_message` says "empty: a ready-made text" and the
+    blueprint's says "empty: nothing is sent" -- both true, for two different
+    paths, so the advanced one says which path it is about.
+    """
+    strings = json.loads(
+        (COMPONENT / "translations" / f"{language}.json").read_text(encoding="utf-8")
+    )
+    help_texts = strings["options"]["step"]["target_advanced"]["data_description"]
+    marker = {
+        "en": "set in the automation",
+        "fr": "se choisit dans l'automatisation",
+        "es": "se ajusta en la automatización",
+    }[language]
+    for key in ("message", "done_message"):
+        assert marker in help_texts[key], (language, key)

@@ -20,6 +20,9 @@ Nothing yet.
   to the message Notify Switchboard sends itself and to the one a Home
   Assistant alert sends through its `notifiers:` list. Set it back to
   critical if you preferred it that way.
+- A new alert is saved as soon as you submit its screen. The screen that
+  follows only explains what to do next, so following its links no longer
+  loses the alert.
 - An alert tied to no Home Assistant alert now ends on a ready-made
   automation: the last screen links to your blueprints, where one click on
   **Notify Switchboard: set an alert off from a sensor** opens the automation
@@ -38,10 +41,10 @@ Nothing yet.
 - A blueprint shipped with Notify Switchboard, in English, French and
   Spanish. It is put in your blueprints the first time you add an alert that
   needs an automation, and is yours from then on: never overwritten, never
-  removed. It sets an alert off when a sensor reaches a state, can send a
-  quiet back-to-normal message when it leaves it, and ignores a sensor that
-  drops off the network. If it cannot be copied, the screen offers to import
-  it instead.
+  removed. It sets an alert off when a sensor reaches a state — also when the
+  sensor comes back from a restart or a network drop already in that state —
+  and can send a back-to-normal message that wakes nobody when it leaves it.
+  If it cannot be copied, the screen offers to import it instead.
 
 ## [0.8.0] - 2026-10-12
 

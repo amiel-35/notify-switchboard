@@ -59,9 +59,12 @@ PACKAGED_FOLDER = Path(__file__).parent / "blueprints"
 
 # The same files on GitHub, for the import link when the copy fails. Each
 # packaged file's `source_url` is this, so "Re-import" in the blueprint list
-# fetches the file it came from.
+# fetches the file it came from. Pinned to the release tag of this version,
+# never `main`: re-importing must not fetch a blueprint newer than the
+# integration that installed it. A test keeps it equal to `v<manifest version>`.
+BLUEPRINT_REF = "v0.9.0"
 RAW_BASE_URL = (
-    "https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/"
+    f"https://raw.githubusercontent.com/amiel-35/notify-switchboard/{BLUEPRINT_REF}/"
     f"custom_components/{DOMAIN}/{BLUEPRINT_FOLDER}"
 )
 MY_IMPORT_URL = "https://my.home-assistant.io/redirect/blueprint_import/"

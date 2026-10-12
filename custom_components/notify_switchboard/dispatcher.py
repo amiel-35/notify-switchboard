@@ -727,16 +727,45 @@ class Switchboard:
             title=title,
             targets=slugs,
             data=dict(data or {}),
-            closing=frozenset(
-                slug
-                for slug in slugs
-                if (target := self.table.targets.get(slug)) is not None
-                and target.alert_entity
-                and self.alert_is_ending(target.alert_entity)
-            ),
+            closing=await self._async_closing_slugs(slugs),
         )
         decision, _outputs = await self._async_route(request)
         return decision
+
+    async def _async_closing_slugs(self, slugs: tuple[str, ...]) -> frozenset[str]:
+        """Return the slugs whose Home Assistant alert this call is the end of.
+
+        Two checks, because one is not proof (ADR-0023 §2.2, amended). The
+        first, `alert_is_ending`, is only a *suspicion*: the live entity reads
+        `idle` while the stored state reads `on`/`off`. That is the instant
+        core's `end_alerting` is in -- but it is also what an alert looks like
+        for as long as its `done_message` template failed to render, because
+        the exception stops `end_alerting` before it writes the state, and the
+        two stay apart until the next firing. Capping every call of that
+        window would downgrade a real alarm.
+
+        So the handler yields once. When the call really is the done message,
+        `end_alerting` resumes in the meantime and writes `idle`; when it is
+        not, nothing writes anything and the stored state still reads `on`.
+        Only a stored `idle` after the yield confirms the suspicion. Anything
+        else keeps the requested priority: when in doubt, a real alarm rings.
+        """
+        suspected = {
+            slug: target.alert_entity
+            for slug in slugs
+            if (target := self.table.targets.get(slug)) is not None
+            and target.alert_entity
+            and self.alert_is_ending(target.alert_entity)
+        }
+        if not suspected:
+            return frozenset()
+        await asyncio.sleep(0)
+        return frozenset(
+            slug
+            for slug, entity_id in suspected.items()
+            if (state := self.hass.states.get(entity_id)) is not None
+            and state.state == STATE_IDLE
+        )
 
     def alert_is_ending(self, entity_id: str) -> bool:
         """Return True while a Home Assistant alert sends its done message.
@@ -746,9 +775,11 @@ class Switchboard:
         `_notify_done_message()` -- which calls this router through the
         alert's `notifiers:` -- and only then writes the state. During that
         await the live `AlertEntity.state` already reads `idle` while the state
-        machine still holds `on` (or `off`, acknowledged). The two disagree at
-        no other moment: the first message is sent while the entity says `on`
-        and the state machine `idle`, a reminder while both say `on`.
+        machine still holds `on` (or `off`, acknowledged). The first message is
+        sent while the entity says `on` and the state machine `idle`, a
+        reminder while both say `on`. The two also stay apart after a
+        `done_message` template that failed to render, which is why this is
+        only a suspicion, confirmed by `_async_closing_slugs`.
 
         Anything missing -- `alert` not loaded, an entity that is not core's
         (a template, a test state), a call that arrives after the state was

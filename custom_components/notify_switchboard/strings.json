@@ -174,7 +174,7 @@
           "name": "The name people see, for example Water leak. It is also the text sent when the alert supplies none.",
           "alert_entity": "Not the sensor itself: a Home Assistant alert (alert.…) that watches it. Those are created in YAML only: if you have none, leave this empty.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "On by default: Notify Switchboard watches the Home Assistant alert itself, so people are told at once, with nothing to copy and no restart. They get one message when it goes off and one when it ends, but no reminders: for reminders, untick this box and list this alert under the Home Assistant alert's notifiers. With nothing under “What sets it off”, this box has no effect and stays on."
+          "observer_mode": "On by default: Notify Switchboard watches the Home Assistant alert itself, so people are told at once, with nothing to copy and no restart — once when it goes off and once when it ends, without reminders. To keep reminding people until somebody answers, the next screen says how. With nothing under “What sets it off”, this box has no effect and stays on."
         }
       },
       "target_edit": {
@@ -194,7 +194,7 @@
           "name": "The name people see. It is also the text sent when the alert supplies none.",
           "alert_entity": "A Home Assistant alert (alert.…). Needed for the Acknowledge button. Empty: the alert only goes off when an automation calls it.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "Notify Switchboard watches the Home Assistant alert itself: people are told at once. This is the recommended way. They get one message when it goes off and one when it ends, but no reminders: for reminders, untick this box and list this alert under the Home Assistant alert's notifiers. With nothing under “What sets it off”, this box has no effect and stays on.",
+          "observer_mode": "Notify Switchboard watches the Home Assistant alert itself, so people are told at once — once when it goes off and once when it ends, without reminders. To keep reminding people until somebody answers, the next screen says how. With nothing under “What sets it off”, this box has no effect and stays on.",
           "advanced": "Importance, presence, buttons and wording. Ticked, everything is saved when the last screen is submitted.",
           "escalation": "Whether to raise the importance when nobody is home. Ticked, everything is saved when the last screen is submitted."
         }
@@ -206,7 +206,7 @@
           "advanced": "Open the advanced settings now"
         },
         "data_description": {
-          "advanced": "Leave it unticked to save this alert as it is. Ticked, it is saved when the next screen is submitted."
+          "advanced": "The alert is already saved. Tick this to set its importance, presence, buttons and wording now; they are saved when the next screen is submitted."
         }
       },
       "target_ready": {
@@ -216,17 +216,17 @@
           "advanced": "Open the advanced settings now"
         },
         "data_description": {
-          "advanced": "Leave it unticked to save this alert as it is. Ticked, it is saved when the next screen is submitted."
+          "advanced": "The alert is already saved. Tick this to set its importance, presence, buttons and wording now; they are saved when the next screen is submitted."
         }
       },
       "target_ready_manual": {
         "title": "Alert saved",
-        "description": "“{name}” is linked to no Home Assistant alert, so it will not go off on its own. Two ways to set it off:\n\n1. **With a ready-made automation.** {blueprint} In the form, pick your sensor and type `{slug}` as the alert's automation name, then save. This way has no Acknowledge button and no reminders. (To build the automation yourself instead: Settings > Automations & scenes > Create automation, then the action {service}, with a message.)\n\n2. **With a Home Assistant alert**, which repeats until it is acknowledged. Paste this block into your configuration, then restart Home Assistant. Replace binary_sensor.CHANGE_ME with the sensor that reports the problem — the leak detector, the window contact:\n\n```yaml\n{snippet}\n```\n\nThen change this alert and pick it under “What sets it off”.",
+        "description": "“{name}” is saved, but it is linked to no Home Assistant alert, so it will not go off on its own. You can follow the links below before closing this window. Two ways to set it off:\n\n1. **With a ready-made automation.** {blueprint} In the form, pick your sensor and type `{slug}` as the alert's automation name, then save. This way has no Acknowledge button and no reminders. (To build the automation yourself instead: Settings > Automations & scenes > Create automation, then the action {service}, with a message.)\n\n2. **With a Home Assistant alert**, which repeats until it is acknowledged. Paste this block into your configuration, then restart Home Assistant. Replace binary_sensor.CHANGE_ME with the sensor that reports the problem — the leak detector, the window contact:\n\n```yaml\n{snippet}\n```\n\nThen change this alert and pick it under “What sets it off”.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
         "data_description": {
-          "advanced": "Leave it unticked to save this alert as it is. Ticked, it is saved when the next screen is submitted."
+          "advanced": "The alert is already saved. Tick this to set its importance, presence, buttons and wording now; they are saved when the next screen is submitted."
         }
       },
       "target_advanced": {
@@ -250,8 +250,8 @@
           "allow_acknowledge": "Adds a button to the notification that turns the alert off.",
           "snooze_minutes": "Durations in minutes, comma separated, for example 15, 60. Empty: no \"later\" button at all.",
           "default_data": "If the message already says the same thing, the message wins.",
-          "message": "Optional, and used only when people are told as soon as it goes off. Empty: the name of the alert is sent. Advanced users can write a template.",
-          "done_message": "Optional, sent when the Home Assistant alert turns off, if people are told as soon as it goes off. Empty: a ready-made text is sent.",
+          "message": "Optional, and used only when people are told as soon as it goes off. Empty: the name of the alert is sent. Advanced users can write a template. Without a Home Assistant alert, this text is set in the automation.",
+          "done_message": "Optional, sent when the Home Assistant alert turns off, if people are told as soon as it goes off. Empty: a ready-made text is sent. Without a Home Assistant alert, this text is set in the automation.",
           "done_priority": "The back-to-normal message never rings louder than this, nor louder than the alert itself. “Normal” by default, so the end of a critical alert does not ring like the alarm, and waits for the morning when somebody is asleep.",
           "default_title": "Title used when the call gives none, and for every message Notify Switchboard sends on its own.",
           "clear_done": "Take the back-to-normal notification off the phones that received it, once the alert is over. Off by default: it rings, then it stays."

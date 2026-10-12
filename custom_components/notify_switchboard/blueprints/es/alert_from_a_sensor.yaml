@@ -1,9 +1,9 @@
 blueprint:
-  name: "Notify Switchboard: activar una alerta desde un sensor"
+  name: "Centralita de notificaciones (Notify Switchboard): activar una alerta desde un sensor"
   description: >-
     Cuando el sensor elegido llega al estado indicado, se avisa a las personas
     de una alerta de la Centralita de notificaciones. Si quieres, se les avisa
-    otra vez, sin ruido, cuando todo vuelve a la normalidad.
+    otra vez, sin despertar a nadie, cuando todo vuelve a la normalidad.
 
 
     El nombre para automatizaciones de la alerta aparece en la pantalla
@@ -13,7 +13,7 @@ blueprint:
   author: Notify Switchboard
   homeassistant:
     min_version: 2024.10.0
-  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/custom_components/notify_switchboard/blueprints/es/alert_from_a_sensor.yaml
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/custom_components/notify_switchboard/blueprints/es/alert_from_a_sensor.yaml
   input:
     trigger_entity:
       name: Sensor que vigilar
@@ -25,8 +25,8 @@ blueprint:
     trigger_to:
       name: Estado que activa la alerta
       description: >-
-        Deja «on» para un sensor que detecta algo (una fuga, una apertura, un
-        movimiento). Para cualquier otro, el estado tal como aparece en
+        Deja «on»: es lo que Home Assistant muestra como «Húmedo», «Abierto»
+        o «Detectado». Para otro tipo de sensor, el estado tal como aparece en
         Herramientas para desarrolladores > Estados.
       default: "on"
       selector:
@@ -87,9 +87,6 @@ triggers:
   - trigger: state
     entity_id: !input trigger_entity
     to: !input trigger_to
-    not_from:
-      - unavailable
-      - unknown
     id: start
   - trigger: state
     entity_id: !input trigger_entity

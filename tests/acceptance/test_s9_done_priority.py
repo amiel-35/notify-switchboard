@@ -30,11 +30,13 @@ the `priority` of the last `routed` `event.switchboard_delivery` says the rest.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
 import homeassistant.util.dt as dt_util
 import pytest
+from homeassistant.exceptions import TemplateError
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
@@ -487,3 +489,130 @@ async def test_a_capped_done_message_waits_for_the_morning_and_stays_capped(
         "not `normal` escalated to `high` (contract v0.9)"
     )
     assert _routed_priority(hass) == "normal"
+
+
+# ---------------------------------------------------------------------------
+# A real alarm is never downgraded (ADR-0023 §2.2, amended)
+# ---------------------------------------------------------------------------
+
+
+async def test_a_done_message_that_fails_to_render_never_downgrades_the_next_alarm(
+    hass, enable_custom_integrations, install, mock_outputs, set_person, wired_alert
+):
+    """The review's probe, kept as a test.
+
+    A `done_message` template that raises (a sensor that is `unavailable`
+    piped through `float`) stops core's `end_alerting` before it writes the
+    state: the live alert reads `idle`, the stored state stays `on`, until the
+    next firing. That looks like the instant of a done message, and a router
+    that trusted it would cap every call to the target in the meantime -- a
+    critical "Second leak!" arriving as a normal push. The suspicion has to be
+    confirmed by the stored state turning `idle`; here it never does.
+    """
+    calls = mock_outputs(PHONE)
+    set_person("person.alice", "home")
+    hass.states.async_set("sensor.humidity", "unavailable")
+    alert = await wired_alert(done_message="{{ states('sensor.humidity') | float }}")
+    await install(_entry(hass))
+
+    await alert.begin()
+
+    # Core's own failure: the template raises inside `end_alerting`, in the
+    # task of the state listener, which reports it to the loop's exception
+    # handler. The harness would fail the test on it at teardown; this one
+    # exception is the scenario, so it is caught here and nothing else is.
+    loop = asyncio.get_running_loop()
+    harness_handler = loop.get_exception_handler()
+    caught: list[BaseException] = []
+
+    def _catch_the_template_error(loop, context) -> None:
+        if isinstance(context.get("exception"), TemplateError):
+            caught.append(context["exception"])
+            return
+        assert harness_handler is not None
+        harness_handler(loop, context)
+
+    loop.set_exception_handler(_catch_the_template_error)
+    try:
+        await alert.end()
+    finally:
+        loop.set_exception_handler(harness_handler)
+    assert caught, "the probe needs core to have failed on the template"
+    assert hass.states.get(ALERT).state == "on", (
+        "the precondition of the probe: core stopped before writing `idle`"
+    )
+
+    await _call(hass, "Second leak!", priority="critical")
+
+    second = _messages(calls[PHONE])[-1]
+    assert second.data["message"] == "Second leak!"
+    assert _is_critical(second), (
+        "when in doubt, a real alarm keeps the priority it asked for"
+    )
+    assert _routed_priority(hass) == "critical"
+
+
+async def test_one_alert_two_targets_both_end_quietly(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """An alert listing two targets under `notifiers:` ends quietly on both.
+
+    Core calls its notifiers one after the other and writes `idle` after the
+    last; each call's yield lets that write happen before it is decided.
+    """
+    calls = mock_outputs(PHONE, "mobile_app_bob")
+    set_person("person.alice", "home")
+    set_person("person.bob", "home")
+    hass.states.async_set(SOURCE, "off")
+    assert await async_setup_component(
+        hass,
+        "alert",
+        {
+            "alert": {
+                "leak": {
+                    "name": "Leak",
+                    "entity_id": SOURCE,
+                    "state": "on",
+                    "repeat": [60],
+                    "skip_first": False,
+                    "message": "Leak!",
+                    "done_message": "All clear",
+                    "notifiers": ["switchboard_leak", "switchboard_leak_bob"],
+                }
+            }
+        },
+    )
+    await install(
+        make_entry(
+            hass,
+            persons=[
+                make_person("person.alice", [PHONE]),
+                make_person("person.bob", ["mobile_app_bob"]),
+            ],
+            targets=[
+                make_target(
+                    slug,
+                    slug,
+                    default_priority="critical",
+                    alert_entity=ALERT,
+                    audience=[person],
+                )
+                for slug, person in (
+                    ("leak", "person.alice"),
+                    ("leak_bob", "person.bob"),
+                )
+            ],
+            default_target="leak",
+        )
+    )
+
+    hass.states.async_set(SOURCE, "on")
+    await hass.async_block_till_done()
+    hass.states.async_set(SOURCE, "off")
+    await hass.async_block_till_done()
+
+    for output in (PHONE, "mobile_app_bob"):
+        first, done = _messages(calls[output])
+        assert _is_critical(first), output
+        assert done.data["message"] == "All clear"
+        assert not _is_critical(done), output

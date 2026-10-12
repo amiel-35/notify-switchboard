@@ -240,7 +240,7 @@ Settings → Devices & services → Notify Switchboard → delete removes the
 services it forwarded to. A night schedule created from a person's screen is
 an ordinary Home Assistant helper and stays, and so does the blueprint copied
 into your blueprints. Current release: **0.9.0** (one-click automation from a
-shipped blueprint, a quiet back-to-normal message, observer mode's missing
+shipped blueprint, a back-to-normal message that wakes nobody, observer mode's missing
 reminders said on screen; before it, a first alert without code — names
 instead of identifiers, observer mode by default, a shorter menu, a night
 schedule in one tick — two-step editors, escalation, a scheduled priority floor, the routing-table sensor,

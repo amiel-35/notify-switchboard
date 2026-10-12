@@ -74,9 +74,10 @@ household to meet a French form is a French file. Its inputs:
 | `done_message` | text | `""` | sent when the sensor leaves that state, with `data.switchboard_done: true`; empty means nothing is sent |
 | `priority` | select | `default` | `default` (the alert's own), `info`, `normal`, `high`, `critical` |
 
-Its two triggers ignore `unavailable` and `unknown` on either side, so a
-sensor that drops off the network neither sets the alert off nor announces the
-end of it. Every call carries `data.source_entity` (contract §"Input").
+Its done trigger ignores a change to `unavailable` or `unknown`, so a
+sensor that drops off the network does not announce the end of anything; its
+start trigger fires from any state, so a leak that starts during a restart or
+a sensor that comes back already wet sets the alert off (amended, see below). Every call carries `data.source_entity` (contract §"Input").
 
 **How it reaches the user — verified in 2026.9.1.** Core has no mechanism for
 an integration other than `automation`/`script` to ship blueprints:
@@ -192,16 +193,18 @@ One kind is new, and is a done message **for its priority only**:
   `homeassistant/core.py` `ServiceRegistry.async_call`,
   `async_create_task_internal(..., eager_start=True)`). At that instant the
   live `AlertEntity.state` property already answers `idle`, while the state
-  machine still holds `on` (or `off` if it was acknowledged). Those two
-  answers disagree at no other moment of an alert's life: during the first
-  message the entity says `on` and the state machine `idle`; during a
-  `repeat` both say `on`; between episodes both say `idle`. So: when a call
+  machine still holds `on` (or `off` if it was acknowledged). During the
+  first message the entity says `on` and the state machine `idle`; during a
+  `repeat` both say `on`; between episodes both say `idle`. That
+  disagreement is only a **suspicion** (amended, see below): it also lasts
+  after a `done_message` template that failed to render. So: when a call
   reaches `notify.switchboard_<slug>` (or `notify.switchboard` resolving to
   `<slug>`), the row names an `alert_entity`, the `alert` entity component
   (`homeassistant/helpers/entity_component.py`, `DATA_INSTANCES`, the same
   lookup core's own `async_update_entity` does) holds that entity, its live
-  `state` is `idle` and the stored state is `on` or `off` — the call is that
-  alert's done message.
+  `state` is `idle` and the stored state is `on` or `off`, the handler yields
+  once (`asyncio.sleep(0)`); only if the stored state then reads `idle` is
+  the call that alert's done message.
 
 Why priority only. That call has carried the target's ordinary default tag
 (`switchboard-<slug>`) since 0.5, so on a phone it **replaces** the alert's
@@ -305,3 +308,66 @@ sprint, a test on a real instance, and the maintainer's decision.
 - `test_s6_target_editor.py`'s field list of `target_advanced` gains
   `done_priority`; that amendment, and nothing else, is listed in
   `tests/acceptance/README.md` §Sprint 9.
+
+## Amendment 2026-10-12 — correction round
+
+A code review ("go with fixes") and a non-technical French reading (8/10) of
+the first implementation, plus an end-to-end run on the maintainer's dev
+instance, led to the following.
+
+### §2.2, amended: a suspicion confirmed, never trusted alone
+
+The first implementation treated "live `idle`, stored `on`/`off`" as proof.
+A review probe showed it is not: when the alert's `done_message` template
+raises — `{{ states('sensor.h') | float }}` with the sensor `unavailable` —
+the exception stops `end_alerting` before `async_write_ha_state()`, and the
+two answers stay apart until the next firing. Every call to the target in
+that window, a critical "second leak" included, was capped.
+
+The handler now yields once (`asyncio.sleep(0)`) when it suspects the end.
+For the real done message, `end_alerting` resumes in the meantime and writes
+`idle` (with several notifiers, after the last one); a stuck alert writes
+nothing. Only a stored `idle` after the yield confirms. Anything else keeps
+the requested priority: **a real alarm is never downgraded; when in doubt it
+rings.** Tested with a failing template and with one alert calling two
+targets.
+
+A call that goes through a `notify.group` containing `switchboard_<slug>` is
+not recognised: the group calls the router from a task of its own, after the
+state is already `idle`. The all-clear then rings at the target's priority, as
+in 0.8 (`docs/known-issues.md`).
+
+### §1, amended: the alert is saved before its confirmation
+
+The confirmation screens were titled "Alert saved" while nothing was written
+until they were submitted — and `target_ready_manual` invites the user to
+leave through the blueprint link, which discards an options flow. The target
+is now written to `entry.options` when the `target` or `target_edit` form is
+submitted (`async_update_entry`, a deep copy); `target_saved`, `target_ready`
+and `target_ready_manual` are informative and their submit only closes the
+flow, or opens `target_advanced` when its box is ticked, which writes again.
+This amends ADR-0022 §3 ("nothing is written until the last step") for the
+target confirmations only.
+
+### §1, amended: the blueprint
+
+- The start trigger no longer ignores `unknown`/`unavailable` as a *from*
+  state: a leak starting during a restart (`unknown → on`) or a Zigbee sensor
+  coming back wet (`unavailable → on`) sets the alert off. The done trigger
+  still ignores a change *to* them.
+- `source_url` and the fallback import link point at this version's release
+  tag (`v0.9.0`), not `main`, so "Re-import" never fetches a blueprint newer
+  than the integration that installed it; a test ties the tag to the
+  manifest version.
+- The French and Spanish names start with the integration's name as those
+  screens show it ("Standard de notification (Notify Switchboard) : …",
+  "Centralita de notificaciones (Notify Switchboard): …"), so the blueprint
+  is found under the name the user knows.
+
+### §3, amended: no YAML key on screen
+
+The word `notifiers` leaves the interface: the `observer_mode` help says that
+the next screen explains how to keep reminding people until somebody answers,
+and the technical detail stays in the documents. The advanced `message` and
+`done_message` help say that without a Home Assistant alert those texts are
+set in the automation.
