@@ -50,6 +50,16 @@ entry, an output entity id). It removes one: `data.priority` no longer reaches
 a `mobile_app_*` output, which is the only breaking change of 0.7.0 and is
 pinned here rather than only in `test_s7_critical_payload.py`. What each rule
 *does* is `test_s7_*.py`'s business.
+
+Extended a seventh time for the v0.8 addendum (ADR-0022), which changes what
+one public step asks and nothing a caller can observe at run time. The public
+step id `target` holds four fields instead of five — `slug` is derived from
+the name and never typed — with `observer_mode` on by default; the two
+checkboxes `person_outputs` gains store nothing; a wake time typed without
+seconds is still stored as `"HH:MM:SS"`. One v0.6 test was amended for that
+and nothing else: `test_class_is_not_a_routing_table_row_key` no longer
+submits a `slug` to `target`. What each screen *does* is `test_s8_*.py`'s
+business.
 """
 
 from __future__ import annotations
@@ -468,7 +478,8 @@ async def test_class_is_not_a_routing_table_row_key(
     await options_flow(
         entry,
         "target",
-        {"slug": "leak", "name": "Leak", "audience": ["person.alice"]},
+        # v0.8 (ADR-0022 §1): the slug is derived from the name.
+        {"name": "Leak", "audience": ["person.alice"]},
         {},
     )
 
@@ -732,4 +743,97 @@ async def test_a_notify_entity_id_may_be_an_output(
     assert [message for message, _title, _extra in living_room.messages] == ["m"], (
         "an output that is a `notify` entity id is delivered with "
         "`notify.send_message` (contract v0.7, ADR-0021 §6)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# v0.8 addendum (ADR-0022): `target` asks four things, two checkboxes store
+# nothing, a wake time without seconds
+# ---------------------------------------------------------------------------
+
+# The fields of the public step id `target`, in the order the form shows them.
+TARGET_STEP_FIELDS = ["name", "alert_entity", "audience", "observer_mode"]
+
+
+async def test_the_target_step_holds_the_four_frozen_fields(
+    hass, enable_custom_integrations, install, options_flow
+):
+    """v0.8 addendum: `slug` left `target`; `observer_mode` defaults to on."""
+    entry = make_entry(hass, persons=[], targets=[], default_target=None)
+    await install(entry)
+
+    result = await options_flow(entry, "target")
+
+    assert result["step_id"] == "target"
+    fields = {str(marker): marker for marker in result["data_schema"].schema}
+    assert list(fields) == TARGET_STEP_FIELDS, (
+        "the public step `target` holds name, alert_entity, audience and "
+        "observer_mode (contract v0.8, ADR-0022 §1)"
+    )
+    assert fields["observer_mode"].default() is True, (
+        "`observer_mode` defaults to true on `target` (contract v0.8)"
+    )
+
+
+async def test_a_created_target_gets_its_slug_from_its_name(
+    hass, enable_custom_integrations, install, options_flow, mock_outputs, set_person
+):
+    """v0.8 addendum: `slugify(name)`, and `notify.switchboard_<slug>` follows."""
+    calls = mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[],
+        default_target=None,
+    )
+    await install(entry)
+
+    await options_flow(
+        entry,
+        "target",
+        {"name": "Water leak", "audience": ["person.alice"], "observer_mode": False},
+        {},
+    )
+
+    assert [row["slug"] for row in entry.options["targets"]] == ["water_leak"]
+    await hass.services.async_call(
+        "notify", "switchboard_water_leak", {"message": "m"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert len(calls["mobile_app_alice"]) == 1
+
+
+async def test_the_person_checkboxes_store_nothing_and_wake_time_keeps_its_shape(
+    hass, enable_custom_integrations, install, options_flow, mock_outputs
+):
+    """v0.8 addendum: a stored person has exactly the keys it had in v0.7."""
+    mock_outputs("mobile_app_alice")
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    await options_flow(
+        entry,
+        "edit_person",
+        {"entity_id": "person.alice"},
+        {
+            "outputs": ["mobile_app_alice"],
+            "silence_entities": [],
+            "night_schedule": False,
+            "advanced": True,
+        },
+        {"wake_time": "7:30"},
+    )
+
+    (person,) = entry.options["persons"]
+    assert set(person) == {"entity_id", "outputs", "silence_entities", "wake_time"}, (
+        "`night_schedule` and `advanced` are actions, never stored (contract v0.8)"
+    )
+    assert person["wake_time"] == "07:30:00", (
+        "a wake time typed without seconds is stored as `HH:MM:SS` (contract v0.8)"
     )

@@ -42,8 +42,13 @@ from .conftest import (
     suggested_value,
 )
 
-# ADR-0020 §1: the five, in the order the form shows them.
-BASIC_FIELDS = ["slug", "name", "alert_entity", "audience", "observer_mode"]
+# ADR-0020 §1: the five, in the order the form shows them. Amended by Sprint 8
+# (ADR-0022 §1): `slug` is derived from the name, so the form asks four.
+BASIC_FIELDS = ["name", "alert_entity", "audience", "observer_mode"]
+
+# Sprint 8 (ADR-0022 §3): "Advanced settings of a target" left the menu; the
+# edit screen's `advanced` checkbox opens the same public step.
+LEAK_BASIC = {"name": "Leak", "audience": ["person.alice"], "advanced": True}
 
 # ADR-0020 §1: everything else, with the defaults 0.5.1 already used.
 ADVANCED_FIELDS = [
@@ -139,12 +144,12 @@ async def test_target_advanced_holds_everything_else_with_unchanged_defaults(
         )
     )
 
-    result = await options_flow(entry, "edit_target_advanced", {"slug": "leak"})
+    result = await options_flow(entry, "edit_target", {"slug": "leak"}, LEAK_BASIC)
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "target_advanced", (
         "`target_advanced` is a public step id (contract v0.6), reached from "
-        "the 'Advanced settings of a target' menu entry (ADR-0020 §1)"
+        "the edit screen of a target (ADR-0022 §3)"
     )
     assert _field_names(result) == ADVANCED_FIELDS
     for key, expected in ADVANCED_DEFAULTS.items():
@@ -177,7 +182,7 @@ async def test_a_target_created_through_the_basic_step_is_the_0_5_row(
         entry,
         "target",
         {
-            "slug": "leak",
+            # Sprint 8 (ADR-0022 §1): no `slug`; "Leak" derives `leak`.
             "name": "Leak",
             "alert_entity": "alert.water",
             "audience": ["person.alice", "person.bob"],
@@ -215,7 +220,7 @@ async def test_a_basic_target_routes_exactly_as_a_0_5_target_with_defaults(
         entry,
         "target",
         {
-            "slug": "leak",
+            # Sprint 8 (ADR-0022 §1): no `slug`; "Leak" derives `leak`.
             "name": "Leak",
             "audience": ["person.alice", "person.bob"],
             "observer_mode": False,
@@ -264,10 +269,19 @@ async def test_editing_through_advanced_keeps_the_basic_values(
         )
     )
 
+    # Sprint 8 (ADR-0022 §3): reached through the edit screen, which is
+    # submitted with the values it opened on.
     result = await options_flow(
         entry,
-        "edit_target_advanced",
+        "edit_target",
         {"slug": "leak"},
+        {
+            "name": "Leak",
+            "alert_entity": "alert.water",
+            "audience": ["person.alice", "person.bob"],
+            "observer_mode": True,
+            "advanced": True,
+        },
         {
             "default_priority": "high",
             "presence_rule": "home_only",
