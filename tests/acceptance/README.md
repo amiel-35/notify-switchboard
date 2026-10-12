@@ -877,3 +877,41 @@ Review round (ADR-0022, amendment 2026-10-12):
 31. **A read-only field is asserted on its selector config**
     (`validator.config["read_only"]`). That the frontend greys it out is a
     frontend behaviour, checked end to end on a real instance, not here.
+
+## Sprint 9 (`test_s9_*.py`, and the v0.9 additions to `test_contract.py`)
+
+Sprint 9 adds one target key and one rule about the priority of a done
+message, ships one blueprint, and changes words on four screens. No service,
+entity, `data` key, drop reason or event type moves.
+
+Written against `docs/contract.md` §"v0.9 addendum (ADR-0023)",
+`docs/ADR/0023-one-click-automation-and-a-quiet-all-clear.md` and
+`docs/history/sprints/sprint-9-brief.md`.
+
+| File | What it pins |
+|---|---|
+| `test_s9_done_priority.py` | On a **real** core `alert:` listing `switchboard_leak` under `notifiers:`, on a `critical` target: the first message and a reminder are critical, the `done_message` is `normal`, carries neither the critical payload nor `authenticationRequired`, and keeps the `switchboard-leak` tag; the same after an acknowledgement and with a static `data.priority: critical` on the alert; a call between episodes is not a done message. Observer mode's done message and a `switchboard_done: true` call are capped too. `done_priority` is a ceiling (never a floor), applied after escalation. A capped done message is held by a silence, deferred, and keeps its ceiling at the flush. |
+| `test_s9_blueprint.py` | The three packaged files are valid automation blueprints (core's `AUTOMATION_BLUEPRINT_SCHEMA`) with the six frozen inputs and the same logic; `target_ready_manual` copies the instance-language file to `blueprints/automation/notify_switchboard/alert_from_a_sensor.yaml` (English for any other language), never over an existing file, and no other confirmation writes it; the screen links to `/config/blueprint/dashboard` and gives the automation name, keeping `{service}` and `{snippet}`; a failed copy falls back to a My Home Assistant `blueprint_import` link; an automation built from the installed file routes the sensor's change with `source_entity`, sends no `priority` by default, sends a capped `switchboard_done` message when asked, and ignores `unavailable`/`unknown`. |
+| `test_s9_observer_repeats.py` | On a real alert: observer mode routes the start and the end and no reminder; the `notifiers:` path routes every reminder. The `observer_mode` help on `target` and `target_edit`, `target_ready` and `target_saved` say so in `en`/`fr`/`es`. |
+| `test_contract.py` | The ten fields of `target_advanced` and `done_priority`'s default; `done_priority` written only when not `normal`; an absent one caps a done message at `normal`; the blueprint path and its six inputs. |
+
+### Older tests amended by Sprint 9, and for nothing else
+
+- **`test_s6_target_editor.py`**: `ADVANCED_FIELDS` gains `done_priority`
+  after `done_message`, and `ADVANCED_DEFAULTS` its default `normal` — the
+  field list of `target_advanced` is what contract v0.9 amends.
+
+### Assumptions added by Sprint 9
+
+32. **Every test has a configuration directory of its own**
+    (`tests/conftest.py` overrides `hass_config_dir` with
+    pytest-homeassistant-custom-component's `hass_tmp_config_dir`), because
+    the options flow now writes a blueprint there.
+33. **The recognition of an alert's done call is tested on core's real
+    `alert`**, never on a synthetic `alert.*` state: what is recognised is
+    the order inside core's `end_alerting`, which only the real entity has.
+    A reminder is fired with `async_fire_time_changed`; every test ends its
+    alert, which cancels core's repeat timer.
+34. **That the frontend opens the automation editor from the blueprint list
+    in one click** is frontend behaviour (`ha-blueprint-overview.ts`,
+    `_handleRowClicked`), checked on a real instance, not here.

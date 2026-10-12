@@ -60,6 +60,13 @@ seconds is still stored as `"HH:MM:SS"`. One v0.6 test was amended for that
 and nothing else: `test_class_is_not_a_routing_table_row_key` no longer
 submits a `slug` to `target`. What each screen *does* is `test_s8_*.py`'s
 business.
+
+Extended an eighth time for the v0.9 addendum (ADR-0023): one optional target
+key (`done_priority`, absent meaning `normal`) and its ceiling on a done
+message; `target_advanced` holds ten fields; one frozen blueprint path and its
+six input names. What the ceiling *does* to each kind of done message is
+`test_s9_done_priority.py`'s business; what the blueprint does,
+`test_s9_blueprint.py`'s.
 """
 
 from __future__ import annotations
@@ -837,3 +844,132 @@ async def test_the_person_checkboxes_store_nothing_and_wake_time_keeps_its_shape
     assert person["wake_time"] == "07:30:00", (
         "a wake time typed without seconds is stored as `HH:MM:SS` (contract v0.8)"
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.9 addendum (ADR-0023): `done_priority`, ten fields on `target_advanced`,
+# one frozen blueprint
+# ---------------------------------------------------------------------------
+
+# The fields of the public step id `target_advanced`, in the order the form
+# shows them (contract v0.9 amends the v0.6 row).
+TARGET_ADVANCED_STEP_FIELDS = [
+    "default_priority",
+    "presence_rule",
+    "allow_acknowledge",
+    "snooze_minutes",
+    "default_data",
+    "message",
+    "done_message",
+    "done_priority",
+    "default_title",
+    "clear_done",
+]
+
+
+async def test_target_advanced_holds_the_ten_frozen_fields(
+    hass, enable_custom_integrations, install, options_flow
+):
+    """v0.9 addendum: `done_priority` joins `target_advanced`, default `normal`."""
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+
+    result = await options_flow(
+        entry,
+        "edit_target",
+        {"slug": "leak"},
+        {"name": "Leak", "audience": ["person.alice"], "advanced": True},
+    )
+
+    assert result["step_id"] == "target_advanced"
+    fields = {str(marker): marker for marker in result["data_schema"].schema}
+    assert list(fields) == TARGET_ADVANCED_STEP_FIELDS, (
+        "contract v0.9: `target_advanced` holds ten fields"
+    )
+    assert fields["done_priority"].default() == "normal"
+
+
+async def test_done_priority_is_written_only_when_it_is_not_normal(
+    hass, enable_custom_integrations, install, options_flow
+):
+    """v0.9 addendum: absent means `normal`, so a 0.8 row stays a 0.8 row."""
+    entry = make_entry(
+        hass,
+        persons=[make_person("person.alice", ["mobile_app_alice"])],
+        targets=[make_target("leak", "Leak", audience=["person.alice"])],
+        default_target="leak",
+    )
+    await install(entry)
+    basic = {"name": "Leak", "audience": ["person.alice"], "advanced": True}
+
+    await options_flow(
+        entry, "edit_target", {"slug": "leak"}, basic, {"done_priority": "normal"}
+    )
+    (row,) = entry.options["targets"]
+    assert "done_priority" not in row
+
+    await options_flow(
+        entry, "edit_target", {"slug": "leak"}, basic, {"done_priority": "critical"}
+    )
+    (row,) = entry.options["targets"]
+    assert row["done_priority"] == "critical"
+
+
+async def test_an_absent_done_priority_caps_a_done_message_at_normal(
+    hass, enable_custom_integrations, install, mock_outputs, set_person
+):
+    """v0.9 addendum: the documented default, observed on a `critical` target."""
+    mock_outputs("mobile_app_alice")
+    set_person("person.alice", "home")
+    await install(
+        make_entry(
+            hass,
+            persons=[make_person("person.alice", ["mobile_app_alice"])],
+            targets=[
+                make_target(
+                    "leak",
+                    "Leak",
+                    default_priority="critical",
+                    audience=["person.alice"],
+                )
+            ],
+            default_target="leak",
+        )
+    )
+
+    await hass.services.async_call(
+        "notify",
+        "switchboard_leak",
+        {"message": "All clear", "data": {"switchboard_done": True}},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    state = hass.states.get("event.switchboard_delivery")
+    assert state.attributes["priority"] == "normal"
+
+
+def test_the_blueprint_path_and_inputs_are_frozen():
+    """v0.9 addendum: automations name the path and the six inputs."""
+    from homeassistant.util.yaml import load_yaml_dict  # noqa: PLC0415
+
+    component = (
+        Path(__file__).resolve().parents[2] / "custom_components" / "notify_switchboard"
+    )
+    for language in ("en", "fr", "es"):
+        path = component / "blueprints" / language / "alert_from_a_sensor.yaml"
+        data = load_yaml_dict(str(path))
+        assert data["blueprint"]["domain"] == "automation"
+        assert list(data["blueprint"]["input"]) == [
+            "trigger_entity",
+            "trigger_to",
+            "alert_name",
+            "message",
+            "done_message",
+            "priority",
+        ], f"{language}: the six frozen inputs, in this order (contract v0.9)"

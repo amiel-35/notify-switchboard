@@ -84,6 +84,7 @@ def make_target(
     managed: bool = False,
     clear_done: bool = False,
     escalate_when_nobody_home: bool = False,
+    done_priority: str | None = None,
 ) -> dict[str, Any]:
     """Build one row of `entry.options["targets"]` (the routing table).
 
@@ -131,6 +132,11 @@ def make_target(
         # v0.7 addendum (ADR-0021 §1): same discipline again -- absent means
         # false, so every S1-S6 target keeps the exact dict it had.
         row["escalate_when_nobody_home"] = True
+    if done_priority is not None:
+        # v0.9 addendum (ADR-0023 §2): absent means `normal`, and the flow
+        # writes the key only when it is not, so every S1-S8 target keeps the
+        # exact dict it had.
+        row["done_priority"] = done_priority
     return row
 
 

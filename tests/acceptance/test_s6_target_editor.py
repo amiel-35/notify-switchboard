@@ -59,6 +59,9 @@ ADVANCED_FIELDS = [
     "default_data",
     "message",
     "done_message",
+    # Sprint 9 (ADR-0023 §2.3): the ceiling of the done message, next to its
+    # text. Contract v0.9 amends the v0.6 field list of `target_advanced`.
+    "done_priority",
     "default_title",
     "clear_done",
 ]
@@ -68,6 +71,7 @@ ADVANCED_DEFAULTS = {
     "allow_acknowledge": False,
     "snooze_minutes": "",
     "default_data": {},
+    "done_priority": "normal",
     "clear_done": False,
 }
 
