@@ -40,18 +40,22 @@ The **My Home Assistant** button at the top opens this repository in
 [HACS](https://hacs.xyz/); by hand, add
 `https://github.com/amiel-35/notify-switchboard` as a custom repository. The
 second button starts the config flow. Two short forms — **two fields for a
-person, then five for a target** — are enough for a working
+person, then four for an alert** — are enough for a working
 `notify.switchboard`: adding the first person also creates a `default` target
 with everybody in it, and a speaker can join a target's audience directly (see
-[Bare outputs](#bare-outputs)). Priority, presence rule, buttons, snooze
-durations, templates and default data all have a sane default and live behind
-**Advanced settings** in the options menu. Full walkthrough, including
-**Test a person / Test a target**, in [`docs/quickstart.md`](docs/quickstart.md).
+[Bare outputs](#bare-outputs)). An alert is given a name; the identifier
+automations use (`notify.switchboard_<slug>`) is made from it once and never
+changes. Observer mode is on by default, so a new alert needs no YAML and no
+restart. Priority, presence rule, buttons, snooze durations, templates and
+default data all have a sane default and are opened by a checkbox on the
+**Change an alert** screen. The menu has three entries for people, three for
+alerts, and **Settings**. Full walkthrough, including the two test messages
+under **Settings**, in [`docs/quickstart.md`](docs/quickstart.md).
 
 ## When the house is empty
 
-A target can carry **`escalate_when_nobody_home`** (options menu → *Escalation
-of a target*, off by default). When on, and no person of the target's audience
+A target can carry **`escalate_when_nobody_home`** (**Change an alert** → tick
+*What happens when the house is empty*, off by default). When on, and no person of the target's audience
 is `home`, that message routes **one step louder** — `info→normal`,
 `normal→high`, `high→critical`, `critical` unchanged — for that message only.
 The presence rule is never overridden, so escalation only matters on a target
@@ -120,8 +124,12 @@ wins. The pickers don't offer entities: type the entity id in directly.
 A person with a silence entity has a queue that behaves like something a human
 wakes up to.
 
-- **Wake time** (optional, advanced person settings) flushes the queue at a
-  fixed hour. Without one, it flushes when the silence itself ends (a
+- **A night in one tick**: *Create a night schedule* on a person's screen
+  makes an ordinary `schedule` helper named after them, 22:00–07:00 every day,
+  and lists it as their silence. It is yours from then on — edit its hours in
+  **Settings → Helpers**; the router never changes or deletes it.
+- **Wake time** (optional, the person's night settings, typed as `7:30`)
+  flushes the queue at a fixed hour. Without one, it flushes when the silence itself ends (a
   `schedule.*` publishes that instant; an `input_boolean` does not, so a
   message it silenced is dropped, not deferred).
 - **A floor**: a silence entity publishing a `min_priority` state attribute
@@ -203,9 +211,12 @@ words; entity ids, service names and option keys are unchanged underneath
 
 Settings → Devices & services → Notify Switchboard → delete removes the
 `notify.switchboard` service and entity; it does not touch the `notify.*`
-services it forwarded to. Current release: **0.7.1** (two-step editors,
-escalation, a scheduled priority floor, the routing-table sensor, bare and
-entity outputs, a critical push per OS, plain-language interface) — see
+services it forwarded to. A night schedule created from a person's screen is
+an ordinary Home Assistant helper and stays. Current release: **0.8.0** (a
+first alert without code: names instead of identifiers, observer mode by
+default, a shorter menu, a night schedule in one tick; before it, two-step
+editors, escalation, a scheduled priority floor, the routing-table sensor,
+bare and entity outputs, a critical push per OS, plain-language interface) — see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full roadmap.
 
 ## Glossary

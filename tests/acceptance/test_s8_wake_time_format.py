@@ -35,7 +35,9 @@ FILES = [
 def _household(hass, wake_time: str | None = None):
     return make_entry(
         hass,
-        persons=[make_person("person.alice", ["mobile_app_alice"], wake_time=wake_time)],
+        persons=[
+            make_person("person.alice", ["mobile_app_alice"], wake_time=wake_time)
+        ],
         targets=[make_target("leak", "Leak", audience=["person.alice"])],
         default_target="leak",
     )

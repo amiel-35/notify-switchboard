@@ -120,6 +120,35 @@ value. Offering entities in the picker needs a few product decisions
 (labelling, ordering, what happens when a legacy service and an entity share
 a name) that have not been made yet.
 
+## The night schedule reaches core's schedule store through its websocket registry
+
+**What.** From 0.8.0 the person screen can create a `schedule` helper (ADR-0022
+§5). Home Assistant 2026.9.1 has no Python API for creating one: the
+`schedule` integration keeps its storage collection only behind its
+`schedule/*` websocket commands. The flow finds that collection through the
+registered `schedule/list` handler and calls the collection's own
+`async_create_item`, the method the `schedule/create` command uses.
+
+**Impact.** If a future core moves or wraps that handler, the checkbox stops
+working: the person screen shows "The night schedule could not be created",
+nothing is saved half-done, and everything else keeps working.
+
+**Workaround.** Create a schedule in **Settings → Devices & services →
+Helpers** and pick it in **When not to disturb them**, as before 0.8.0.
+
+## The read-only identifier and the menu are unverified in a real frontend
+
+**What.** The **Change an alert** screen shows the identifier automations use
+in a text field marked `read_only`, a selector option every selector accepts
+in 2026.9.1 (`make_selector_config_schema`). The tests assert the option is
+sent; that the frontend greys the field out, and how the seven-entry menu and
+the **Settings** sub-menu read, has to be seen on a real instance.
+
+**Impact.** If the frontend ignores `read_only`, the field looks editable;
+whatever is typed in it is ignored, so nothing breaks.
+
+**Workaround.** None needed; one look on a real instance closes this out.
+
 ## The critical push is unverified on a real device
 
 **What.** A `critical`-priority message carries the Companion-documented keys

@@ -1,4 +1,4 @@
-""""Create a night schedule for {person}": a core helper, made once, owned by the user.
+""" "Create a night schedule for {person}": a core helper, made once, owned by the user.
 
 Written before the Sprint 8 implementation exists, against:
 
@@ -48,7 +48,9 @@ async def cleanup_schedules(hass):
 
 
 def _person(entry, entity_id: str) -> dict[str, Any]:
-    return next(row for row in entry.options["persons"] if row["entity_id"] == entity_id)
+    return next(
+        row for row in entry.options["persons"] if row["entity_id"] == entity_id
+    )
 
 
 def _schedules(hass) -> list[str]:
@@ -118,7 +120,10 @@ async def test_ticking_it_creates_the_helper_and_lists_it_as_a_silence(
 
     blocks = await _weekly_blocks(hass, schedule)
     for day in DAYS:
-        assert blocks[day] == [("00:00:00", "07:00:00"), ("22:00:00", "23:59:59.999999")], (
+        assert blocks[day] == [
+            ("00:00:00", "07:00:00"),
+            ("22:00:00", "23:59:59.999999"),
+        ], (
             f"{day}: 22:00 → 07:00, as two blocks because a schedule block "
             f"cannot cross midnight; got {blocks[day]}"
         )

@@ -69,7 +69,7 @@ async def test_the_target_step_has_no_code_name_to_invent(
 async def test_the_slug_is_derived_from_the_name(
     hass, enable_custom_integrations, install, options_flow, mock_outputs
 ):
-    """"Fuite d'eau à l'étage" becomes `fuite_d_eau_a_l_etage`, and its service exists."""
+    """ "Fuite d'eau à l'étage" becomes `fuite_d_eau_a_l_etage`, and its service exists."""
     calls = mock_outputs("mobile_app_alice")
     hass.states.async_set("person.alice", "home")
     entry = await install(_household(hass))

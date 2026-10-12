@@ -61,6 +61,7 @@ from .test_config_flow import (  # noqa: PLC2701 - the flow helpers live there
     _add_person,
     _add_target,
     _create_entry,
+    _open_person_advanced,
     _options_step,
 )
 from .test_dispatcher import install, make_person, make_target
@@ -403,31 +404,31 @@ async def test_the_night_step_greets_the_person_by_name(
     entry = await _create_entry(hass)
     await _add_person(hass, entry, "person.dev_bob")
 
-    result = await _options_step(
-        hass, entry, "edit_person_advanced", {"entity_id": "person.dev_bob"}
-    )
+    result = await _open_person_advanced(hass, entry, "person.dev_bob")
 
+    assert result["step_id"] == "person_advanced"
     assert (result["description_placeholders"] or {})["person"] == "Bob"
 
 
 async def test_the_person_pickers_list_people_by_name(hass: HomeAssistant) -> None:
-    """Four pickers, one selector each, all of them showing entity ids in 0.7.0."""
+    """Three pickers, one selector each, all of them showing entity ids in 0.7.0.
+
+    From 0.8.0 (ADR-0022 §7) the label goes on after the name with the
+    person's devices and quiet times, so it opens on the name.
+    """
     async_mock_service(hass, "notify", "mobile_app_alice")
     hass.states.async_set("person.dev_bob", "home", {"friendly_name": "Bob"})
     entry = await _create_entry(hass)
     await _add_person(hass, entry, "person.dev_bob")
 
-    for step in (
-        "edit_person",
-        "edit_person_advanced",
-        "remove_person",
-        "test_person",
-    ):
+    for step in ("edit_person", "remove_person", "test_person"):
         result = await _options_step(hass, entry, step)
         options = _selector_options(result, "entity_id")
-        assert options == [{"value": "person.dev_bob", "label": "Bob"}], (
+        assert [option["value"] for option in options] == ["person.dev_bob"]
+        assert options[0]["label"].startswith("Bob — "), (
             f"the {step!r} picker still lists entity ids; got {options}"
         )
+        assert "person.dev_bob" not in options[0]["label"]
 
 
 async def test_the_target_pickers_list_targets_by_name(hass: HomeAssistant) -> None:
@@ -436,15 +437,14 @@ async def test_the_target_pickers_list_targets_by_name(hass: HomeAssistant) -> N
     hass.states.async_set("person.alice", "home", {"friendly_name": "Alice"})
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
-    await _add_target(hass, entry, slug="water_leak", name="Water leak")
+    # v0.8 (ADR-0022 §1): "Water leak" derives `water_leak`.
+    await _add_target(hass, entry, name="Water leak")
 
     for step, key in (
         ("edit_target", "slug"),
-        ("edit_target_advanced", "slug"),
-        ("edit_target_escalation", "slug"),
         ("remove_target", "slug"),
         ("test_target", "slug"),
-        ("general", "default_target"),
+        ("default_target", "default_target"),
     ):
         result = await _options_step(hass, entry, step)
         labels = {

@@ -9,6 +9,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.8.0] - 2026-10-12
+
+### Changed
+
+- **Add an alert** no longer asks for a short identifier. You give it a name —
+  "Water leak" — and the name used by automations (`water_leak`) is made from
+  it. Alerts you already have keep theirs, so `notify.switchboard_<name>` does
+  not change.
+- A new alert watches its Home Assistant alert directly by default. When it
+  does, the last screen says who will be told and that there is nothing else
+  to do: no YAML block to copy, no restart. The block is still shown when you
+  turn that switch off.
+- An alert that watches nothing is explained as an action your automations
+  can call, with its name.
+- The options menu is shorter: three entries for the people of the house,
+  three for the alerts, and **Settings** for the rest — the target used by
+  default, critical alerts on phones, how long a message set aside stays
+  useful, and the two test messages.
+- **Advanced settings of a target**, **What happens when the house is empty**
+  and **Set up somebody's night** are no longer menu entries: tick the box on
+  the screen where you change an alert or a person to open them.
+- When you change an alert, the name automations use is shown, read-only.
+- **Make phones ring for critical alerts** has a screen of its own under
+  **Settings**. Your choice is kept.
+- The wake time is typed the way you say it — `7:30`, `07:30`, `7h30` — with
+  no seconds.
+- The lists where you pick somebody show, on one line, their devices and when
+  they are left alone.
+
+### Added
+
+- **Create a night schedule** on a person's screen makes a Home Assistant
+  schedule for them, from 10 pm to 7 am every day, and uses it as their quiet
+  time. The schedule is yours: change its hours in **Settings → Devices &
+  services → Helpers**. Removing the person, or Notify Switchboard, leaves it
+  in place.
+- Removing somebody or an alert now asks for confirmation and says what will
+  be lost: which alerts that person will stop hearing about, or who will stop
+  being told.
+
 ## [0.7.1] - 2026-09-07
 
 ### Added
@@ -356,7 +396,8 @@ Nothing yet.
 - Upgrading from 0.0.1 reuses `notify.switchboard` instead of leaving an
   unavailable entity beside a new `notify.switchboard_2`. Nothing to do by hand.
 
-[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.5.1...v0.6.0

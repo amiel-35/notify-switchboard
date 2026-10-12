@@ -30,7 +30,12 @@
     "detail_delivery_failed": "Este mensaje se entregó a los dispositivos indicados para {person} y ninguno lo aceptó, así que no llegó.",
     "state_home": "en casa",
     "state_not_home": "fuera de casa",
-    "state_unknown": "en un lugar que la casa no sabe nombrar"
+    "state_unknown": "en un lugar que la casa no sabe nombrar",
+    "night_schedule_name": "Noche de {person}",
+    "picker_no_device": "todavía sin dispositivo",
+    "picker_quiet": "silencio: {entities}",
+    "no_target_yet": "ninguna alerta por ahora",
+    "nobody": "nadie"
   },
   "entity": {
     "binary_sensor": {
@@ -79,21 +84,15 @@
     "step": {
       "init": {
         "title": "Centralita de notificaciones",
-        "description": "Empieza por las personas de la casa: en qué dispositivos se avisa a cada una y cuándo no hay que molestarla. Crea después un destino por alerta — una fuga de agua, una puerta que se ha quedado abierta — eligiendo a quién hay que avisar.",
+        "description": "Empieza por las personas de la casa: en qué dispositivos se avisa a cada una y cuándo no hay que molestarla. Añade después una alerta por cada cosa que puede ir mal — una fuga de agua, una puerta que se ha quedado abierta — eligiendo a quién hay que avisar. Todo lo demás está en Ajustes.",
         "menu_options": {
           "person": "Añadir a alguien",
-          "edit_person": "Cambiar los dispositivos de alguien",
-          "edit_person_advanced": "Configurar la noche de alguien",
+          "edit_person": "Modificar a alguien",
           "remove_person": "Quitar a alguien",
-          "target": "Añadir un destino",
-          "edit_target": "Modificar un destino",
-          "edit_target_advanced": "Ajustes avanzados de un destino",
-          "remove_target": "Eliminar un destino",
-          "general": "Destino usado por defecto",
-          "ttl": "Cuánto tiempo sigue siendo útil un mensaje guardado",
-          "test_person": "Enviar un mensaje de prueba a alguien",
-          "test_target": "Enviar un mensaje de prueba por un destino",
-          "edit_target_escalation": "Qué pasa cuando la casa está vacía"
+          "target": "Añadir una alerta",
+          "edit_target": "Modificar una alerta",
+          "remove_target": "Quitar una alerta",
+          "general": "Ajustes"
         }
       },
       "person": {
@@ -107,41 +106,38 @@
         }
       },
       "edit_person": {
-        "title": "Cambiar los dispositivos de alguien",
+        "title": "Modificar a alguien",
         "description": "Elige a quién quieres modificar. La pantalla siguiente se abre ya rellenada con lo que está guardado.",
         "data": {
           "entity_id": "Persona"
         }
       },
       "person_outputs": {
-        "title": "Cambiar los dispositivos de {person}",
+        "title": "Los dispositivos de {person}",
         "description": "¿En qué dispositivos recibe {person} las notificaciones, y cuándo no hay que molestarla?",
         "data": {
           "outputs": "Dónde avisar",
-          "silence_entities": "Cuándo no molestar"
+          "silence_entities": "Cuándo no molestar",
+          "night_schedule": "Crear un horario de noche para esta persona",
+          "advanced": "Configurar su noche ahora"
         },
         "data_description": {
           "outputs": "Sus teléfonos ya están marcados. Puedes añadir un dispositivo que todavía no esté instalado: se usará en cuanto aparezca.",
-          "silence_entities": "Un horario, un interruptor o el modo Concentración de su iPhone: mientras esté activo, sus notificaciones esperan."
+          "silence_entities": "Un horario, un interruptor o el modo Concentración de su iPhone: mientras esté activo, sus notificaciones esperan.",
+          "night_schedule": "Añade a los momentos de silencio de arriba un horario «Noche de …» con su nombre, de 22:00 a 7:00 todos los días. Después es tuyo: cambia sus horas en Ajustes > Dispositivos y servicios > Ayudantes.",
+          "advanced": "Abre después su hora de despertar y su resumen de la mañana. Si la marcas, todo se guarda al validar esa pantalla."
         }
       },
       "person_advanced": {
-        "title": "Configurar la noche de {person}",
+        "title": "La noche de {person}",
         "description": "A qué hora termina su noche y cómo devolverle por la mañana lo que se ha guardado. Las dos respuestas son opcionales, y dejar la hora de despertar vacía es una respuesta: los mensajes esperan entonces a que el periodo de «no molestar» termine por sí solo, cuando anuncia un final — un horario lo hace — y se abandonan si no.",
         "data": {
           "wake_time": "Hora de despertar",
           "summary": "Resumirlo todo en un solo mensaje"
         },
         "data_description": {
-          "wake_time": "La hora a la que termina la noche, por ejemplo 07:00. Lo que se ha guardado durante la noche se entrega entonces, en lugar de perderse. Vacío: los mensajes esperan al final del periodo de «no molestar», cuando anuncia uno.",
+          "wake_time": "La hora a la que termina la noche, por ejemplo 7:30. Lo que se ha guardado durante la noche se entrega entonces, en lugar de perderse. Vacío: los mensajes esperan al final del periodo de «no molestar», cuando anuncia uno.",
           "summary": "Al despertar, una sola notificación que enumera todo lo que se ha guardado, en lugar de una notificación por mensaje. Activado por defecto."
-        }
-      },
-      "edit_person_advanced": {
-        "title": "Configurar la noche de alguien",
-        "description": "Elige de quién quieres configurar la noche. Sus dispositivos y sus periodos de «no molestar» se quedan tal cual.",
-        "data": {
-          "entity_id": "Persona"
         }
       },
       "remove_person": {
@@ -150,35 +146,85 @@
           "entity_id": "Persona"
         },
         "data_description": {
-          "entity_id": "Esta persona ya no será avisada por ningún destino. Valida para quitarla."
+          "entity_id": "Todavía no se quita nada: la pantalla siguiente dice de qué dejará de ser avisada esta persona."
+        }
+      },
+      "remove_person_confirm": {
+        "title": "¿Quitar a {person}?",
+        "description": "{person} dejará de ser avisada por: {targets}.\n\nLa Centralita de notificaciones olvida sus dispositivos y sus momentos de silencio; los teléfonos, horarios e interruptores siguen en Home Assistant.",
+        "data": {
+          "confirm": "Sí, quitar"
+        },
+        "data_description": {
+          "confirm": "Marca la casilla para confirmar. Para conservar a esta persona, cierra esta ventana."
         }
       },
       "target": {
-        "title": "Un destino: una alerta y a quién avisa",
-        "description": "Un destino es una alerta de la casa — una fuga de agua, una puerta que se ha quedado abierta — y las personas a las que avisar cuando se dispara. Estas cinco respuestas bastan: la importancia, la presencia, los botones y los textos ya tienen un valor razonable y se configuran más tarde.",
+        "title": "Añadir una alerta",
+        "description": "Una cosa que puede ir mal en la casa — una fuga de agua, una puerta que se ha quedado abierta — y las personas a las que avisar cuando ocurre. Cada alerta que añades aquí se convierte en un destino de la Centralita de notificaciones. Estas cuatro respuestas bastan: la importancia, la presencia, los botones y los textos ya tienen un valor razonable.",
         "data": {
-          "slug": "Identificador corto",
           "name": "Nombre",
           "alert_entity": "Alerta vigilada",
           "audience": "A quién avisar",
           "observer_mode": "Vigilar la alerta directamente"
         },
         "data_description": {
-          "slug": "Letras minúsculas sin espacios, por ejemplo fuga_agua. Este nombre funciona entre bastidores; una vez creado, ya no se cambia. Se convierte en notify.switchboard_fuga_agua.",
-          "name": "El nombre que ve la gente. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
-          "alert_entity": "La alerta de Home Assistant que acompaña este destino. Necesaria para el botón «Visto».",
+          "name": "El nombre que ve la gente, por ejemplo Fuga de agua. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
+          "alert_entity": "La alerta de Home Assistant que la acompaña. Necesaria para el botón «Visto». Déjala vacía para una alerta que envían tus propias automatizaciones.",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "La Centralita de notificaciones mira la alerta ella misma. No tienes que hacer nada más: en cuanto la alerta se dispara, se avisa a la gente. Es la forma recomendada."
+          "observer_mode": "Activado por defecto, y es la forma recomendada: la Centralita de notificaciones mira la alerta ella misma, así que en cuanto se dispara se avisa a la gente, sin nada que copiar ni reinicio."
+        }
+      },
+      "target_edit": {
+        "title": "Modificar {target}",
+        "description": "Cambia lo que vigila {target} y a quién avisa. Su nombre interno no cambia: las automatizaciones siguen llamándola {service}.",
+        "data": {
+          "slug": "Nombre interno",
+          "name": "Nombre",
+          "alert_entity": "Alerta vigilada",
+          "audience": "A quién avisar",
+          "observer_mode": "Vigilar la alerta directamente",
+          "advanced": "Abrir después los ajustes avanzados",
+          "escalation": "Abrir después qué pasa cuando la casa está vacía"
+        },
+        "data_description": {
+          "slug": "Es lo que usan tus automatizaciones. Se hizo a partir del primer nombre de esta alerta y nunca cambia, aunque la renombres.",
+          "name": "El nombre que ve la gente. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
+          "alert_entity": "La alerta de Home Assistant que la acompaña. Necesaria para el botón «Visto».",
+          "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
+          "observer_mode": "La Centralita de notificaciones mira la alerta ella misma: en cuanto se dispara, se avisa a la gente. Es la forma recomendada.",
+          "advanced": "La importancia, la presencia, los botones y los textos. Si la marcas, todo se guarda al validar la última pantalla.",
+          "escalation": "Si hay que subir la importancia cuando no hay nadie en casa. Si la marcas, todo se guarda al validar la última pantalla."
         }
       },
       "target_saved": {
-        "title": "Destino guardado",
-        "description": "Queda una cosa por hacer, una sola vez: copiar este bloque en tu configuración, sustituir binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reiniciar Home Assistant.\n\n```yaml\n{snippet}\n```\n\nEl bloque sigue la elección que acabas de hacer: si la Centralita de notificaciones vigila la alerta directamente, aquí no hay nadie que declarar; si no, esto es justamente lo que conecta la alerta con la Centralita de notificaciones.\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Ajustes avanzados de un destino» en este menú.",
+        "title": "Alerta guardada",
+        "description": "La Centralita de notificaciones no vigila esta alerta ella misma, así que queda una cosa por hacer, una sola vez: copiar este bloque en tu configuración, sustituir binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reiniciar Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPara saltarte este paso, modifica la alerta y activa «Vigilar la alerta directamente».\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
         "data_description": {
-          "advanced": "Déjala sin marcar para guardar el destino tal cual. Si la marcas, se guarda al validar la pantalla siguiente."
+          "advanced": "Déjala sin marcar para guardar la alerta tal cual. Si la marcas, se guarda al validar la pantalla siguiente."
+        }
+      },
+      "target_ready": {
+        "title": "Alerta guardada",
+        "description": "En cuanto «{name}» se dispare, se avisa a estas personas: {audience}. No hay nada más que hacer.\n\nLa importancia, la presencia, los botones y los textos ya tienen un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
+        "data": {
+          "advanced": "Abrir los ajustes avanzados ahora"
+        },
+        "data_description": {
+          "advanced": "Déjala sin marcar para guardar la alerta tal cual. Si la marcas, se guarda al validar la pantalla siguiente."
+        }
+      },
+      "target_ready_manual": {
+        "title": "Alerta guardada",
+        "description": "«{name}» no vigila ninguna alerta de Home Assistant: nada la dispara por sí sola. Es algo que tus automatizaciones pueden llamar: la acción {service}, con un mensaje, avisa a sus personas según sus ajustes.\n\nPara que se dispare sola, modifica la alerta y elige la alerta que hay que vigilar.",
+        "data": {
+          "advanced": "Abrir los ajustes avanzados ahora"
+        },
+        "data_description": {
+          "advanced": "Déjala sin marcar para guardar la alerta tal cual. Si la marcas, se guarda al validar la pantalla siguiente."
         }
       },
       "target_advanced": {
@@ -207,37 +253,70 @@
           "clear_done": "Quita el mensaje de vuelta a la normalidad de los teléfonos que lo han recibido, una vez terminada la alerta. Desactivado por defecto: suena y luego se queda."
         }
       },
-      "edit_target": {
-        "title": "Modificar un destino",
-        "description": "Elige el destino que quieres modificar. La pantalla siguiente se abre ya rellenada con lo que está guardado.",
+      "target_escalation": {
+        "title": "Qué pasa cuando la casa está vacía",
+        "description": "Lo que hace {target} cuando nadie de aquellos a los que avisa está en casa. No se modifica nada más. Esta elección solo sirve si el destino avisa también a los ausentes: si solo avisa a los que están en casa, una casa vacía quiere decir que no se avisa a nadie, y ya no queda nada que subir.",
         "data": {
-          "slug": "Destino"
+          "escalate_when_nobody_home": "Subir la importancia cuando la casa está vacía"
+        },
+        "data_description": {
+          "escalate_when_nobody_home": "Un punto más fuerte, solo para ese mensaje: poco importante pasa a normal, normal pasa a importante, importante pasa a crítico. Una alerta ya crítica no se mueve, y sigue siendo la presencia la que decide a quién se avisa."
         }
       },
-      "edit_target_advanced": {
-        "title": "Ajustes avanzados de un destino",
-        "description": "Elige el destino cuyos ajustes avanzados quieres abrir. Su alerta y las personas a las que avisa se quedan tal cual.",
+      "edit_target": {
+        "title": "Modificar una alerta",
+        "description": "Elige la alerta que quieres modificar. La pantalla siguiente se abre ya rellenada con lo que está guardado y lleva a sus ajustes avanzados.",
         "data": {
-          "slug": "Destino"
+          "slug": "Alerta"
         }
       },
       "remove_target": {
-        "title": "Eliminar un destino",
+        "title": "Quitar una alerta",
         "data": {
-          "slug": "Destino"
+          "slug": "Alerta"
         },
         "data_description": {
-          "slug": "Lo que lo usaba para avisar a la gente ya no avisará a nadie. Valida para eliminar este destino."
+          "slug": "Todavía no se quita nada: la pantalla siguiente dice a quién se dejará de avisar."
+        }
+      },
+      "remove_target_confirm": {
+        "title": "¿Quitar {target}?",
+        "description": "Ya no se avisará a nadie de {target}: {persons}.\n\nLo que todavía llame a {service} — una alerta, una automatización, una tarjeta — no avisará a nadie.",
+        "data": {
+          "confirm": "Sí, quitar"
+        },
+        "data_description": {
+          "confirm": "Marca la casilla para confirmar. Para conservar esta alerta, cierra esta ventana."
         }
       },
       "general": {
-        "title": "Destino usado por defecto",
-        "data": {
+        "title": "Ajustes",
+        "description": "Lo que afecta a toda la casa y no a una persona o a una alerta, y los dos mensajes de prueba.",
+        "menu_options": {
           "default_target": "Destino usado por defecto",
+          "critical_payload": "Hacer sonar los teléfonos para las alertas críticas",
+          "ttl": "Cuánto tiempo sigue siendo útil un mensaje guardado",
+          "test_person": "Enviar un mensaje de prueba a alguien",
+          "test_target": "Enviar un mensaje de prueba por un destino"
+        }
+      },
+      "default_target": {
+        "title": "Destino usado por defecto",
+        "description": "El destino que se usa cuando se pide a la Centralita de notificaciones que avise a la gente sin decir de qué alerta se trata.",
+        "data": {
+          "default_target": "Destino usado por defecto"
+        },
+        "data_description": {
+          "default_target": "Se usa cuando no se dice nada más."
+        }
+      },
+      "critical_payload": {
+        "title": "Hacer sonar los teléfonos para las alertas críticas",
+        "description": "Una alerta crítica es la única que pasa cuando no hay que molestar a alguien. Con este ajuste, además hace sonar su teléfono.",
+        "data": {
           "critical_payload": "Hacer sonar los teléfonos para las alertas críticas"
         },
         "data_description": {
-          "default_target": "Se usa cuando no se dice nada más.",
           "critical_payload": "Una alerta crítica hace sonar entonces el teléfono aunque esté en «No molestar». Activado por defecto; solo afecta a la aplicación Home Assistant."
         }
       },
@@ -278,23 +357,6 @@
       "test_result": {
         "title": "Resultado de la prueba",
         "description": "El mensaje ha salido. Esto es lo que ha pasado con cada uno:\n\n{result}\n\nEstas explicaciones están escritas en el idioma de Home Assistant, que no es necesariamente el de tu cuenta."
-      },
-      "target_escalation": {
-        "title": "Qué pasa cuando la casa está vacía",
-        "description": "Lo que hace {target} cuando nadie de aquellos a los que avisa está en casa. No se modifica nada más. Esta elección solo sirve si el destino avisa también a los ausentes: si solo avisa a los que están en casa, una casa vacía quiere decir que no se avisa a nadie, y ya no queda nada que subir.",
-        "data": {
-          "escalate_when_nobody_home": "Subir la importancia cuando la casa está vacía"
-        },
-        "data_description": {
-          "escalate_when_nobody_home": "Un punto más fuerte, solo para ese mensaje: poco importante pasa a normal, normal pasa a importante, importante pasa a crítico. Una alerta ya crítica no se mueve, y sigue siendo la presencia la que decide a quién se avisa."
-        }
-      },
-      "edit_target_escalation": {
-        "title": "Qué pasa cuando la casa está vacía",
-        "description": "Elige el destino que quieres configurar. Todo lo demás se queda tal cual.",
-        "data": {
-          "slug": "Destino"
-        }
       }
     },
     "error": {
@@ -314,7 +376,10 @@
       "empty_audience": "Elige al menos una persona.",
       "unknown_person": "Este destino quiere avisar a alguien que no está en la lista de personas de la casa.",
       "invalid_snooze_minutes": "Usa minutos enteros y positivos separados por comas.",
-      "invalid_default_data": "Este campo es para ajustes técnicos; déjalo vacío si no lo sabes."
+      "invalid_default_data": "Este campo es para ajustes técnicos; déjalo vacío si no lo sabes.",
+      "empty_name": "Dale un nombre.",
+      "not_confirmed": "Marca la casilla para confirmar, o cierra esta ventana para cancelar.",
+      "night_schedule_failed": "No se ha podido crear el horario de noche. Crea un horario en Ajustes > Dispositivos y servicios > Ayudantes y elígelo arriba."
     },
     "abort": {
       "nothing_to_remove": "Todavía no hay nada que eliminar.",

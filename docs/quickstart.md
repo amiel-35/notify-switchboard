@@ -15,16 +15,19 @@ Setup takes no input.
 
 ## 2. Add a person — the only required step
 
-Open **Configure → Add or update a person** and pick a `person.*`. The form is
-pre-filled: **Notify services** lists this instance's `notify.*` services,
+Open **Configure → Add somebody** and pick a `person.*`. The form is
+pre-filled: **Where to tell them** lists this instance's `notify.*` services,
 with the phones registered to *this person's* Home Assistant user marked as
 theirs and pre-selected (via the Companion registration's `user_id`, not a
-guess from the name); **Silence entities** proposes their iPhone Focus
+guess from the name); **When not to disturb them** proposes their iPhone Focus
 sensors. You can still type a service that does not exist yet — a speaker
 becomes a person's output the same way, once it is a `notify.*` service (see
-[`../README.md`](../README.md#adding-a-speaker-as-an-output)). That is the
-whole form: **wake time** and night **summary** are optional, in **Advanced
-settings of a person**.
+[`../README.md`](../README.md#adding-a-speaker-as-an-output)). Tick **Create a
+night schedule** and a `schedule` helper named after them, 22:00–07:00 every
+day, is created and used as their quiet time — it is yours afterwards, in
+**Settings → Helpers**. That is the whole form: **wake time** (typed `7:30`)
+and the morning **summary** are optional, behind the **Set up their night
+now** box.
 
 Submitting this form on an **empty** routing table also creates one target,
 `default`, with that person as its audience, so `notify.switchboard` now
@@ -39,15 +42,20 @@ and pick that as the silence entity instead.
 
 ## 3. Tie a target to an alert
 
-**Configure → Add or update a target** asks five things: a slug, a name, the
-`alert.*` it is about, the audience, and whether the router watches it itself
-(**Observer mode** — start here, no YAML change needed). Both wiring styles:
+**Configure → Add an alert** asks four things: a name, the `alert.*` it is
+about, the audience, and whether the router watches it itself (**Watch the
+alert directly**, on by default — no YAML change and no restart needed). The
+identifier automations use is made from the name: "Water leak" becomes
+`notify.switchboard_water_leak`, and stays so even if you rename it later.
+With observer mode on, the last screen just says who will be told; turn it off
+and it shows the `alert:` block to paste instead. Both wiring styles:
 [`../README.md`](../README.md#wiring-a-target-to-an-alert); more examples in
 [`examples/`](examples/).
 
 ## 4. Test it from the options menu
 
-**Configure → Test a person** or **Test a target** sends one *real* message
+**Configure → Settings → Send somebody a test message** or **Send a test
+message through a target** sends one *real* message
 through the ordinary routing path (tagged `switchboard-test`) and reports what
 happened to each person, in the same words `explain` uses.
 

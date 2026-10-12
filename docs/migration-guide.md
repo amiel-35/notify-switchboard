@@ -54,11 +54,11 @@ one is the notify payload the router reads `priority`/`tag` from.)
 ## Step 2 — one target per alert, starting with the one that annoys you most
 
 **One alert, one target** — a target's job is to say *who* is told about
-*that* alert, not to group by room or device class. In **Configure → Add or
-update a target**, fill the slug, name, `alert.*`, and audience (probably not
-everybody), and turn **Observer mode** on for an existing alert. Leave the
-rest — priority, presence rule, snooze durations, templates — at their
-defaults, in **Advanced settings of a target**.
+*that* alert, not to group by room or device class. In **Configure → Add an
+alert**, give it a name, the `alert.*` and the audience (probably not
+everybody); **Watch the alert directly** (observer mode) is already on. Leave
+the rest — priority, presence rule, snooze durations, templates — at their
+defaults, behind the advanced-settings box of **Change an alert**.
 
 Full wiring detail: [`../README.md`](../README.md#wiring-a-target-to-an-alert).
 With observer mode on, the old `notifiers:` list keeps working alongside it,

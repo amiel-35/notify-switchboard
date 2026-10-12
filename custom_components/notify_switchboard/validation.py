@@ -33,6 +33,50 @@ from .router import (
 PERSON_DOMAIN = "person"
 ALERT_DOMAIN = "alert"
 
+# ADR-0022 §1: what a name that slugifies to nothing becomes.
+FALLBACK_SLUG = "alert"
+
+
+def derive_slug(name: Any, existing: list[str]) -> str:
+    """Return the slug a new target called `name` gets (ADR-0022 §1).
+
+    `slugify(name)`, de-duplicated against the slugs already in the table by
+    appending `_2`, `_3`, ... -- the rule core's `IDManager.generate_id`
+    applies to helper ids (`homeassistant/helpers/collection.py`), so the
+    result reads like every other id the user has met.
+    """
+    text = str(name or "")
+    # Core's `slugify` answers "unknown" for a text it can make nothing of;
+    # a name made only of punctuation gets the documented fallback instead.
+    base = (slugify(text) if any(char.isalnum() for char in text) else "") or (
+        FALLBACK_SLUG
+    )
+    taken = set(existing)
+    proposal, attempt = base, 1
+    while proposal in taken:
+        attempt += 1
+        proposal = f"{base}_{attempt}"
+    return proposal
+
+
+def normalise_wake_time(raw: Any) -> str | None:
+    """Return a typed wake time as `"HH:MM:SS"`, or None when it is unreadable.
+
+    ADR-0022 §6: people type `7:30`, `07:30`, `7h30` or `7 h 30`; the options
+    keep the `"HH:MM:SS"` string the contract documents. Hours alone (`7`)
+    are refused, like core's own `parse_time` refuses them.
+    """
+    text = str(raw or "").strip().lower().replace(" ", "")
+    if not text:
+        return None
+    text = text.replace("h", ":")
+    if text.endswith(":"):
+        text += "00"
+    if not 2 <= len(text.split(":")) <= 3:  # noqa: PLR2004 - H:M or H:M:S
+        return None
+    parsed = parse_wake_time(text)
+    return parsed.strftime("%H:%M:%S") if parsed is not None else None
+
 
 def parse_snooze_minutes(raw: Any) -> tuple[list[int], bool]:
     """Parse a snooze duration list, returning (durations, ok)."""

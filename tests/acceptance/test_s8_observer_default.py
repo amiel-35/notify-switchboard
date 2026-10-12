@@ -66,7 +66,7 @@ async def test_a_new_target_starts_in_observer_mode(
 async def test_observer_mode_on_ends_on_one_sentence_without_yaml(
     hass, enable_custom_integrations, install, options_flow
 ):
-    """"As soon as “Leak” goes off, these people are told: Alice, Bob."""
+    """ "As soon as “Leak” goes off, these people are told: Alice, Bob."""
     hass.states.async_set("person.alice", "home", {"friendly_name": "Alice"})
     hass.states.async_set("person.bob", "home", {"friendly_name": "Bob"})
     entry = await install(_household(hass))

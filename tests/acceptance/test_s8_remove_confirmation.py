@@ -31,9 +31,7 @@ def _household(hass):
             make_person("person.bob", ["mobile_app_bob"]),
         ],
         targets=[
-            make_target(
-                "leak", "Water leak", audience=["person.alice", "person.bob"]
-            ),
+            make_target("leak", "Water leak", audience=["person.alice", "person.bob"]),
             make_target("gate", "Gate left open", audience=["person.alice"]),
             make_target("mail", "Mail", audience=["person.bob"]),
         ],
@@ -59,7 +57,7 @@ def _audience(entry, slug: str) -> list[str]:
 async def test_removing_somebody_first_says_which_alerts_they_lose(
     hass, enable_custom_integrations, install, options_flow
 ):
-    """"Alice will no longer be told by: Water leak, Gate left open"."""
+    """ "Alice will no longer be told by: Water leak, Gate left open"."""
     entry = await install(_household(hass))
 
     result = await options_flow(entry, "remove_person", {"entity_id": "person.alice"})

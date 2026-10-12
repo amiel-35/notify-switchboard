@@ -40,7 +40,13 @@ TOP_MENU = [
     "remove_target",
     "general",
 ]
-SETTINGS_MENU = ["default_target", "critical_payload", "ttl", "test_person", "test_target"]
+SETTINGS_MENU = [
+    "default_target",
+    "critical_payload",
+    "ttl",
+    "test_person",
+    "test_target",
+]
 GONE = ["edit_person_advanced", "edit_target_advanced", "edit_target_escalation"]
 
 
@@ -87,8 +93,7 @@ async def test_the_menu_is_three_blocks_of_one_entry_per_thing(
 
     assert result["type"] is FlowResultType.MENU
     assert list(result["menu_options"]) == TOP_MENU, (
-        "three entries about people, three about alerts, then Settings "
-        "(ADR-0022 §3)"
+        "three entries about people, three about alerts, then Settings (ADR-0022 §3)"
     )
     for entry_id in GONE:
         assert entry_id not in result["menu_options"], (
@@ -277,9 +282,7 @@ async def test_the_default_target_has_a_screen_of_its_own(
     )
 
     form = await options_flow(entry, "default_target")
-    assert [str(marker) for marker in form["data_schema"].schema] == [
-        "default_target"
-    ]
+    assert [str(marker) for marker in form["data_schema"].schema] == ["default_target"]
     await options_flow(entry, "default_target", {"default_target": "gate"})
     assert entry.options["default_target"] == "gate"
 
@@ -292,7 +295,7 @@ async def test_the_default_target_has_a_screen_of_its_own(
 async def test_the_person_pickers_describe_a_person_in_one_line(
     hass, enable_custom_integrations, install, options_flow, mobile_app_registration
 ):
-    """"Alice — Alice's iPhone, quiet: Alice's night"."""
+    """ "Alice — Alice's iPhone, quiet: Alice's night"."""
     mobile_app_registration("Alice's iPhone", user_id="user-alice")
     hass.states.async_set(
         "input_boolean.alice_night", "off", {"friendly_name": "Alice's night"}

@@ -846,6 +846,8 @@ weakened.
   through the person screen's `advanced` checkbox.
 - **`test_contract.py::test_class_is_not_a_routing_table_row_key`** no longer
   submits a `slug` to `target`.
+- **`test_s6_class_removed.py::test_class_is_a_field_of_neither_target_step`**
+  reaches `target_advanced` through the edit screen's `advanced` checkbox.
 
 ### Assumptions added by Sprint 8
 
