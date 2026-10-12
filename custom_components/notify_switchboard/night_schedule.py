@@ -99,12 +99,40 @@ def _storage_collection(hass: HomeAssistant) -> Any | None:
     return collection
 
 
-async def async_ensure_night_schedule(hass: HomeAssistant, name: str) -> str | None:
-    """Return the entity id of the night called `name`, creating it if needed.
+# How many "{name} 2", "{name} 3", ... are tried before giving up. A household
+# with that many people of one name has a naming problem the flow cannot fix.
+MAX_NAME_ATTEMPTS = 20
 
-    A schedule already stored under that exact name is reused, so ticking the
-    box twice gives one night. Returns None when the schedule collection
-    cannot be reached or refuses the item; nothing has been created then.
+
+def _is_our_night(item: dict[str, Any]) -> bool:
+    """Return True when a stored schedule holds exactly the 22:00-07:00 night."""
+    expected = [(block["from"], block["to"]) for block in NIGHT_BLOCKS]
+    for day in DAYS:
+        blocks = item.get(day) or []
+        found = [
+            (str(block.get("from")), str(block.get("to")))
+            for block in blocks
+            if isinstance(block, dict)
+        ]
+        if found != expected:
+            return False
+    return True
+
+
+async def async_ensure_night_schedule(
+    hass: HomeAssistant, name: str, taken: frozenset[str] = frozenset()
+) -> str | None:
+    """Return the entity id of a night for one person, creating it if needed.
+
+    A schedule already stored under `name` is reused only when it is exactly
+    the 22:00-07:00 night and its entity is not in `taken` -- the silence
+    entities of the *other* persons. Ticking the box twice for the same person
+    gives one night; two people with the same display name, or a schedule of
+    that name the user made with other hours, get a new one named "{name} 2",
+    "{name} 3", ... (ADR-0022 §5).
+
+    Returns None when the schedule collection cannot be reached or refuses the
+    item; nothing has been created then.
     """
     if SCHEDULE_DOMAIN not in hass.config.components and not (
         await async_setup_component(hass, SCHEDULE_DOMAIN, {})
@@ -120,24 +148,39 @@ async def async_ensure_night_schedule(hass: HomeAssistant, name: str) -> str | N
         )
         return None
 
-    item_id: str | None = None
-    for item in collection.async_items():
-        if isinstance(item, dict) and item.get("name") == name and item.get("id"):
-            item_id = str(item["id"])
-            break
-    if item_id is None:
-        try:
-            created = await collection.async_create_item(night_schedule_item(name))
-        except vol.Invalid, ValueError, HomeAssistantError:
-            # `async_create_item` validates before it stores anything, so a
-            # refusal leaves nothing behind.
-            _LOGGER.warning("The night schedule %r could not be created", name)
-            _LOGGER.debug("Refusal", exc_info=True)
-            return None
-        item_id = str(created["id"])
+    registry = er.async_get(hass)
+    items = [
+        item
+        for item in collection.async_items()
+        if isinstance(item, dict) and item.get("id")
+    ]
+    for attempt in range(1, MAX_NAME_ATTEMPTS + 1):
+        candidate = name if attempt == 1 else f"{name} {attempt}"
+        same_name = [item for item in items if item.get("name") == candidate]
+        if not same_name:
+            return await _async_create(hass, collection, candidate)
+        for item in same_name:
+            entity_id = registry.async_get_entity_id(
+                SCHEDULE_DOMAIN, SCHEDULE_DOMAIN, str(item["id"])
+            )
+            if entity_id is not None and entity_id not in taken and _is_our_night(item):
+                return entity_id
+    _LOGGER.warning("No free name was found for the night schedule %r", name)
+    return None
 
+
+async def _async_create(hass: HomeAssistant, collection: Any, name: str) -> str | None:
+    """Create the night called `name` and return its entity id."""
+    try:
+        created = await collection.async_create_item(night_schedule_item(name))
+    except vol.Invalid, ValueError, HomeAssistantError:
+        # `async_create_item` validates before it stores anything, so a
+        # refusal leaves nothing behind.
+        _LOGGER.warning("The night schedule %r could not be created", name)
+        _LOGGER.debug("Refusal", exc_info=True)
+        return None
     entity_id = er.async_get(hass).async_get_entity_id(
-        SCHEDULE_DOMAIN, SCHEDULE_DOMAIN, item_id
+        SCHEDULE_DOMAIN, SCHEDULE_DOMAIN, str(created["id"])
     )
     if entity_id is None:
         _LOGGER.warning("The night schedule %r has no entity", name)

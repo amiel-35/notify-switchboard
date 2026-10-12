@@ -13,28 +13,31 @@ Nothing yet.
 
 ### Changed
 
+- What you add for each thing that can go wrong is now called an **alert**
+  everywhere on screen — menus, errors, repairs and actions. A Home Assistant
+  alert (`alert.…`) is always called "a Home Assistant alert", so the two are
+  not confused. Nothing is renamed underneath.
 - **Add an alert** no longer asks for a short identifier. You give it a name —
-  "Water leak" — and the name used by automations (`water_leak`) is made from
-  it. Alerts you already have keep theirs, so `notify.switchboard_<name>` does
-  not change.
-- A new alert watches its Home Assistant alert directly by default. When it
-  does, the last screen says who will be told and that there is nothing else
-  to do: no YAML block to copy, no restart. The block is still shown when you
-  turn that switch off.
-- An alert that watches nothing is explained as an action your automations
-  can call, with its name.
+  "Water leak" — and its **automation name** (`water_leak`, so
+  `notify.switchboard_water_leak`) is made from it. Alerts you already have
+  keep theirs, and renaming an alert never changes it.
+- **Tell people as soon as it goes off** is on by default. With a Home
+  Assistant alert picked under **What sets it off**, the last screen just says
+  who will be told: no YAML to copy, no restart.
+- An alert tied to no Home Assistant alert says plainly that it will not go
+  off on its own, and gives both ways to set it off: the action to add to an
+  automation, or a ready-to-paste `alert:` block.
 - The options menu is shorter: three entries for the people of the house,
-  three for the alerts, and **Settings** for the rest — the target used by
+  three for the alerts, and **Settings** for the rest — the alert used by
   default, critical alerts on phones, how long a message set aside stays
   useful, and the two test messages.
-- **Advanced settings of a target**, **What happens when the house is empty**
-  and **Set up somebody's night** are no longer menu entries: tick the box on
-  the screen where you change an alert or a person to open them.
-- When you change an alert, the name automations use is shown, read-only.
+- The advanced settings of an alert, what happens when the house is empty,
+  and somebody's night are opened by a box on the screen where you change
+  them, instead of entries of their own in the menu.
 - **Make phones ring for critical alerts** has a screen of its own under
   **Settings**. Your choice is kept.
-- The wake time is typed the way you say it — `7:30`, `07:30`, `7h30` — with
-  no seconds.
+- The wake time is typed the way you say it — `7:30`, `07:30`, `7h30` — and a
+  time saved with seconds keeps them.
 - The lists where you pick somebody show, on one line, their devices and when
   they are left alone.
 
@@ -42,12 +45,18 @@ Nothing yet.
 
 - **Create a night schedule** on a person's screen makes a Home Assistant
   schedule for them, from 10 pm to 7 am every day, and uses it as their quiet
-  time. The schedule is yours: change its hours in **Settings → Devices &
-  services → Helpers**. Removing the person, or Notify Switchboard, leaves it
-  in place.
+  time. It is created only when you save, never shared between two people,
+  and never replaces a schedule of yours with other hours. It is yours: change
+  its hours in **Settings → Devices & services → Helpers**. Removing the
+  person, or Notify Switchboard, leaves it in place.
 - Removing somebody or an alert now asks for confirmation and says what will
-  be lost: which alerts that person will stop hearing about, or who will stop
-  being told.
+  be lost.
+
+### Fixed
+
+- An alert removed and then added again under the same name starts clean: it
+  no longer inherits the "later" holds, the messages set aside or the
+  back-to-normal memory of the one it replaces.
 
 ## [0.7.1] - 2026-09-07
 

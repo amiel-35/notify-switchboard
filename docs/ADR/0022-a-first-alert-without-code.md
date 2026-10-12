@@ -296,3 +296,63 @@ picker remain internal.
   If a future core moves the schedule collection, the checkbox fails visibly
   (`night_schedule_failed`) and nothing else breaks; `docs/known-issues.md`
   records it.
+
+## Amendment 2026-10-12 — review round
+
+Two reviews of the first implementation (code: "go with fixes"; a
+non-technical French reader: 5/10 against a target of 7/10) led the
+maintainer to the following. The doctrine is kept — a lasting state is a
+native `alert` — and the main blocker, that Home Assistant creates alerts in
+YAML only, is answered by explanation, not by a new mechanism.
+
+### §8. One word on screen: *alert*
+
+This supersedes the last paragraph of §3 and amends ADR-0020 §6 for the
+interface only. Every string a user reads calls a target an **alert**
+(« alerte », « alerta »): menus, screens, errors, repairs, exceptions and the
+action descriptions. A Home Assistant `alert.*` entity is always spelled "a
+Home Assistant alert (alert.…)" so the two never meet unqualified. Documents
+keep *target* as the technical term and say once, in the README glossary,
+that the screen calls it an alert. The repair/exception vocabulary test
+(`test_s6_vocabulary.py`) now asks for "alert".
+
+A target's slug is called its **automation name** (« nom pour les
+automatisations », "nombre para automatizaciones") everywhere: `target_edit`,
+the action fields, the README and the guides.
+
+### §2, amended: an alert tied to nothing says what to do
+
+The `alert_entity` field reads "What sets it off (optional)", and its help
+says that Home Assistant creates its alerts in YAML only. `target_ready_manual`
+says the alert will not go off on its own and gives **both** ways to set it
+off: the action `notify.switchboard_<slug>` to add to an automation, and the
+ready-to-paste `alert:` block (without `notifiers:`, since the router watches
+that alert once it is picked), with one sentence on `binary_sensor.CHANGE_ME`.
+`observer_mode` reads "Tell people as soon as it goes off (recommended)".
+
+### §5, amended: the helper is created at the last step, and never shared
+
+- The helper is created when the **last** screen of the person editor is
+  submitted: `person_outputs` when it is the last, `person_advanced` when the
+  `advanced` box chained to it. A user who closes the second screen leaves no
+  helper behind. A failure there is shown as a form-level error.
+- A schedule stored under the person's night name is reused only when it is
+  exactly the 22:00–07:00 night **and** its entity is not a silence entity of
+  another person. Otherwise the name is de-duplicated ("Bob's night 2", …), so
+  two people with the same display name get two nights and a schedule the
+  user made with other hours is left alone.
+
+### §6, amended: a wake time keeps its seconds
+
+A stored wake time whose seconds are not zero (written by 0.7) is shown as
+`HH:MM:SS` and kept on an unchanged submit; one without seconds is shown as
+`HH:MM`.
+
+### §9. A re-created alert starts clean
+
+Because a slug is derived from a name, removing an alert and adding it again
+under the same name gives the same slug. On every load of the config entry —
+and removing an alert writes the options, which reloads it — the router drops
+the snoozes, deferred messages and episodes whose slug is no longer in the
+routing table, before anything is re-armed. No storage version moves: the
+stored shape is unchanged, entries are only removed.

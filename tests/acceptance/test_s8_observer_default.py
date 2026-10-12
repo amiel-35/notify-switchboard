@@ -127,7 +127,12 @@ async def test_observer_mode_off_still_shows_the_alert_block(
 async def test_an_observer_target_without_an_alert_is_explained_as_a_service(
     hass, enable_custom_integrations, install, options_flow
 ):
-    """Nothing will go off by itself: say it is a service for automations."""
+    """Nothing will go off by itself: say so, and give both ways to set it off.
+
+    Amended in the 0.8.0 review round (ADR-0022 §2, amendment): the
+    automation action first, and the ready-to-paste `alert:` block as the
+    other path, because Home Assistant creates alerts in YAML only.
+    """
     entry = await install(_household(hass))
 
     result = await options_flow(
@@ -139,17 +144,24 @@ async def test_an_observer_target_without_an_alert_is_explained_as_a_service(
     )
     placeholders = result["description_placeholders"] or {}
     assert placeholders.get("service") == "notify.switchboard_doorbell"
-    assert "snippet" not in placeholders
+    snippet = placeholders.get("snippet", "")
+    assert "alert:" in snippet
+    assert "binary_sensor.CHANGE_ME" in snippet
+    assert "notifiers:" not in snippet, (
+        "once the user picks that alert, the router watches it: no notifiers"
+    )
 
 
 @pytest.mark.parametrize("file", FILES, ids=lambda path: path.name)
-def test_the_observer_confirmations_mention_no_yaml_and_no_restart(file: Path):
-    """The two observer confirmations are sentences, in every language."""
+def test_the_observer_confirmations_say_what_is_left_to_do(file: Path):
+    """`target_ready` is one sentence; `target_ready_manual` gives both paths."""
     steps = json.loads(file.read_text(encoding="utf-8"))["options"]["step"]
-    for step_id in ("target_ready", "target_ready_manual"):
-        text = steps[step_id]["description"]
-        assert "```" not in text, f"{file.name}: {step_id} must not carry YAML"
-        assert "{snippet}" not in text
-    assert "{audience}" in steps["target_ready"]["description"]
-    assert "{name}" in steps["target_ready"]["description"]
-    assert "{service}" in steps["target_ready_manual"]["description"]
+    ready = steps["target_ready"]["description"]
+    assert "```" not in ready, f"{file.name}: target_ready must not carry YAML"
+    assert "{snippet}" not in ready
+    assert "{audience}" in ready
+    assert "{name}" in ready
+    manual = steps["target_ready_manual"]["description"]
+    assert "{service}" in manual, "the automation action, by name"
+    assert "{snippet}" in manual, "and the `alert:` block, as the other path"
+    assert "binary_sensor.CHANGE_ME" in manual, "the placeholder is explained"

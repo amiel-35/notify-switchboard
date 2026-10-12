@@ -849,6 +849,19 @@ weakened.
 - **`test_s6_class_removed.py::test_class_is_a_field_of_neither_target_step`**
   reaches `target_advanced` through the edit screen's `advanced` checkbox.
 
+Review round (ADR-0022, amendment 2026-10-12):
+
+- **`test_s6_vocabulary.py::test_every_issue_or_exception_naming_a_target_says_target`**
+  asks for the word "alert" instead of "target": the screen word changed
+  (ADR-0022 §8); the rule — one word everywhere a user reads — did not.
+- **`test_s8_observer_default.py`**: `target_ready_manual` now carries the
+  `alert:` block as the second way to set an unwired alert off, so the two
+  tests about it assert the block is there (without `notifiers:`) instead of
+  absent. `target_ready` still carries no YAML.
+- The night-schedule ordering, the reuse rule, wake times with seconds and the
+  purge of a removed target's state are pinned in
+  `tests/unit/test_night_schedule.py`.
+
 ### Assumptions added by Sprint 8
 
 29. **The night schedule is observed through core's own service.** Its blocks

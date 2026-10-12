@@ -1,7 +1,8 @@
 # Quickstart: a working `notify.switchboard` in about ten minutes
 
-Install, add one person, write the `alert:` block, restart, watch a
-notification arrive. The only step that is not optional has no YAML at all:
+Install, add one person, add one alert, watch a notification arrive — from
+0.8.0 none of these steps needs YAML or a restart when the alert is tied to a
+Home Assistant alert you already have. The only step that is not optional:
 add the integration and add one person — their phones and Focus sensors are
 already filled in — and `notify.switchboard` works. This follows the public
 contract in [`contract.md`](contract.md); every word used here is defined
@@ -40,22 +41,33 @@ Android exposes Do Not Disturb as a multi-state `sensor`, not an `on`/`off`
 (`state: "{{ states('sensor.alice_phone_do_not_disturb_sensor') not in ['off', 'unknown', 'unavailable'] }}"`)
 and pick that as the silence entity instead.
 
-## 3. Tie a target to an alert
+## 3. Add an alert
 
-**Configure → Add an alert** asks four things: a name, the `alert.*` it is
-about, the audience, and whether the router watches it itself (**Watch the
-alert directly**, on by default — no YAML change and no restart needed). The
-identifier automations use is made from the name: "Water leak" becomes
-`notify.switchboard_water_leak`, and stays so even if you rename it later.
-With observer mode on, the last screen just says who will be told; turn it off
-and it shows the `alert:` block to paste instead. Both wiring styles:
+**Configure → Add an alert** asks four things: a name, **what sets it off**
+(an optional Home Assistant `alert.*`), who to tell, and **Tell people as soon
+as it goes off** (observer mode, on by default). Its **automation name** is
+made from its name: "Water leak" becomes `notify.switchboard_water_leak`, and
+stays so even if you rename it later.
+
+- **With a Home Assistant alert picked**, the last screen just says who will
+  be told. Nothing to copy, nothing to restart.
+- **With nothing picked** — Home Assistant only creates alerts in YAML — the
+  last screen gives two ways to set it off: add the action
+  `notify.switchboard_water_leak` to an automation, or paste the `alert:`
+  block it shows (replace `binary_sensor.CHANGE_ME` with your sensor),
+  restart, then pick that alert under **What sets it off**.
+- Turning observer mode off is the older wiring, where the Home Assistant
+  alert lists the router under `notifiers:`; the last screen then shows that
+  block.
+
+Both wiring styles:
 [`../README.md`](../README.md#wiring-a-target-to-an-alert); more examples in
 [`examples/`](examples/).
 
 ## 4. Test it from the options menu
 
 **Configure → Settings → Send somebody a test message** or **Send a test
-message through a target** sends one *real* message
+message through an alert** sends one *real* message
 through the ordinary routing path (tagged `switchboard-test`) and reports what
 happened to each person, in the same words `explain` uses.
 

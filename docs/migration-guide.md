@@ -55,8 +55,8 @@ one is the notify payload the router reads `priority`/`tag` from.)
 
 **One alert, one target** — a target's job is to say *who* is told about
 *that* alert, not to group by room or device class. In **Configure → Add an
-alert**, give it a name, the `alert.*` and the audience (probably not
-everybody); **Watch the alert directly** (observer mode) is already on. Leave
+alert**, give it a name, pick the Home Assistant `alert.*` under **What sets it off** and choose who to tell (probably not
+everybody); **Tell people as soon as it goes off** (observer mode) is already on. Leave
 the rest — priority, presence rule, snooze durations, templates — at their
 defaults, behind the advanced-settings box of **Change an alert**.
 
@@ -76,7 +76,7 @@ full example. **Configure → Test a target** is the other half: it sends one
 ## Step 4 — the night, once the rest works
 
 Only now give people a night. A person with a silence entity has a queue:
-give them a **wake time** in **Advanced settings of a person** if they want a
+give them a **wake time** (tick **Set up their night now** on their screen) if they want a
 specific hour, and expect this to change what you receive — give it a week
 before tuning. If a night that holds *everything* is too much, give the
 silence a **floor** rather than adding a second silence entity (see
@@ -106,8 +106,9 @@ calls outside the integration's options.
   phones they carry is the person's business.
 - **Do not migrate everything in one evening.** Every step above is
   independently useful and reversible.
-- **Do not use a target's slug for anything you might rename.** It is a
-  public service name.
+- **The automation name of an alert is fixed.** It is made from the name
+  when the alert is created and is a public service name
+  (`notify.switchboard_<slug>`): renaming the alert later does not change it.
 
 ## If you want to go back
 

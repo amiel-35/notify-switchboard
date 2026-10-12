@@ -812,14 +812,31 @@ the options:
 
 | Field | Effect when ticked |
 |---|---|
-| `night_schedule` | creates a core `schedule` helper named after the person, on 22:00–07:00 every day (or reuses one already named that way), and adds it to that person's `silence_entities`. The helper belongs to the user: the router never edits or deletes it, including when the person or the config entry is removed |
+| `night_schedule` | when the last screen of the person editor is submitted, creates a core `schedule` helper named after the person, on 22:00–07:00 every day, and adds it to that person's `silence_entities`. A schedule of that name is reused only when it holds exactly that night and is not another person's silence entity; otherwise the name is de-duplicated. Nothing is created before that last submit. The helper belongs to the user: the router never edits or deletes it, including when the person or the config entry is removed |
 | `advanced` | opens `person_advanced` for the same person before anything is written |
 
 ### `wake_time` without seconds
 
 `person_advanced.wake_time` accepts `H:MM`, `HH:MM`, `HHhMM` and `HH:MM:SS`.
 What is stored is unchanged: the `"HH:MM:SS"` string v0.7 documents for
-`sensor.switchboard_routing_table`.
+`sensor.switchboard_routing_table`. A stored value whose seconds are not zero
+is shown and kept as it is.
+
+### One word on screen (amends v0.6 §"One word per concept")
+
+In every user-facing **string** — not in this document or the other technical
+ones — a target is an **alert** (« alerte », « alerta »), and its slug its
+**automation name**. A Home Assistant `alert.*` entity is always called "a
+Home Assistant alert". Documents keep *target*; the README glossary maps the
+two. No key, step id or public name changes.
+
+### A target's leftover state is dropped with it
+
+Snoozes, deferred messages and episodes are keyed on a target's slug. On every
+load of the config entry, those whose slug is no longer in the routing table
+are dropped, so a target re-created under the same name — hence the same
+derived slug — inherits nothing from the one that was removed. Nothing is
+added to what is stored.
 
 ### Steps that are reached differently
 

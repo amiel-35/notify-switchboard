@@ -10,9 +10,9 @@
     "default_target_name": "Everybody",
     "test_message": "Notify Switchboard test message.",
     "detail_routed": "This message would be sent to: {outputs}.",
-    "detail_deferred": "{person} is not to be disturbed right now — {entities}. The message would wait, and be delivered at {until}.",
+    "detail_deferred": "{person} is not to be disturbed right now — {entities}. The message would be set aside, and delivered at {until}.",
     "detail_dropped": "This message would not reach {person} ({reason}).",
-    "detail_presence": "This target does not notify everybody in every situation: its presence rule is {rule}, and {person} is currently {state}.",
+    "detail_presence": "This alert does not notify everybody in every situation: its presence rule is {rule}, and {person} is currently {state}.",
     "detail_silenced": "{person} is not to be disturbed right now — {entities}. Only a critical alert would get through.",
     "detail_silenced_temporary": "{person} has been left in peace for a while, until {until}. Only a critical alert would get through.",
     "detail_snoozed": "{person} put {target} on hold until {until}.",
@@ -23,7 +23,7 @@
     "summary_title": "{count} messages set aside for you",
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
-    "detail_expired": "A message kept back for {person} would be given up: it would have waited too long to still be worth delivering.",
+    "detail_expired": "A message set aside for {person} would be given up: it has been set aside too long to still be worth delivering.",
     "detail_not_notified": "{person} heard nothing the last time {target} went off, so the back-to-normal message does not concern {person}.",
     "detail_silenced_floor": "{person} is not to be disturbed right now — {entities}, and only messages marked “{floor}” or above get through. A critical alert always does.",
     "detail_unknown_target": "“{target}” is no longer one of the messages this house knows how to send, so there is nowhere to deliver this one.",
@@ -73,7 +73,7 @@
     "step": {
       "user": {
         "title": "Set up Notify Switchboard",
-        "description": "Notify Switchboard decides who is told, on what, and when; your phones and your speakers are what ring — it never rings anything itself. Once it is installed, open its options: add the people of the house and their devices first, then one target per alert."
+        "description": "Notify Switchboard decides who is told, on what, and when; your phones and your speakers are what ring — it never rings anything itself. Once it is installed, click Configure: add the people of the house and their devices first, then one alert per thing that can go wrong."
       }
     },
     "abort": {
@@ -123,20 +123,20 @@
         },
         "data_description": {
           "outputs": "Their phones are already ticked. You can add a device that is not set up yet: it will be used as soon as it shows up.",
-          "silence_entities": "A schedule, a switch, or the Focus mode of their iPhone: while it is on, their notifications wait.",
+          "silence_entities": "A schedule, a switch, or the Focus mode of their iPhone: while it is on, their notifications are set aside.",
           "night_schedule": "Adds a schedule named after this person, from 10 pm to 7 am every day, to the quiet times above. It is yours afterwards: change its hours in Settings > Devices & services > Helpers.",
           "advanced": "Opens their wake time and morning summary next. Ticked, everything is saved when that screen is submitted."
         }
       },
       "person_advanced": {
         "title": "The night of {person}",
-        "description": "What time their night ends, and how to hand them in the morning what was set aside. Both answers are optional, and leaving the wake time empty is an answer: messages then wait for the not-to-be-disturbed period to end by itself, when it announces an end — a schedule does — and are given up otherwise.",
+        "description": "Optional. Without a time, the messages of the night arrive when the night schedule ends. A plain switch announces no end: with one of those, give a time, or the messages of the night are lost.",
         "data": {
           "wake_time": "Wake time",
           "summary": "Sum it all up in one message"
         },
         "data_description": {
-          "wake_time": "The time the night ends, for example 7:30. What was set aside during the night is delivered then, instead of being lost. Empty: messages wait for the not-to-be-disturbed period to end, when it announces an end.",
+          "wake_time": "The time the night ends, for example 7:30. What was set aside during the night is delivered then. Empty: when the night schedule ends.",
           "summary": "One notification on waking, listing everything that was set aside, instead of one notification per message. On by default."
         }
       },
@@ -161,45 +161,45 @@
       },
       "target": {
         "title": "Add an alert",
-        "description": "One thing that can go wrong in the house — a water leak, a gate left open — and the people to tell when it does. Each alert you add here becomes a target of Notify Switchboard. These four answers are enough: importance, presence, buttons and wording all have a sensible value already.",
+        "description": "One thing that can go wrong in the house — a water leak, a gate left open — and the people to tell when it happens. These four answers are enough: importance, presence, buttons and wording all have a sensible value already.",
         "data": {
           "name": "Name",
-          "alert_entity": "Alert watched",
+          "alert_entity": "What sets it off (optional)",
           "audience": "Who to tell",
-          "observer_mode": "Watch the alert directly"
+          "observer_mode": "Tell people as soon as it goes off (recommended)"
         },
         "data_description": {
           "name": "The name people see, for example Water leak. It is also the text sent when the alert supplies none.",
-          "alert_entity": "The Home Assistant alert this one goes with. Needed for the Acknowledge button. Leave it empty for an alert your automations send themselves.",
+          "alert_entity": "A Home Assistant alert (alert.…). Home Assistant only lets you create those in YAML: if you have none, leave this empty — you will be shown what to do.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "On by default, and the recommended way: Notify Switchboard watches the alert itself, so the moment it goes off people are told, with nothing to copy and no restart."
+          "observer_mode": "On by default: Notify Switchboard watches what sets it off itself, so people are told at once, with nothing to copy and no restart."
         }
       },
       "target_edit": {
         "title": "Changing {target}",
-        "description": "Change what {target} watches and who it tells. Its name behind the scenes does not change: automations keep calling it {service}.",
+        "description": "Change what “{target}” watches and who it tells. Its automation name does not change: {service}.",
         "data": {
-          "slug": "Name behind the scenes",
+          "slug": "Automation name",
           "name": "Name",
-          "alert_entity": "Alert watched",
+          "alert_entity": "What sets it off (optional)",
           "audience": "Who to tell",
-          "observer_mode": "Watch the alert directly",
+          "observer_mode": "Tell people as soon as it goes off (recommended)",
           "advanced": "Open the advanced settings next",
           "escalation": "Open what happens when the house is empty next"
         },
         "data_description": {
-          "slug": "This is what your automations use. It was made from the first name of this alert and never changes, even if you rename it.",
+          "slug": "The name to use in your automations. It was made from the first name of this alert and never changes, even if you rename it.",
           "name": "The name people see. It is also the text sent when the alert supplies none.",
-          "alert_entity": "The Home Assistant alert this one goes with. Needed for the Acknowledge button.",
+          "alert_entity": "A Home Assistant alert (alert.…). Needed for the Acknowledge button. Empty: the alert only goes off when an automation calls it.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "Notify Switchboard watches the alert itself: the moment it goes off, people are told. This is the recommended way.",
+          "observer_mode": "Notify Switchboard watches what sets it off itself: people are told at once. This is the recommended way.",
           "advanced": "Importance, presence, buttons and wording. Ticked, everything is saved when the last screen is submitted.",
           "escalation": "Whether to raise the importance when nobody is home. Ticked, everything is saved when the last screen is submitted."
         }
       },
       "target_saved": {
         "title": "Alert saved",
-        "description": "Notify Switchboard does not watch this alert itself, so one thing is left to do, once and for all: copy this block into your configuration, replace binary_sensor.CHANGE_ME with the sensor to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTo skip this step, change the alert and turn on “Watch the alert directly” instead.\n\nEverything else — importance, presence, buttons, wording — already has a sensible value. Tick the box below to set them up right away, or come back later through “Change an alert”.",
+        "description": "You chose not to tell people as soon as it goes off, so the Home Assistant alert is what calls Notify Switchboard. Copy this block into your configuration once, replace binary_sensor.CHANGE_ME with the sensor to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTo skip this step, change the alert and tick “Tell people as soon as it goes off” instead.\n\nEverything else — importance, presence, buttons, wording — already has a sensible value. Tick the box below to set them up right away, or come back later through “Change an alert”.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
@@ -219,7 +219,7 @@
       },
       "target_ready_manual": {
         "title": "Alert saved",
-        "description": "“{name}” watches no Home Assistant alert, so nothing sets it off on its own. It is something your automations can call: the action {service}, with a message, tells its people according to their settings.\n\nTo have it go off by itself, change the alert and pick the alert to watch.",
+        "description": "“{name}” is linked to no Home Assistant alert, so it will not go off on its own. Two ways to set it off:\n\n1. In an automation, add the action {service} with a message.\n\n2. Or create a Home Assistant alert by pasting this block into your configuration, then restart Home Assistant. Replace binary_sensor.CHANGE_ME with the sensor that reports the problem — the leak detector, the gate contact:\n\n```yaml\n{snippet}\n```\n\nThen change this alert and pick it under “What sets it off”.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
@@ -242,20 +242,20 @@
           "clear_done": "Clear the back-to-normal message"
         },
         "data_description": {
-          "default_priority": "Only a critical alert gets through when somebody is not to be disturbed or has put the target on hold.",
+          "default_priority": "Only a critical alert gets through when somebody is not to be disturbed or has put the alert on hold.",
           "presence_rule": "Does somebody have to be at home, to be out, or does it not matter, to be told?",
           "allow_acknowledge": "Adds a button to the notification that turns the alert off.",
           "snooze_minutes": "Durations in minutes, comma separated, for example 15, 60. Empty: no \"later\" button at all.",
           "default_data": "If the message already says the same thing, the message wins.",
-          "message": "Optional, and used only when Notify Switchboard watches the alert itself. Empty: the name of the target is sent. Advanced users can write a template.",
-          "done_message": "Optional, sent when the alert turns off, if Notify Switchboard watches it itself. Empty: a ready-made text is sent.",
+          "message": "Optional, and used only when people are told as soon as it goes off. Empty: the name of the alert is sent. Advanced users can write a template.",
+          "done_message": "Optional, sent when the Home Assistant alert turns off, if people are told as soon as it goes off. Empty: a ready-made text is sent.",
           "default_title": "Title used when the call gives none, and for every message Notify Switchboard sends on its own.",
           "clear_done": "Take the back-to-normal notification off the phones that received it, once the alert is over. Off by default: it rings, then it stays."
         }
       },
       "target_escalation": {
         "title": "What happens when the house is empty",
-        "description": "What {target} does when nobody it tells is at home. Nothing else about it is touched. This choice only matters when the target also tells people who are out: if it only tells people who are in, an empty house means nobody is told at all, and there is nothing left to raise.",
+        "description": "What {target} does when nobody it tells is at home. Nothing else about it is touched. This choice only matters when the alert also tells people who are out: if it only tells people who are in, an empty house means nobody is told at all, and there is nothing left to raise.",
         "data": {
           "escalate_when_nobody_home": "Raise the importance when the house is empty"
         },
@@ -281,7 +281,7 @@
       },
       "remove_target_confirm": {
         "title": "Remove {target}?",
-        "description": "Nobody will be told about {target} any more: {persons}.\n\nWhatever still calls {service} — an alert, an automation, a card — will reach nobody.",
+        "description": "Nobody will be told about {target} any more: {persons}.\n\nWhatever still calls {service} — a Home Assistant alert, an automation, a card — will reach nobody.",
         "data": {
           "confirm": "Yes, remove"
         },
@@ -293,18 +293,18 @@
         "title": "Settings",
         "description": "What concerns the whole house rather than one person or one alert, and the two test messages.",
         "menu_options": {
-          "default_target": "Target used by default",
+          "default_target": "Alert used by default",
           "critical_payload": "Make phones ring for critical alerts",
           "ttl": "How long a message set aside stays useful",
           "test_person": "Send somebody a test message",
-          "test_target": "Send a test message through a target"
+          "test_target": "Send a test message through an alert"
         }
       },
       "default_target": {
-        "title": "Target used by default",
-        "description": "The target used when something asks Notify Switchboard to tell people without saying which alert it is about.",
+        "title": "Alert used by default",
+        "description": "The alert used when something asks Notify Switchboard to tell people without saying which alert it is about.",
         "data": {
-          "default_target": "Target used by default"
+          "default_target": "Alert used by default"
         },
         "data_description": {
           "default_target": "Used when nothing else is said."
@@ -335,23 +335,23 @@
         }
       },
       "test_target": {
-        "title": "Send a test message through a target",
-        "description": "Sends one real test message, to everybody this target tells.",
+        "title": "Send a test message through an alert",
+        "description": "Sends one real test message, to everybody this alert tells.",
         "data": {
-          "slug": "Target"
+          "slug": "Alert"
         },
         "data_description": {
-          "slug": "The target to try. The message counts like any other."
+          "slug": "The alert to try. The message counts like any other."
         }
       },
       "test_person": {
         "title": "Send somebody a test message",
-        "description": "Sends one real test message to this person, through a target that tells them.",
+        "description": "Sends one real test message to this person, through an alert that tells them.",
         "data": {
           "entity_id": "Person"
         },
         "data_description": {
-          "entity_id": "The target used by default is used when it tells this person, otherwise the first target that tells them."
+          "entity_id": "The alert used by default is used when it tells this person, otherwise the first alert that tells them."
         }
       },
       "test_result": {
@@ -369,12 +369,12 @@
       "invalid_entity": "This does not exist (any more) in your home.",
       "invalid_time": "Give a time, for example 7:30.",
       "invalid_slug": "Lowercase letters, digits and the _ sign only.",
-      "duplicate_slug": "Another target already goes by this name.",
+      "duplicate_slug": "Another alert already goes by this name.",
       "invalid_priority": "Pick one of: not very important, normal, important, critical.",
-      "invalid_presence_rule": "Pick one of: always, only people at home, only people who are out.",
+      "invalid_presence_rule": "Pick one of: always, at home or out; only people who are at home; only people who are out.",
       "not_an_alert": "Pick an alert.",
       "empty_audience": "Pick at least one person.",
-      "unknown_person": "This target wants to tell somebody who is not in the list of people this house notifies.",
+      "unknown_person": "This alert wants to tell somebody who is not in the list of people this house notifies.",
       "invalid_snooze_minutes": "Use whole, positive minutes, comma separated.",
       "invalid_default_data": "This field is for technical settings; leave it empty if you are not sure.",
       "empty_name": "Give it a name.",
@@ -384,65 +384,65 @@
     "abort": {
       "nothing_to_remove": "There is nothing to remove yet.",
       "nothing_to_edit": "There is nothing to edit yet.",
-      "nothing_to_configure": "Create a target first.",
-      "nothing_to_test": "No target tells this person anything, so there is nothing to send them. Add them to a target first."
+      "nothing_to_configure": "Create an alert first.",
+      "nothing_to_test": "No alert tells this person anything, so there is nothing to send them. Add them to an alert first."
     }
   },
   "issues": {
     "unknown_target": {
-      "title": "A target that was asked for does not exist",
-      "description": "Something asked for the target “{slug}”, which does not exist. The message was given up. Create that target, or fix whatever asks for it."
+      "title": "An alert that was asked for does not exist",
+      "description": "Something asked for the alert “{slug}”, which does not exist. The message was given up. Create that alert, or fix whatever asks for it."
     },
     "missing_output": {
       "title": "A device no longer answers",
       "description": "The device “{output}” has received nothing several times in succession: it does not exist, or every send ended in an error. The messages meant for it are lost. Repair it, or take it out of the person's devices."
     },
     "invalid_service_target": {
-      "title": "Something keeps asking for a target that does not exist",
-      "description": "Notify Switchboard cannot find the target “{value}”. Something — most often a card or a script left on a renamed target — keeps asking for it. Fix it, or create that target."
+      "title": "Something keeps asking for an alert that does not exist",
+      "description": "Notify Switchboard cannot find the alert “{value}”. Something — most often a card or a script left on a renamed alert — keeps asking for it. Fix it, or create that alert."
     },
     "invalid_service_person": {
       "title": "Something keeps naming somebody it cannot tell",
-      "description": "Notify Switchboard cannot find “{value}”: that person is not in the list of people of the house, or is not told by this target. Fix whatever asks for them, or add that person."
+      "description": "Notify Switchboard cannot find “{value}”: that person is not in the list of people of the house, or is not told by this alert. Fix whatever asks for them, or add that person."
     },
     "invalid_service_calls_many": {
       "title": "Something keeps asking with names that do not exist",
-      "description": "Notify Switchboard has now refused more than {count} different targets or people. Rather than one warning per name, this one stands for them all. Something is making up names that do not exist — most often an automation producing a wrong name. Fix it; this warning goes away when you restart Notify Switchboard."
+      "description": "Notify Switchboard has now refused more than {count} different alerts or people. Rather than one warning per name, this one stands for them all. Something is making up names that do not exist — most often an automation producing a wrong name. Fix it; this warning goes away when you restart Notify Switchboard."
     },
     "person_without_user_id": {
       "title": "Somebody is not linked to a Home Assistant account",
-      "description": "{person} gets notifications with the Acknowledge and Later buttons, but their card is not linked to any Home Assistant account. Notify Switchboard therefore cannot tell who pressed, and applies the action to everybody the target tells. Link this person to their account in Settings > People, then reload Notify Switchboard."
+      "description": "{person} gets notifications with the Acknowledge and Later buttons, but their card is not linked to any Home Assistant account. Notify Switchboard therefore cannot tell who pressed, and applies the action to everybody the alert tells. Link this person to their account in Settings > People, then reload Notify Switchboard."
     },
     "person_without_outputs": {
       "title": "Somebody has no device at all",
-      "description": "At least one target tells {person}, but no device is listed for {person}: every message meant for them is lost. Open the Notify Switchboard options, edit that person and give them at least one device."
+      "description": "At least one alert tells {person}, but no device is listed for {person}: every message meant for them is lost. Open the Notify Switchboard options, edit that person and give them at least one device."
     },
     "alert_entity_missing": {
-      "title": "A target watches an alert that does not exist",
-      "description": "The target “{slug}” watches an alert that no longer exists ({entity_id}). So it watches nothing, and its Acknowledge button turns nothing off. Create that alert, or take it out of the target's “Alert watched” field, then reload Notify Switchboard."
+      "title": "What sets an alert off no longer exists",
+      "description": "The alert “{slug}” is linked to a Home Assistant alert that no longer exists ({entity_id}). So it never goes off on its own, and its Acknowledge button turns nothing off. Create that Home Assistant alert again, or empty the alert's “What sets it off” field, then reload Notify Switchboard."
     }
   },
   "exceptions": {
     "unknown_target": {
-      "message": "There is no target {target}."
+      "message": "There is no alert {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "The target {target} has no Acknowledge button: it watches no alert, or the button is turned off for it."
+      "message": "The alert {target} has no Acknowledge button: it is linked to no Home Assistant alert, or the button is turned off for it."
     },
     "snooze_minutes_not_offered": {
-      "message": "The target {target} does not offer a {minutes} min hold. It offers: {offered}."
+      "message": "The alert {target} does not offer a {minutes} min hold. It offers: {offered}."
     },
     "unknown_person": {
       "message": "{person} is not in the list of people Notify Switchboard knows about."
     },
     "person_not_in_audience": {
-      "message": "{person} is not one of the people the target {target} tells."
+      "message": "{person} is not one of the people the alert {target} tells."
     },
     "invalid_silence_minutes": {
       "message": "Peace and quiet lasts between {min} and {max} minutes; {minutes} is neither."
     },
     "no_audience": {
-      "message": "The target {target} tells nobody."
+      "message": "The alert {target} tells nobody."
     },
     "no_loaded_entry": {
       "message": "Notify Switchboard is switched off, so it can do nothing. Switch it back on, then try again."
@@ -468,29 +468,29 @@
   "services": {
     "acknowledge": {
       "name": "Acknowledge",
-      "description": "Turns off the alert a target watches, exactly as the Acknowledge button of a notification does.",
+      "description": "Turns off the Home Assistant alert linked to an alert, exactly as the Acknowledge button of a notification does.",
       "fields": {
         "target": {
-          "name": "Target",
-          "description": "The target concerned (its short identifier). It must watch an alert and offer the Acknowledge button."
+          "name": "Alert",
+          "description": "The alert concerned (its automation name). It must be linked to a Home Assistant alert and offer the Acknowledge button."
         }
       }
     },
     "snooze": {
       "name": "Put on hold",
-      "description": "Stops the messages of one target for a while, for one person or for everybody that target tells.",
+      "description": "Stops the messages of one alert for a while, for one person or for everybody that alert tells.",
       "fields": {
         "target": {
-          "name": "Target",
-          "description": "The target concerned (its short identifier), the one to put on hold."
+          "name": "Alert",
+          "description": "The alert concerned (its automation name), the one to put on hold."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "For how long. It has to be one of the durations the target offers."
+          "description": "For how long. It has to be one of the durations the alert offers."
         },
         "person": {
           "name": "Person",
-          "description": "For whom. Leave empty for everybody that target tells."
+          "description": "For whom. Leave empty for everybody that alert tells."
         }
       }
     },
@@ -499,18 +499,18 @@
       "description": "Starts the messages again straight away, without waiting for the hold to run out.",
       "fields": {
         "target": {
-          "name": "Target",
-          "description": "The target concerned (its short identifier), the one to start again."
+          "name": "Alert",
+          "description": "The alert concerned (its automation name), the one to start again."
         },
         "person": {
           "name": "Person",
-          "description": "For whom. Leave empty for everybody that target tells."
+          "description": "For whom. Leave empty for everybody that alert tells."
         }
       }
     },
     "silence": {
       "name": "Do not disturb somebody",
-      "description": "Stops disturbing somebody for a while, for every target. Their own schedules and switches are left untouched; only a critical alert still gets through.",
+      "description": "Stops disturbing somebody for a while, for every alert. Their own schedules and switches are left untouched; only a critical alert still gets through.",
       "fields": {
         "person": {
           "name": "Person",
@@ -534,19 +534,19 @@
     },
     "explain": {
       "name": "Explain",
-      "description": "Answers the question “what would happen to a message sent right now to this target?”, person by person, without sending anything. Call it asking for the answer.",
+      "description": "Answers the question “what would happen to a message sent right now to this alert?”, person by person, without sending anything. Call it asking for the answer.",
       "fields": {
         "target": {
-          "name": "Target",
-          "description": "The target concerned (its short identifier), the one to look at."
+          "name": "Alert",
+          "description": "The alert concerned (its automation name), the one to look at."
         },
         "priority": {
           "name": "Importance",
-          "description": "The importance to assume. Leave empty for the one the target uses by default, exactly as a real message does."
+          "description": "The importance to assume. Leave empty for the one the alert uses by default, exactly as a real message does."
         },
         "person": {
           "name": "Person",
-          "description": "Whom to answer about. Leave empty for everybody that target tells."
+          "description": "Whom to answer about. Leave empty for everybody that alert tells."
         }
       }
     }

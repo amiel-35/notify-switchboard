@@ -616,9 +616,16 @@ def _person_picker_options(
 
 
 def _wake_time_display(stored: Any) -> str | None:
-    """Return a stored `"HH:MM:SS"` wake time as `HH:MM`, the way it is typed."""
+    """Return a stored `"HH:MM:SS"` wake time the way it is typed.
+
+    `HH:MM` when the seconds are zero -- every value 0.8 writes -- and the full
+    `HH:MM:SS` otherwise, so a 0.7 value such as `07:30:15` is shown as it is
+    and survives an unchanged submit instead of being rounded.
+    """
     parsed = parse_wake_time(stored)
-    return parsed.strftime("%H:%M") if parsed is not None else None
+    if parsed is None:
+        return None
+    return parsed.strftime("%H:%M:%S" if parsed.second else "%H:%M")
 
 
 def _target_picker_options(
@@ -739,6 +746,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
         # `target_advanced`, then `target_escalation`; this remembers the
         # second half of that chain while the first is on screen.
         self._then_escalation = False
+        # v0.8 (ADR-0022 §5): `night_schedule` was ticked on `person_outputs`
+        # together with `advanced`; the helper is created when
+        # `person_advanced` is submitted, never before.
+        self._pending_night = False
 
     @property
     def _switchboard(self) -> Switchboard | None:
@@ -1038,26 +1049,26 @@ class SwitchboardOptionsFlow(OptionsFlow):
             errors = _showable(
                 validate_person(row, persons, is_new=is_new), PERSON_BASIC_FIELDS
             )
-            if not errors and user_input.get(CONF_NIGHT_SCHEDULE):
-                # v0.8 (ADR-0022 §5): only once the person is known to be
-                # valid, so a refused form never leaves a helper behind.
-                night = await self._async_night_schedule(person_id)
-                silences: list[str] = list(row[CONF_SILENCE_ENTITIES] or [])
-                if night is None:
-                    errors = {CONF_NIGHT_SCHEDULE: "night_schedule_failed"}
-                elif night not in silences:
-                    row[CONF_SILENCE_ENTITIES] = [*silences, night]
-            if not errors:
-                persons = [
-                    other for other in persons if other["entity_id"] != person_id
-                ]
-                persons.append(row)
-                self._options[CONF_PERSONS] = persons
+            if not errors and user_input.get(CONF_ADVANCED):
+                # ADR-0022 §3: the night settings, for the same person, before
+                # anything is written -- submitting them saves both. The night
+                # helper, if asked for, is created then and only then: a user
+                # who closes the next screen leaves nothing behind (§5).
+                self._pending_night = bool(user_input.get(CONF_NIGHT_SCHEDULE))
+                self._stage_person(row)
                 await self._async_bootstrap_default_target()
-                if user_input.get(CONF_ADVANCED):
-                    # ADR-0022 §3: the night settings, for the same person,
-                    # before anything is written -- submitting them saves both.
-                    return await self.async_step_person_advanced()
+                return await self.async_step_person_advanced()
+            # v0.8 (ADR-0022 §5): this is the last step, and the person is
+            # known to be valid, so a refused form never leaves a helper.
+            if (
+                not errors
+                and user_input.get(CONF_NIGHT_SCHEDULE)
+                and not await self._async_add_night(row)
+            ):
+                errors = {CONF_NIGHT_SCHEDULE: "night_schedule_failed"}
+            if not errors:
+                self._stage_person(row)
+                await self._async_bootstrap_default_target()
                 return self._save()
 
         labels = await self._async_option_labels()
@@ -1144,11 +1155,15 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 validate_person(row, self._persons, is_new=False),
                 PERSON_ADVANCED_FIELDS,
             )
+            if not errors and self._pending_night:
+                # ADR-0022 §5: the night helper ticked on `person_outputs` is
+                # created at the last step, so closing this screen leaves none.
+                if await self._async_add_night(row):
+                    self._pending_night = False
+                else:
+                    errors = {"base": "night_schedule_failed"}
             if not errors:
-                self._options[CONF_PERSONS] = [
-                    row if other["entity_id"] == person_id else other
-                    for other in self._persons
-                ]
+                self._stage_person(row)
                 return self._save()
 
         schema = vol.Schema(
@@ -1175,13 +1190,40 @@ class SwitchboardOptionsFlow(OptionsFlow):
             },
         )
 
-    async def _async_night_schedule(self, person_id: str) -> str | None:
-        """Create or find the night helper of one person (ADR-0022 §5)."""
+    def _stage_person(self, row: dict[str, Any]) -> None:
+        """Put a validated person in the working copy, not yet in the options."""
+        persons = [
+            other for other in self._persons if other["entity_id"] != row["entity_id"]
+        ]
+        persons.append(row)
+        self._options[CONF_PERSONS] = persons
+
+    async def _async_add_night(self, row: dict[str, Any]) -> bool:
+        """Create or find the night helper of one person and list it (§5).
+
+        Called only by the last step of the person editor, once the person is
+        valid. A helper already listed as somebody *else's* silence is never
+        reused, so two people with the same display name get two nights.
+        Returns False when no helper could be created; `row` is then unchanged.
+        """
+        person_id = str(row["entity_id"])
         texts = await self._async_texts(SENTENCE_FALLBACKS)
         name = texts["night_schedule_name"].replace(
             "{person}", _person_label(self.hass, person_id)
         )
-        return await async_ensure_night_schedule(self.hass, name)
+        taken = frozenset(
+            str(entity)
+            for other in self._persons
+            if other["entity_id"] != person_id
+            for entity in other.get(CONF_SILENCE_ENTITIES) or []
+        )
+        night = await async_ensure_night_schedule(self.hass, name, taken)
+        if night is None:
+            return False
+        silences = [str(entity) for entity in row.get(CONF_SILENCE_ENTITIES) or []]
+        if night not in silences:
+            row[CONF_SILENCE_ENTITIES] = [*silences, night]
+        return True
 
     async def _async_option_labels(self) -> dict[str, str]:
         """Return the translated words the two selectors build labels from.
@@ -1520,6 +1562,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
             description_placeholders={
                 "name": _target_label(row),
                 "service": f"{NOTIFY_DOMAIN}.{LEGACY_SERVICE_NAME}_{row[CONF_SLUG]}",
+                # The other way to set it off: a Home Assistant alert of its
+                # own. An observer row's block names no `notifiers:`, which is
+                # right once the user picks that alert in "What sets it off".
+                "snippet": _alert_snippet(row),
             },
         )
 

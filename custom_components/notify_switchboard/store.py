@@ -261,6 +261,29 @@ class SwitchboardStore:
         self.episodes.clear()
         await self._store.async_remove()
 
+    def purge_unknown_slugs(self, slugs: set[str]) -> bool:
+        """Drop snoozes, deferrals and episodes of targets no longer in the table.
+
+        ADR-0022 §1 derives a slug from a name, so a target removed and then
+        re-created under the same name gets the *same* slug. Without this, the
+        new target would inherit the old one's snoozes, its half-open episode
+        and its queued messages. Run on every load -- removing a target writes
+        the options, which reloads the entry. Returns True when something was
+        dropped.
+        """
+        snoozes = [key for key in self.snoozes if key[1] not in slugs]
+        deferrals = [
+            key for key, value in self.deferrals.items() if value.slug not in slugs
+        ]
+        episodes = [slug for slug in self.episodes if slug not in slugs]
+        for key in snoozes:
+            del self.snoozes[key]
+        for deferral_key in deferrals:
+            del self.deferrals[deferral_key]
+        for slug in episodes:
+            del self.episodes[slug]
+        return bool(snoozes or deferrals or episodes)
+
     def purge_expired_snoozes(self, now: datetime) -> bool:
         """Drop snoozes that have expired; return True when something changed."""
         expired = [key for key, expiry in self.snoozes.items() if expiry <= now]

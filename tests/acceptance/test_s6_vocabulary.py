@@ -121,13 +121,18 @@ def test_rule_is_only_ever_the_presence_rule(file: Path):
 
 @pytest.mark.parametrize("file", ENGLISH_FILES, ids=lambda file: file.name)
 def test_every_issue_or_exception_naming_a_target_says_target(file: Path):
-    """A repair and a refusal teach the word the options menu uses."""
+    """A repair and a refusal teach the word the options menu uses.
+
+    Amended by Sprint 8 (ADR-0022 §8): the word the menu uses for a target is
+    now **alert** -- "Add an alert" -- so that is the word a repair has to
+    teach. The rule itself, one word everywhere the user reads, is unchanged.
+    """
     offenders = [
         (key, text)
         for key, text in _strings(file)
         if key.split("/")[0] in {"issues", "exceptions"}
         and _names_a_target(text)
-        and "target" not in text.lower()
+        and "alert" not in text.lower()
     ]
 
     assert not offenders, (

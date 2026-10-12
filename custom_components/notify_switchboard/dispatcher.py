@@ -347,6 +347,13 @@ class Switchboard:
         """Load persisted state and start every listener."""
         await self.store.async_load()
 
+        # ADR-0022 §1: a slug derived from a name comes back when a target is
+        # removed and re-created under that name. What the removed target left
+        # behind -- snoozes, an open episode, queued messages -- is dropped
+        # here, before anything is re-armed, so the new target starts clean.
+        if self.store.purge_unknown_slugs(set(self.table.targets)):
+            await self.store.async_save()
+
         # An options change reloads the entry, so this is also the moment a
         # slug or a person the user has just added stops being "invalid".
         self._async_clear_fixed_service_issues()
