@@ -59,6 +59,13 @@ From 0.8.0 (ADR-0022) the flow is built for somebody adding a first alert:
   (`night_schedule.py`), and `person_advanced` takes a wake time without
   seconds.
 
+From 0.9.0 (ADR-0023):
+
+- `target_ready_manual` installs the shipped automation blueprint
+  (`automation_blueprint.py`) and links to it, before the manual way;
+- `target_advanced` holds a tenth field, `done_priority`, the ceiling of the
+  target's done messages, written only when it is not `normal`.
+
 Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/helpers/selector.py: SelectSelector / SelectSelectorConfig
   (line 1883, `custom_value` and `sort`), SelectOptionDict (line 1869),
@@ -94,6 +101,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er, selector
 from homeassistant.helpers.translation import async_get_translations
 
+from .automation_blueprint import (
+    InstallResult,
+    async_install_blueprint,
+    blueprint_language,
+    import_url,
+)
 from .const import (
     ATTR_USER_ID,
     CONF_ALERT_ENTITY,
@@ -106,6 +119,7 @@ from .const import (
     CONF_DEFAULT_TARGET,
     CONF_DEFAULT_TITLE,
     CONF_DONE_MESSAGE,
+    CONF_DONE_PRIORITY,
     CONF_ESCALATE_WHEN_NOBODY_HOME,
     CONF_MANAGED,
     CONF_MESSAGE,
@@ -120,6 +134,7 @@ from .const import (
     CONF_TARGETS,
     CONF_TTL_MINUTES,
     CONF_WAKE_TIME,
+    DEFAULT_DONE_PRIORITY,
     DEFAULT_PRESENCE_RULE,
     DEFAULT_PRIORITY,
     DEFAULT_TARGET_SLUG,
@@ -246,6 +261,8 @@ TARGET_ADVANCED_FIELDS: frozenset[str] = frozenset(
         CONF_DEFAULT_DATA,
         CONF_MESSAGE,
         CONF_DONE_MESSAGE,
+        # v0.9 (ADR-0023 §2.3): next to the text it governs.
+        CONF_DONE_PRIORITY,
         CONF_DEFAULT_TITLE,
         CONF_CLEAR_DONE,
     }
@@ -301,6 +318,15 @@ SENTENCE_FALLBACKS: dict[str, str] = {
     "picker_quiet": "quiet: {entities}",
     "no_target_yet": "no alert yet",
     "nobody": "nobody",
+    # ADR-0023 §1: the one sentence `target_ready_manual` opens on, depending on
+    # whether the blueprint is in the configuration or has to be imported.
+    "blueprint_ready": (
+        "The blueprint “Notify Switchboard: set an alert off from a sensor” is "
+        "ready. [Open your blueprints](/config/blueprint/dashboard) and click it."
+    ),
+    "blueprint_import": (
+        "[Import the blueprint]({url}), then click it in your blueprints."
+    ),
 }
 
 
@@ -326,6 +352,13 @@ def _advanced_target_values(stored: dict[str, Any] | None) -> dict[str, Any]:
             CONF_DEFAULT_TITLE: stored.get(CONF_DEFAULT_TITLE) or None,
         }
         | ({CONF_CLEAR_DONE: True} if stored.get(CONF_CLEAR_DONE) else {})
+        | (
+            # v0.9 (ADR-0023 §2.1): same discipline, absent is `normal`.
+            {CONF_DONE_PRIORITY: stored[CONF_DONE_PRIORITY]}
+            if stored.get(CONF_DONE_PRIORITY)
+            and stored[CONF_DONE_PRIORITY] != DEFAULT_DONE_PRIORITY
+            else {}
+        )
         | (
             # v0.7 (ADR-0021 §1): carried over, never invented. The basic step must
             # not be able to clear a flag it does not show.
@@ -1571,6 +1604,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
             data_schema=schema,
             description_placeholders={
                 "name": _target_label(row),
+                # ADR-0023 §1: the way first -- the shipped blueprint, now in
+                # the configuration -- and the automation name to type into it.
+                "blueprint": await self._async_blueprint_sentence(),
+                "slug": str(row[CONF_SLUG]),
                 "service": f"{NOTIFY_DOMAIN}.{LEGACY_SERVICE_NAME}_{row[CONF_SLUG]}",
                 # The other way to set it off: a Home Assistant alert of its
                 # own. An observer row's block names no `notifiers:`, which is
@@ -1578,6 +1615,22 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 "snippet": _alert_snippet(row),
             },
         )
+
+    async def _async_blueprint_sentence(self) -> str:
+        """Install the shipped blueprint if absent, and say where it is.
+
+        ADR-0023 §1. The copy is made when the screen that needs it is shown,
+        never at start-up: a user who deleted the file on purpose gets it back
+        only by asking for an alert that needs an automation. A file already
+        there is the user's and is left alone; it is still the one to open.
+        When the copy fails, the sentence is the My Home Assistant import link
+        to the same file on GitHub.
+        """
+        texts = await self._async_texts(SENTENCE_FALLBACKS)
+        if await async_install_blueprint(self.hass) is not InstallResult.FAILED:
+            return texts["blueprint_ready"]
+        url = import_url(blueprint_language(self.hass.config.language))
+        return texts["blueprint_import"].replace("{url}", url)
 
     async def _async_confirm_target(
         self, user_input: dict[str, Any] | None
@@ -1677,6 +1730,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
             # v0.5 (ADR-0019 §6): same discipline as `managed`, absent is false.
             if user_input.get(CONF_CLEAR_DONE):
                 row[CONF_CLEAR_DONE] = True
+            # v0.9 (ADR-0023 §2.1): absent is `normal`, so only another value
+            # is written and a 0.8 target submitted unchanged stays a 0.8 row.
+            done_priority = user_input.get(CONF_DONE_PRIORITY, DEFAULT_DONE_PRIORITY)
+            if done_priority != DEFAULT_DONE_PRIORITY:
+                row[CONF_DONE_PRIORITY] = done_priority
             # v0.7 (ADR-0021 §1): not a field of this step, carried over.
             if stored.get(CONF_ESCALATE_WHEN_NOBODY_HOME):
                 row[CONF_ESCALATE_WHEN_NOBODY_HOME] = True
@@ -1730,6 +1788,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 # of its own in `validation.py`.
                 vol.Optional(CONF_MESSAGE): selector.TemplateSelector(),
                 vol.Optional(CONF_DONE_MESSAGE): selector.TemplateSelector(),
+                vol.Required(
+                    CONF_DONE_PRIORITY, default=DEFAULT_DONE_PRIORITY
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=list(VALID_PRIORITIES),
+                        translation_key=SELECTOR_PRIORITY,
+                    )
+                ),
                 vol.Optional(CONF_DEFAULT_TITLE): selector.TextSelector(
                     selector.TextSelectorConfig()
                 ),

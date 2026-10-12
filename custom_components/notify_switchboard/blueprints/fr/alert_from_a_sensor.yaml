@@ -1,0 +1,128 @@
+blueprint:
+  name: "Notify Switchboard : déclencher une alerte depuis un capteur"
+  description: >-
+    Quand le capteur choisi passe à l'état voulu, les personnes d'une alerte
+    du Standard de notification sont prévenues. Si vous le souhaitez, elles le
+    sont encore une fois, sans bruit, quand tout revient à la normale.
+
+
+    Le nom de l'alerte pour les automatisations est affiché sur l'écran
+    « Alerte enregistrée » et dans **Modifier une alerte**. Ce chemin n'a ni
+    bouton « J'ai vu » ni rappels : pour cela, passez par une alerte Home
+    Assistant.
+  domain: automation
+  author: Notify Switchboard
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/custom_components/notify_switchboard/blueprints/fr/alert_from_a_sensor.yaml
+  input:
+    trigger_entity:
+      name: Capteur à surveiller
+      description: >-
+        L'appareil qui remarque le problème : le détecteur de fuite, le contact
+        de la porte, le détecteur de mouvement. Pas une alerte Home Assistant.
+      selector:
+        entity: {}
+    trigger_to:
+      name: État qui déclenche l'alerte
+      description: >-
+        Laissez « on » pour un capteur qui détecte quelque chose (une fuite,
+        une ouverture, un mouvement). Pour tout autre capteur, l'état tel
+        qu'il apparaît dans Outils de développement > États.
+      default: "on"
+      selector:
+        text: {}
+    alert_name:
+      name: Nom de l'alerte pour les automatisations
+      description: >-
+        Celui que l'écran « Alerte enregistrée » vous a donné, par exemple
+        fuite_d_eau.
+      selector:
+        text: {}
+    message:
+      name: Message (facultatif)
+      description: Vide, c'est le nom du capteur qui est envoyé.
+      default: ""
+      selector:
+        text: {}
+    done_message:
+      name: Message de retour à la normale (facultatif)
+      description: >-
+        Envoyé quand le capteur quitte cet état, jamais plus fort que
+        l'importance du retour à la normale de l'alerte (normale si vous ne
+        l'avez pas changée). Vide, rien n'est envoyé.
+      default: ""
+      selector:
+        text: {}
+    priority:
+      name: Importance
+      description: >-
+        Gardez celle de l'alerte, sauf si ce capteur en mérite une autre.
+        Seul un message critique passe quand quelqu'un ne veut pas être
+        dérangé.
+      default: default
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: default
+              label: Celle de l'alerte
+            - value: info
+              label: Peu important
+            - value: normal
+              label: Normal
+            - value: high
+              label: Important
+            - value: critical
+              label: Critique
+
+mode: queued
+max: 10
+
+variables:
+  alert_name: !input alert_name
+  message_text: !input message
+  done_text: !input done_message
+  chosen_priority: !input priority
+  source: !input trigger_entity
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    to: !input trigger_to
+    not_from:
+      - unavailable
+      - unknown
+    id: start
+  - trigger: state
+    entity_id: !input trigger_entity
+    from: !input trigger_to
+    not_to:
+      - unavailable
+      - unknown
+    id: done
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id == 'start' or done_text | length > 0 }}"
+
+actions:
+  - variables:
+      payload: >-
+        {{ {'source_entity': source} if chosen_priority == 'default'
+           else {'source_entity': source, 'priority': chosen_priority} }}
+  - if:
+      - condition: trigger
+        id: done
+    then:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: "{{ done_text }}"
+          data: "{{ dict(payload, switchboard_done=true) }}"
+    else:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: >-
+            {{ message_text if message_text | length > 0
+               else trigger.to_state.name }}
+          data: "{{ payload }}"

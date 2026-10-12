@@ -29,7 +29,9 @@ remplacer.
    que quelque chose le change — une `alert`. *Information* : un fait
    ponctuel — un événement ou un appel `notify` direct. Urgence,
    destinataire et droit de réveiller sont des attributs de l'appel, pas une
-   troisième nature.
+   troisième nature. La fin d'une alerte (« retour à la normale ») est une
+   information : elle ne sonne jamais plus fort que l'alerte elle-même, et
+   par défaut pas plus fort qu'un message normal.
 4. **La voix est une sortie comme une autre, jamais une alerte par défaut.**
    Une enceinte devient un service `notify.*` via la plateforme native
    `notify: platform: tts` du cœur de Home Assistant, visée sur un lecteur
@@ -64,6 +66,12 @@ promesses — pas de rappel en double, pas de message « retour à la normale »
 envoyé à qui n'a jamais reçu l'alerte — mais rien de plus. Le contrat exact
 (noms figés, ordre de décision, ce que chaque option change) vit dans
 [`../contract.md`](../contract.md), gelé au sens de l'ADR-0011.
+
+Le rythme d'une alerte appartient à l'alerte. En mode observateur, le routeur
+regarde l'état d'une alerte Home Assistant : il voit son début et sa fin,
+jamais ses rappels (`repeat`), qui ne changent aucun état. Qui veut être
+relancé relie l'alerte au routeur par `notifiers:` ; le routeur ne fabrique
+pas de rappels avec une horloge à lui.
 
 ## 4. Standards techniques, en résumé
 

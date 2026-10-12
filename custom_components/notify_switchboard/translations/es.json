@@ -35,7 +35,9 @@
     "picker_no_device": "todavía sin dispositivo",
     "picker_quiet": "silencio: {entities}",
     "no_target_yet": "ninguna alerta por ahora",
-    "nobody": "nadie"
+    "nobody": "nadie",
+    "blueprint_ready": "El plano de automatización (blueprint) «Notify Switchboard: activar una alerta desde un sensor» ya está en Home Assistant: [abre tus blueprints](/config/blueprint/dashboard) y haz clic en él.",
+    "blueprint_import": "[Importa el plano de automatización (blueprint) «Notify Switchboard: activar una alerta desde un sensor»]({url}) y luego haz clic en él en tus blueprints."
   },
   "entity": {
     "binary_sensor": {
@@ -172,7 +174,7 @@
           "name": "El nombre que ve la gente, por ejemplo Fuga de agua. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
           "alert_entity": "No el detector en sí: una alerta de Home Assistant (alert.…) que lo vigila. Solo se crean en YAML: si no tienes ninguna, déjalo vacío.",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "Activado por defecto: la Centralita de notificaciones vigila ella misma la alerta de Home Assistant, así que se avisa enseguida, sin nada que copiar ni reinicio. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada."
+          "observer_mode": "Activado por defecto: la Centralita de notificaciones vigila ella misma la alerta de Home Assistant, así que se avisa enseguida, sin nada que copiar ni reinicio. Se recibe un mensaje cuando salta y otro cuando termina, pero no los recordatorios: para los recordatorios, desmarca esta casilla y añade esta alerta a los notifiers de la alerta de Home Assistant. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada."
         }
       },
       "target_edit": {
@@ -192,14 +194,14 @@
           "name": "El nombre que ve la gente. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
           "alert_entity": "Una alerta de Home Assistant (alert.…). Necesaria para el botón «Visto». Vacío: la alerta solo salta cuando la llama una automatización.",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "La Centralita de notificaciones vigila ella misma la alerta de Home Assistant: se avisa enseguida. Es la forma recomendada. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada.",
+          "observer_mode": "La Centralita de notificaciones vigila ella misma la alerta de Home Assistant: se avisa enseguida. Es la forma recomendada. Se recibe un mensaje cuando salta y otro cuando termina, pero no los recordatorios: para los recordatorios, desmarca esta casilla y añade esta alerta a los notifiers de la alerta de Home Assistant. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada.",
           "advanced": "La importancia, la presencia, los botones y los textos. Si la marcas, todo se guarda al validar la última pantalla.",
           "escalation": "Si hay que subir la importancia cuando no hay nadie en casa. Si la marcas, todo se guarda al validar la última pantalla."
         }
       },
       "target_saved": {
         "title": "Alerta guardada",
-        "description": "Has desmarcado esta casilla: es la propia alerta de Home Assistant la que enviará los mensajes. Copia una sola vez este bloque en tu configuración, sustituye binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPara saltarte este paso, modifica la alerta y vuelve a marcar «Avisar en cuanto salte».\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
+        "description": "Has desmarcado esta casilla: es la propia alerta de Home Assistant la que enviará los mensajes. Copia una sola vez este bloque en tu configuración, sustituye binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPor este camino, también llegan los recordatorios que repite la alerta de Home Assistant. Si no los necesitas, modifica la alerta y vuelve a marcar «Avisar en cuanto salte»: no hay bloque que copiar.\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -209,7 +211,7 @@
       },
       "target_ready": {
         "title": "Alerta guardada",
-        "description": "En cuanto «{name}» se dispare, se avisa a estas personas: {audience}. No hay nada más que hacer.\n\nLa importancia, la presencia, los botones y los textos ya tienen un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
+        "description": "En cuanto «{name}» se dispare, se avisa a estas personas: {audience}. No hay nada más que hacer.\n\nReciben un mensaje cuando salta y otro cuando termina, no los recordatorios que repite la alerta de Home Assistant. Para los recordatorios, modifica la alerta y desmarca «Avisar en cuanto salte».\n\nLa importancia, la presencia, los botones y los textos ya tienen un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -219,7 +221,7 @@
       },
       "target_ready_manual": {
         "title": "Alerta guardada",
-        "description": "«{name}» no está vinculada a ninguna alerta de Home Assistant, así que no saltará sola. Dos formas de hacerla saltar:\n\n1. **Con una automatización.** Ajustes > Automatizaciones y escenas > Crear automatización. Cuando: tu detector cambia a «Detectado» (o el estado que quieras). Entonces: la acción {service}, con un mensaje. Este camino no tiene botón «Visto»: no hay ninguna alerta de Home Assistant que apagar.\n\n2. **Con una alerta de Home Assistant**, que se repite hasta que alguien pulsa «Visto». Pega este bloque en tu configuración y reinicia Home Assistant. Sustituye binary_sensor.CHANGE_ME por el sensor que señala el problema — el detector de fugas, el contacto de la ventana:\n\n```yaml\n{snippet}\n```\n\nDespués, modifica esta alerta y elígela en «Lo que la dispara».",
+        "description": "«{name}» no está vinculada a ninguna alerta de Home Assistant, así que no saltará sola. Dos formas de hacerla saltar:\n\n1. **Con una automatización ya preparada.** {blueprint} En el formulario, elige tu sensor y escribe `{slug}` como nombre de la alerta para automatizaciones, y guarda. Este camino no tiene botón «Visto» ni recordatorios. (Para crear tú la automatización: Ajustes > Automatizaciones y escenas > Crear automatización, y luego la acción {service}, con un mensaje.)\n\n2. **Con una alerta de Home Assistant**, que se repite hasta que alguien pulsa «Visto». Pega este bloque en tu configuración y reinicia Home Assistant. Sustituye binary_sensor.CHANGE_ME por el sensor que señala el problema — el detector de fugas, el contacto de la ventana:\n\n```yaml\n{snippet}\n```\n\nDespués, modifica esta alerta y elígela en «Lo que la dispara».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -238,6 +240,7 @@
           "default_data": "Ajustes técnicos añadidos a cada mensaje",
           "message": "Texto del mensaje",
           "done_message": "Texto de la vuelta a la normalidad",
+          "done_priority": "Importancia de la vuelta a la normalidad",
           "default_title": "Título por defecto",
           "clear_done": "Borrar el mensaje de vuelta a la normalidad"
         },
@@ -249,6 +252,7 @@
           "default_data": "Si el mensaje ya dice lo mismo, gana el mensaje.",
           "message": "Opcional, y solo se usa cuando se avisa en cuanto salta. Vacío: se envía el nombre de la alerta. Los usuarios avanzados pueden escribir una plantilla.",
           "done_message": "Opcional, se envía cuando la alerta de Home Assistant se apaga, si se avisa en cuanto salta. Vacío: se envía un texto ya preparado.",
+          "done_priority": "El mensaje de vuelta a la normalidad nunca suena más fuerte que esto, ni más fuerte que la propia alerta. «Normal» por defecto: el final de una alerta crítica no suena como la alarma y espera a la mañana si alguien duerme.",
           "default_title": "Título usado cuando la llamada no da ninguno, y para todos los mensajes que la Centralita de notificaciones envía por su cuenta.",
           "clear_done": "Quita el mensaje de vuelta a la normalidad de los teléfonos que lo han recibido, una vez terminada la alerta. Desactivado por defecto: suena y luego se queda."
         }

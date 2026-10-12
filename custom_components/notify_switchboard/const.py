@@ -72,6 +72,12 @@ CONF_CLEAR_DONE: Final = "clear_done"
 # priority is raised one step, for that decision only.
 CONF_ESCALATE_WHEN_NOBODY_HOME: Final = "escalate_when_nobody_home"
 
+# v0.9 addendum (ADR-0023 §2): an optional target key, absent means `normal`,
+# written into the row only when it is not -- so every target written before
+# 0.9.0 keeps the exact dict it had. A done message is routed at no more than
+# this priority, and never louder than it would otherwise have been.
+CONF_DONE_PRIORITY: Final = "done_priority"
+
 # v0.7 addendum (ADR-0021 §7): a *global* option, `entry.options`-level, whose
 # default is **on**; absent means on, so no migration and no options rewrite.
 # Turning it off stops the router adding the Companion critical keys; it never
@@ -191,6 +197,11 @@ PRIORITY_HIGH: Final = "high"
 PRIORITY_CRITICAL: Final = "critical"
 
 DEFAULT_PRIORITY: Final = PRIORITY_NORMAL
+# v0.9 addendum (ADR-0023 §2.1): the ceiling of a done message when the target
+# names none. `normal`, not the target's own priority: the observed bug is the
+# all-clear of a critical alert ringing as critical, and a default that kept it
+# would make every household find the setting after the first false alarm.
+DEFAULT_DONE_PRIORITY: Final = PRIORITY_NORMAL
 
 VALID_PRIORITIES: Final[tuple[str, ...]] = (
     PRIORITY_INFO,

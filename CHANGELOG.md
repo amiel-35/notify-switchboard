@@ -9,6 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.9.0] - 2026-10-12
+
+### Changed
+
+- The back-to-normal message of an alert no longer rings like the alert
+  itself. It is sent at **normal** importance at most, and never louder than
+  the alert: the end of a critical leak no longer sounds through Do Not
+  Disturb, and it waits for the morning when somebody is asleep. This applies
+  to the message Notify Switchboard sends itself and to the one a Home
+  Assistant alert sends through its `notifiers:` list. Set it back to
+  critical if you preferred it that way.
+- An alert tied to no Home Assistant alert now ends on a ready-made
+  automation: the last screen links to your blueprints, where one click on
+  **Notify Switchboard: set an alert off from a sensor** opens the automation
+  editor. Pick the sensor, type the automation name the screen shows, save.
+  Building the automation yourself, and the `alert:` block, are still
+  explained below it.
+- **Tell people as soon as it goes off** now says what it does not do: people
+  get one message when the Home Assistant alert goes off and one when it
+  ends, not its reminders. The screens say how to get reminders: untick it
+  and list the alert under `notifiers:`.
+
+### Added
+
+- **Importance of the back-to-normal message**, in an alert's advanced
+  settings: how loud the end of that alert may be. Normal by default.
+- A blueprint shipped with Notify Switchboard, in English, French and
+  Spanish. It is put in your blueprints the first time you add an alert that
+  needs an automation, and is yours from then on: never overwritten, never
+  removed. It sets an alert off when a sensor reaches a state, can send a
+  quiet back-to-normal message when it leaves it, and ignores a sensor that
+  drops off the network. If it cannot be copied, the screen offers to import
+  it instead.
+
 ## [0.8.0] - 2026-10-12
 
 ### Changed

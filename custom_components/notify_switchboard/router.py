@@ -40,6 +40,7 @@ from .const import (
     CONF_DEFAULT_TARGET,
     CONF_DEFAULT_TITLE,
     CONF_DONE_MESSAGE,
+    CONF_DONE_PRIORITY,
     CONF_ESCALATE_WHEN_NOBODY_HOME,
     CONF_MANAGED,
     CONF_MESSAGE,
@@ -53,6 +54,7 @@ from .const import (
     CONF_SUMMARY,
     CONF_TARGETS,
     CONF_WAKE_TIME,
+    DEFAULT_DONE_PRIORITY,
     DEFAULT_PRESENCE_RULE,
     DEFAULT_PRIORITY,
     DEFAULT_TTL_MINUTES,
@@ -159,6 +161,9 @@ class TargetConfig:
     # neither `default_priority` nor the caller's `data.priority`, and the next
     # call asks the question again from scratch.
     escalate_when_nobody_home: bool = False
+    # v0.9 addendum (ADR-0023 §2). Absent means `normal`. The ceiling of every
+    # done message of this target; see `cap_done_priority`.
+    done_priority: str = DEFAULT_DONE_PRIORITY
 
     @property
     def audience_persons(self) -> tuple[str, ...]:
@@ -219,6 +224,13 @@ class NotificationRequest:
     title: str | None = None
     targets: tuple[str, ...] = ()
     data: dict[str, Any] = field(default_factory=dict)
+    # v0.9 addendum (ADR-0023 §2.2): the slugs of this request whose Home
+    # Assistant alert is *ending* -- the call is that alert's `done_message`,
+    # made through its `notifiers:`. The dispatcher fills it, because only it
+    # can read the live alert entity; it is never a `data` key, so it reaches
+    # no output. It changes the priority and nothing else: no `-done` tag, no
+    # episode filter.
+    closing: frozenset[str] = frozenset()
 
     @property
     def tag(self) -> str | None:
@@ -230,6 +242,14 @@ class NotificationRequest:
     def is_done(self) -> bool:
         """Return True when this call marks itself as a "back to normal"."""
         return is_done_message(self.data)
+
+    def is_done_for(self, slug: str) -> bool:
+        """Return True when this call is a done message for `slug`'s priority.
+
+        Every kind of done message the v0.9 ceiling applies to (ADR-0023 §2.2):
+        one that says so in its `data`, and the call of an alert that is ending.
+        """
+        return self.is_done or slug in self.closing
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,6 +374,9 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
     presence_rule = str(raw.get(CONF_PRESENCE_RULE) or DEFAULT_PRESENCE_RULE)
     if presence_rule not in VALID_PRESENCE_RULES:
         presence_rule = DEFAULT_PRESENCE_RULE
+    done_priority = str(raw.get(CONF_DONE_PRIORITY) or DEFAULT_DONE_PRIORITY)
+    if done_priority not in VALID_PRIORITIES:
+        done_priority = DEFAULT_DONE_PRIORITY
     slug = slugify(str(raw[CONF_SLUG]))
     return TargetConfig(
         slug=slug,
@@ -374,6 +397,7 @@ def parse_target(raw: dict[str, Any]) -> TargetConfig:
         managed=bool(raw.get(CONF_MANAGED)),
         clear_done=bool(raw.get(CONF_CLEAR_DONE)),
         escalate_when_nobody_home=bool(raw.get(CONF_ESCALATE_WHEN_NOBODY_HOME)),
+        done_priority=done_priority,
     )
 
 
@@ -546,6 +570,21 @@ def effective_priority(
     if raised == priority:
         return priority, None
     return raised, ESCALATED_NOBODY_HOME
+
+
+def cap_done_priority(priority: str, ceiling: str) -> str:
+    """Return the priority a done message is routed at (ADR-0023 §2.1).
+
+    The lower of the two: `done_priority` is a ceiling, never a floor -- the
+    all-clear of an `info` target stays `info` whatever the ceiling says. An
+    unknown priority on either side changes nothing, the same way an unknown
+    floor or an unknown escalation step does.
+    """
+    rank = PRIORITY_RANK.get(priority)
+    limit = PRIORITY_RANK.get(ceiling)
+    if rank is None or limit is None or rank <= limit:
+        return priority
+    return ceiling
 
 
 def parse_min_priority(raw: Any) -> str | None:
@@ -888,6 +927,11 @@ def decide(
             continue
 
         priority, _escalated = effective_priority(target, request.data, context)
+        if request.is_done_for(slug):
+            # Applied last, so it holds whatever raised the call: the caller's
+            # `data.priority` -- which an `alert:` repeats on all three of its
+            # calls -- or an empty house (contract v0.9, ADR-0023 §2.1).
+            priority = cap_done_priority(priority, target.done_priority)
         bypass = priority == PRIORITY_CRITICAL
         payload = merge_data(target, request.data)
         # A `done` message reaches only the persons the episode it closes

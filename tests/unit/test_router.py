@@ -33,6 +33,7 @@ from custom_components.notify_switchboard.router import (
     build_actions,
     build_routing_table,
     caller_tag,
+    cap_done_priority,
     collapse_by_tag,
     critical_keys_for_os,
     decide,
@@ -985,3 +986,68 @@ def test_the_v07_target_key_defaults_to_its_absent_meaning() -> None:
         ).escalate_when_nobody_home
         is True
     )
+
+
+# ---------------------------------------------------------------------------
+# v0.9 (ADR-0023 §2): the ceiling of a done message
+# ---------------------------------------------------------------------------
+
+
+def test_done_priority_defaults_to_normal_and_ignores_garbage() -> None:
+    """Absent or unreadable means `normal`, the documented default."""
+    assert parse_target({"slug": "leak"}).done_priority == PRIORITY_NORMAL
+    assert parse_target({"slug": "leak", "done_priority": "loud"}).done_priority == (
+        PRIORITY_NORMAL
+    )
+    assert (
+        parse_target({"slug": "leak", "done_priority": "critical"}).done_priority
+        == PRIORITY_CRITICAL
+    )
+
+
+@pytest.mark.parametrize(
+    ("priority", "ceiling", "expected"),
+    [
+        (PRIORITY_CRITICAL, PRIORITY_NORMAL, PRIORITY_NORMAL),
+        (PRIORITY_HIGH, PRIORITY_INFO, PRIORITY_INFO),
+        (PRIORITY_INFO, PRIORITY_CRITICAL, PRIORITY_INFO),
+        (PRIORITY_NORMAL, PRIORITY_NORMAL, PRIORITY_NORMAL),
+        ("loud", PRIORITY_NORMAL, "loud"),
+        (PRIORITY_CRITICAL, "loud", PRIORITY_CRITICAL),
+    ],
+)
+def test_cap_done_priority_is_a_ceiling(priority, ceiling, expected) -> None:
+    """The lower of the two; an unknown value on either side changes nothing."""
+    assert cap_done_priority(priority, ceiling) == expected
+
+
+def test_a_closing_call_is_capped_and_keeps_its_ordinary_tag() -> None:
+    """`closing` changes the priority and nothing else (ADR-0023 §2.2)."""
+    routing = table(
+        [person("person.alice", outputs=("mobile_app_alice",))],
+        [
+            target(
+                "leak",
+                default_priority=PRIORITY_CRITICAL,
+                alert_entity="alert.leak",
+                audience=("person.alice",),
+            )
+        ],
+    )
+    ctx = context(
+        person_states={"person.alice": "home"},
+        # Nobody recorded in the episode: a `not_notified` filter would drop
+        # Alice. The closing call is not filtered.
+        episode_recipients={"leak": frozenset()},
+    )
+
+    closing = decide(routing, request(closing=frozenset({"leak"})), ctx)
+    (routed,) = closing.routed
+    assert routed.priority == PRIORITY_NORMAL
+    assert effective_tag("leak", routed.data) == "switchboard-leak"
+
+    ordinary = decide(routing, request(), ctx)
+    assert ordinary.routed[0].priority == PRIORITY_CRITICAL
+    assert not request().is_done_for("leak")
+    assert request(closing=frozenset({"leak"})).is_done_for("leak")
+    assert not request(closing=frozenset({"other"})).is_done_for("leak")

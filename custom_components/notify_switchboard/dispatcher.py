@@ -17,6 +17,11 @@ Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/helpers/template/__init__.py: Template(...).async_render
 - homeassistant/exceptions.py: ServiceValidationError
 - homeassistant/util/dt.py: now, utcnow, parse_datetime
+- homeassistant/helpers/entity_component.py: DATA_INSTANCES and
+  EntityComponent.get_entity (the lookup core's own `async_update_entity`
+  does), to read a Home Assistant alert's live state (ADR-0023 §2.2)
+- homeassistant/components/alert/entity.py: AlertEntity.state and the order
+  of `end_alerting` (`_firing` cleared, done message awaited, state written)
 """
 
 from __future__ import annotations
@@ -58,6 +63,7 @@ from homeassistant.exceptions import (
 )
 from homeassistant.helpers import device_registry as dr, issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.entity_component import DATA_INSTANCES
 from homeassistant.helpers.event import (
     EventStateChangedData,
     async_call_later,
@@ -721,9 +727,45 @@ class Switchboard:
             title=title,
             targets=slugs,
             data=dict(data or {}),
+            closing=frozenset(
+                slug
+                for slug in slugs
+                if (target := self.table.targets.get(slug)) is not None
+                and target.alert_entity
+                and self.alert_is_ending(target.alert_entity)
+            ),
         )
         decision, _outputs = await self._async_route(request)
         return decision
+
+    def alert_is_ending(self, entity_id: str) -> bool:
+        """Return True while a Home Assistant alert sends its done message.
+
+        Contract v0.9, ADR-0023 §2.2. Core's `end_alerting`
+        (`homeassistant/components/alert/entity.py`) clears `_firing`, awaits
+        `_notify_done_message()` -- which calls this router through the
+        alert's `notifiers:` -- and only then writes the state. During that
+        await the live `AlertEntity.state` already reads `idle` while the state
+        machine still holds `on` (or `off`, acknowledged). The two disagree at
+        no other moment: the first message is sent while the entity says `on`
+        and the state machine `idle`, a reminder while both say `on`.
+
+        Anything missing -- `alert` not loaded, an entity that is not core's
+        (a template, a test state), a call that arrives after the state was
+        written -- answers False, and the call is routed as in 0.8: the
+        recognition fails towards the old behaviour, never towards dropping a
+        message.
+        """
+        stored = self.hass.states.get(entity_id)
+        if stored is None or stored.state not in (STATE_ON, STATE_OFF):
+            return False
+        component = self.hass.data.get(DATA_INSTANCES, {}).get(ALERT_DOMAIN)
+        if component is None:
+            return False
+        entity = component.get_entity(entity_id)
+        if entity is None:
+            return False
+        return bool(entity.state == STATE_IDLE)
 
     async def _async_route(
         self, request: NotificationRequest
@@ -1752,6 +1794,10 @@ class Switchboard:
             priority=resolve_priority(target, request.data),
             data=dict(request.data),
             queued_at=dt_util.utcnow(),
+            # The flush re-decides from the caller's priority, so it has to
+            # know this was a done message to apply the ceiling again
+            # (ADR-0023 §2.5).
+            done=request.is_done_for(slug),
         )
         self.store.deferrals[deferral.key] = deferral
         self.deferred_today += 1
@@ -2164,6 +2210,7 @@ class Switchboard:
             title=deferral.title,
             targets=(deferral.slug,),
             data={**deferral.data, ATTR_PRIORITY: deferral.priority},
+            closing=frozenset({deferral.slug}) if deferral.done else frozenset(),
         )
         decision = decide(self.table, request, context)
         refusals = tuple(

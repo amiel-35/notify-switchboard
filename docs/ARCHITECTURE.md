@@ -68,7 +68,11 @@ counter of its own:
    target's default; then, if the target has `escalate_when_nobody_home` and
    no person of its audience is `home`, the priority is raised one step for
    this decision only. A target with no person in its audience escalates
-   nothing. From here on "the priority" means the escalated one, everywhere.
+   nothing. For a **done message** — `data.switchboard_done`, observer
+   mode's `on|off → idle` message, or the `done_message` a Home Assistant
+   alert sends through its `notifiers:` while it is ending — the target's
+   `done_priority` (default `normal`) is then a ceiling (ADR-0023). From here
+   on "the priority" means this one, everywhere.
 3. **The audience, entry by entry.** A `notify` domain entry is a **bare
    output** and skips steps 5–7 entirely; anything else is a person, known or
    not. `notify.notify` and `notify.send_message` can never be an audience
@@ -386,9 +390,10 @@ the `alert` component may not exist yet at setup itself.
 
 Each editor is split in two so the first form somebody meets is short, and
 each half writes only its own fields — changing a phone cannot erase
-somebody's night. A target is `slug`, `name`, `alert_entity`, `audience` and
-`observer_mode` on the `target` step, the other nine fields on
-`target_advanced`; a person is outputs and silence entities on
+somebody's night. A target is `name`, `alert_entity`, `audience` and
+`observer_mode` on the `target` step (its slug is derived from the name,
+ADR-0022), the other ten fields on `target_advanced` (`done_priority` joined
+them in 0.9, ADR-0023); a person is outputs and silence entities on
 `person_outputs`, wake time and `summary` on `person_advanced`. Those four
 step ids are public names (contract v0.6); `escalate_when_nobody_home` sits
 on a third, internal step, `target_escalation` (see
@@ -451,8 +456,9 @@ sequence, independent of the wider suite:
 | 0.5.0 – 0.5.1 | Night: time-to-live, one wake-time summary, a full re-decision at flush, early flush, episodes and cleared notifications (ADR-0019) |
 | 0.6.0 | Consolidation: a five-field target and two-field person editor with advanced steps, one vocabulary (ADR-0020) |
 | 0.7.0 | Escalation, a scheduled priority floor, the routing-table sensor, bare and entity outputs, a critical payload per OS (ADR-0021) |
-| 0.7.1 | Plain language: the whole interface rewritten for somebody who does not read code, in three languages — **current release** |
-| 0.8 (proposed) | A derived slug, observer mode on by default, a simpler menu, a night `schedule` helper — awaiting the maintainer and an ADR-0022 |
+| 0.7.1 | Plain language: the whole interface rewritten for somebody who does not read code, in three languages |
+| 0.8.0 | A first alert without code: a derived slug, observer mode on by default, a simpler menu, a night `schedule` helper (ADR-0022) |
+| 0.9.0 | One-click automation from a shipped blueprint, a back-to-normal message that never rings louder than `done_priority`, observer mode's missing reminders said on screen (ADR-0023) — **current release** |
 | Later, unscheduled | Escalation after N minutes, a delivery cap, labels on a target, a per-target authentication override, a per-person priority floor, a `places` object, intents — each needing its own ADR |
 
 The voice lines of the wider suite are the part reality overtook: core's own
@@ -498,3 +504,5 @@ schema; and expose one device per config entry with a `translation_key`.
 | [0019](ADR/0019-night-catch-up-and-closing-the-loop.md) | Night, catch-up and closing the loop — TTL, one wake-time summary, a full re-decision at flush, early flush, episode recipients, cleared notifications |
 | [0020](ADR/0020-consolidation.md) | Consolidation — a five-field target, an optional wake time, one vocabulary, and documents that tell the truth |
 | [0021](ADR/0021-escalation-and-places-reduced.md) | Escalation and places, reduced — one step when nobody is home, a scheduled priority floor, the routing table as an entity, acknowledgement authorship, bare and entity outputs, a critical payload per OS |
+| [0022](ADR/0022-a-first-alert-without-code.md) | A first alert without code — a derived code name, observer mode by default, a menu in three blocks, a night the user owns, a confirmation before removal |
+| [0023](ADR/0023-one-click-automation-and-a-quiet-all-clear.md) | One-click automation, a quiet all-clear, and observer mode's reminders said plainly |

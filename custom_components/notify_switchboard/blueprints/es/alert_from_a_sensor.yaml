@@ -1,0 +1,125 @@
+blueprint:
+  name: "Notify Switchboard: activar una alerta desde un sensor"
+  description: >-
+    Cuando el sensor elegido llega al estado indicado, se avisa a las personas
+    de una alerta de la Centralita de notificaciones. Si quieres, se les avisa
+    otra vez, sin ruido, cuando todo vuelve a la normalidad.
+
+
+    El nombre para automatizaciones de la alerta aparece en la pantalla
+    «Alerta guardada» y en **Modificar una alerta**. Este camino no tiene botón
+    «Visto» ni recordatorios: para eso, usa una alerta de Home Assistant.
+  domain: automation
+  author: Notify Switchboard
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/custom_components/notify_switchboard/blueprints/es/alert_from_a_sensor.yaml
+  input:
+    trigger_entity:
+      name: Sensor que vigilar
+      description: >-
+        El aparato que detecta el problema: el detector de fugas, el contacto
+        de la puerta, el sensor de movimiento. No una alerta de Home Assistant.
+      selector:
+        entity: {}
+    trigger_to:
+      name: Estado que activa la alerta
+      description: >-
+        Deja «on» para un sensor que detecta algo (una fuga, una apertura, un
+        movimiento). Para cualquier otro, el estado tal como aparece en
+        Herramientas para desarrolladores > Estados.
+      default: "on"
+      selector:
+        text: {}
+    alert_name:
+      name: Nombre de la alerta para automatizaciones
+      description: >-
+        El que te dio la pantalla «Alerta guardada», por ejemplo fuga_de_agua.
+      selector:
+        text: {}
+    message:
+      name: Mensaje (opcional)
+      description: Vacío, se envía el nombre del sensor.
+      default: ""
+      selector:
+        text: {}
+    done_message:
+      name: Mensaje de vuelta a la normalidad (opcional)
+      description: >-
+        Se envía cuando el sensor deja ese estado, nunca más fuerte que la
+        importancia de la vuelta a la normalidad de la alerta (normal si no la
+        has cambiado). Vacío, no se envía nada.
+      default: ""
+      selector:
+        text: {}
+    priority:
+      name: Importancia
+      description: >-
+        Deja la de la alerta, salvo que este sensor merezca otra. Solo un
+        mensaje crítico llega a quien no quiere que le molesten.
+      default: default
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: default
+              label: La de la alerta
+            - value: info
+              label: Poco importante
+            - value: normal
+              label: Normal
+            - value: high
+              label: Importante
+            - value: critical
+              label: Crítico
+
+mode: queued
+max: 10
+
+variables:
+  alert_name: !input alert_name
+  message_text: !input message
+  done_text: !input done_message
+  chosen_priority: !input priority
+  source: !input trigger_entity
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    to: !input trigger_to
+    not_from:
+      - unavailable
+      - unknown
+    id: start
+  - trigger: state
+    entity_id: !input trigger_entity
+    from: !input trigger_to
+    not_to:
+      - unavailable
+      - unknown
+    id: done
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id == 'start' or done_text | length > 0 }}"
+
+actions:
+  - variables:
+      payload: >-
+        {{ {'source_entity': source} if chosen_priority == 'default'
+           else {'source_entity': source, 'priority': chosen_priority} }}
+  - if:
+      - condition: trigger
+        id: done
+    then:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: "{{ done_text }}"
+          data: "{{ dict(payload, switchboard_done=true) }}"
+    else:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: >-
+            {{ message_text if message_text | length > 0
+               else trigger.to_state.name }}
+          data: "{{ payload }}"

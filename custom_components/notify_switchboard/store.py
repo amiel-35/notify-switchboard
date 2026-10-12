@@ -51,6 +51,13 @@ class DeferredMessage:
     # time can tell "this is still tonight's message" from "this one is
     # already late" -- see `Switchboard._async_catch_up_deferrals`.
     queued_at: datetime = field(default_factory=dt_util.utcnow)
+    # v0.9 (ADR-0023 §2.5): this is a done message, so its flush keeps the
+    # target's `done_priority` ceiling. A done message that says so in its
+    # `data` (`switchboard_done`) would be recognised again anyway; the call
+    # of an alert that was ending would not, which is what this remembers.
+    # Absent from every record written before 0.9.0, and read as False: no
+    # migration, and the store version does not move.
+    done: bool = False
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -68,7 +75,7 @@ class DeferredMessage:
             "priority": self.priority,
             "data": self.data,
             "queued_at": self.queued_at.isoformat(),
-        }
+        } | ({"done": True} if self.done else {})
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> DeferredMessage | None:
@@ -84,6 +91,7 @@ class DeferredMessage:
                 priority=str(raw.get("priority", "normal")),
                 data=dict(raw.get("data") or {}),
                 queued_at=queued_at or dt_util.utcnow(),
+                done=bool(raw.get("done")),
             )
         except KeyError, TypeError, ValueError:
             return None

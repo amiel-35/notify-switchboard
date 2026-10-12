@@ -8,10 +8,54 @@ lasting condition (a leak, a fault that repeats or needs acknowledging), copy
 a snippet from [`docs/examples/`](examples/) instead and list
 `switchboard_<target>` under its `notifiers:`.
 
-All three live under
+One ships **inside the integration** and is put in your blueprints for you;
+the other three live under
 [`blueprints/automation/notify_switchboard/`](../blueprints/automation/notify_switchboard/)
-and resolve a `target_slug` input to `notify.switchboard_<target_slug>`,
-calling it with `data.source_entity` set to the triggering entity.
+and are imported by hand. All four call `notify.switchboard_<target>` with
+`data.source_entity` set to the triggering entity.
+
+## Set an alert off from a sensor (shipped with the integration)
+
+**Files:** [`custom_components/notify_switchboard/blueprints/<language>/alert_from_a_sensor.yaml`](../custom_components/notify_switchboard/blueprints/)
+— English, French and Spanish, the same automation with translated texts
+(Home Assistant does not translate blueprints).
+
+This is the automation an alert tied to no Home Assistant alert needs. You do
+not import it: the first time **Add an alert** ends on "it will not go off on
+its own", the integration copies the file for your language to
+`blueprints/automation/notify_switchboard/alert_from_a_sensor.yaml` in your
+configuration — only if no file is there — and the screen links to your
+blueprints. Click it, pick the sensor, type the alert's automation name, save.
+The file is yours from then on: it is never overwritten and never removed,
+not even when Notify Switchboard is. If it cannot be copied, the screen links
+to the import dialog instead:
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Famiel-35%2Fnotify-switchboard%2Fmain%2Fcustom_components%2Fnotify_switchboard%2Fblueprints%2Fen%2Falert_from_a_sensor.yaml)
+
+| Input | Required | Default | Notes |
+|---|---|---|---|
+| `trigger_entity` | yes | — | The sensor that notices the problem. |
+| `trigger_to` | no | `on` | The state that sets the alert off. |
+| `alert_name` | yes | — | The alert's automation name: calls `notify.switchboard_<alert_name>`. |
+| `message` | no | `""` | Empty means the sensor's name. |
+| `done_message` | no | `""` | Sent with `switchboard_done: true` when the sensor leaves that state — never louder than the alert's `done_priority`. Empty means nothing is sent. |
+| `priority` | no | `default` | `default` sends none, so the alert's own applies; else `info` \| `normal` \| `high` \| `critical`. |
+
+Neither trigger fires on a change from or to `unavailable` / `unknown`, so a
+sensor dropping off the network neither sets the alert off nor announces its
+end. This path has no Acknowledge button and no reminders: for those, use a
+Home Assistant `alert:` (see [`docs/examples/`](examples/)).
+
+```yaml
+automation:
+  - alias: "Water leak"
+    use_blueprint:
+      path: notify_switchboard/alert_from_a_sensor.yaml
+      input:
+        trigger_entity: binary_sensor.leak_kitchen
+        alert_name: water_leak
+        done_message: "The kitchen is dry again."
+```
 
 ## Information from a state change
 
@@ -100,8 +144,8 @@ automation:
 
 ## Marking a "back to normal" message
 
-None of the three blueprints above sends one, but an `alert:` block or your
-own automation often does. Add `switchboard_done: true` to such a call's
+Only **Set an alert off from a sensor** sends one (its `done_message`), but
+your own automation often does too. Add `switchboard_done: true` to such a call's
 `data` and it becomes the target's **done** message — reaching only the
 people that target's current episode actually reached:
 
@@ -113,9 +157,12 @@ data:
     switchboard_done: true
 ```
 
-It only changes anything on a target that names an `alert_entity`; one
-without has no episodes, so the message routes to the whole audience as
-usual.
+The episode filter only changes anything on a target that names an
+`alert_entity`; one without has no episodes, so the message routes to the
+whole audience as usual. On every target, a done message is routed at no more
+than the target's `done_priority` (*normal* unless you changed it). The
+`done_message` of an `alert:` that lists `switchboard_<target>` under
+`notifiers:` is recognised as one too, without any key.
 
 ## Escalation after N minutes
 
@@ -142,9 +189,9 @@ https://raw.githubusercontent.com/amiel-35/notify-switchboard/main/blueprints/au
 
 ## On the templated action name
 
-All three blueprints call `notify.switchboard_{{ target_slug }}` — templated,
-not static, so one blueprint works with any target. If `target_slug` does not
-match a target's slug, the call fails as an ordinary "service not found"
+Every blueprint here calls `notify.switchboard_{{ target_slug }}` (or
+`{{ alert_name }}`) — templated, not static, so one blueprint works with any
+target. If that input does not match a target's slug, the call fails as an ordinary "service not found"
 error rather than the friendlier `unknown_target` repair (which only fires
 for the default `notify.switchboard` service with a `target:` list).
 Double-check the slug before relying on a blueprint in production.

@@ -103,6 +103,8 @@ def test_valid_target_has_no_errors() -> None:
         ({"slug": ""}, "slug", "invalid_slug"),
         ({"slug": "Fuite d'eau"}, "slug", "invalid_slug"),
         ({"default_priority": "urgent"}, "default_priority", "invalid_priority"),
+        # v0.9 (ADR-0023 §2.1): optional, but one of the four when present.
+        ({"done_priority": "loud"}, "done_priority", "invalid_priority"),
         ({"presence_rule": "maybe"}, "presence_rule", "invalid_presence_rule"),
         ({"alert_entity": "sensor.leak"}, "alert_entity", "not_an_alert"),
         ({"audience": []}, "audience", "empty_audience"),
