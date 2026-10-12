@@ -50,10 +50,15 @@ target's audience directly (see [Bare outputs](#bare-outputs)). On screen, a
 target is called an **alert**; its **automation name**
 (`notify.switchboard_<slug>`) is made from its name once and never changes.
 "Tell people as soon as it goes off" (observer mode) is on by default, so a
-new alert tied to a Home Assistant alert needs no YAML and no restart; one
-tied to nothing is set off by an automation calling its automation name. Priority, presence rule, buttons, snooze durations, templates and
-default data all have a sane default and are opened by a checkbox on the
-**Change an alert** screen. The menu has three entries for people, three for
+new alert tied to a Home Assistant alert needs no YAML and no restart — but
+it sends one message when that alert goes off and one when it ends, **not
+its reminders** (see [Wiring a target to an alert](#wiring-a-target-to-an-alert)).
+One tied to nothing is set off by an automation: the last screen links to a
+blueprint shipped with the integration, already in your blueprints, so the
+automation is one click and two fields away (see
+[`docs/blueprints.md`](docs/blueprints.md)). Priority, presence rule,
+buttons, snooze durations, templates and default data all have a sane default
+and are opened by a checkbox on the **Change an alert** screen. The menu has three entries for people, three for
 alerts, and **Settings**. Full walkthrough, including the two test messages
 under **Settings**, in [`docs/quickstart.md`](docs/quickstart.md).
 
@@ -71,7 +76,9 @@ whose presence rule lets an absent person be notified (`always` or
 
 **Observer mode** — tick it on the target, and the router watches the alert
 itself: routes `idle → on`, sends back-to-normal on `→ idle`, stops on
-`on → off`. No `notifiers:` needed:
+`on → off`. No `notifiers:` needed — and **no reminders**: an alert's
+`repeat` changes no state, so there is nothing for the router to observe;
+only the alert's own `notifiers:` calls carry them:
 
 ```yaml
 alert:
@@ -85,7 +92,14 @@ alert:
 
 **Or drive the router from the alert** — leave observer mode off and add
 `notifiers: [switchboard_leak]` to the same block, so the alert decides when
-to send and repeats on its own schedule.
+to send and repeats on its own schedule. This is the way to choose when people
+should be reminded until somebody acknowledges.
+
+Either way, the **back-to-normal** message never rings louder than the
+target's **Importance of the back-to-normal message** (`done_priority`,
+*normal* by default) nor louder than the alert itself: the end of a critical
+leak does not sound through Do Not Disturb, and waits for the morning when
+somebody is asleep. Set it to *critical* to have the old behaviour back.
 
 ## Adding a speaker as an output
 
@@ -189,7 +203,7 @@ to a missing `alert.*`, and an output that keeps failing.
 | `source_entity` | The entity the message is about. |
 | `tag` | Names the notification and de-duplicates a deferral. Defaults to `switchboard-<slug>`. |
 | `ttl_minutes` | How long a held-back message is still worth delivering. `0` never expires. |
-| `switchboard_done` | Marks this call as the target's "back to normal" message. |
+| `switchboard_done` | Marks this call as the target's "back to normal" message, routed at no more than its `done_priority`. |
 | anything else | Merged over the target's default data, caller wins, passed to outputs untouched. |
 
 A `critical` message also carries, on `mobile_app_*` outputs only, the keys
@@ -224,10 +238,12 @@ En français : les principes du projet sont résumés dans
 Settings → Devices & services → Notify Switchboard → delete removes the
 `notify.switchboard` service and entity; it does not touch the `notify.*`
 services it forwarded to. A night schedule created from a person's screen is
-an ordinary Home Assistant helper and stays. Current release: **0.8.0** (a
-first alert without code: names instead of identifiers, observer mode by
-default, a shorter menu, a night schedule in one tick; before it, two-step
-editors, escalation, a scheduled priority floor, the routing-table sensor,
+an ordinary Home Assistant helper and stays, and so does the blueprint copied
+into your blueprints. Current release: **0.9.0** (one-click automation from a
+shipped blueprint, a back-to-normal message that wakes nobody, observer mode's missing
+reminders said on screen; before it, a first alert without code — names
+instead of identifiers, observer mode by default, a shorter menu, a night
+schedule in one tick — two-step editors, escalation, a scheduled priority floor, the routing-table sensor,
 bare and entity outputs, a critical push per OS, plain-language interface) — see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full roadmap.
 
@@ -253,7 +269,8 @@ anything.
 | **Deferral** | A message held back, not dropped, because the person is silent and their night has a known end. Re-decided in full when flushed. |
 | **Summary** | The one notification a person gets when more than one deferral survives the flush. On by default. |
 | **Episode** | What the router remembers between an alert's `idle → on` and its return to `idle`: who was told, on which outputs. |
-| **Observer mode** | The router watching a target's alert itself instead of waiting to be called as one of its `notifiers:`. The recommended way to wire a target. |
+| **Observer mode** | The router watching a target's alert itself instead of waiting to be called as one of its `notifiers:`. The recommended way to wire a target — one message when the alert goes off, one when it ends, no reminders. |
+| **Done message** | A target's "back to normal" message: observer mode's, a call with `switchboard_done: true`, or the `done_message` of an alert that lists the router under `notifiers:`. Never louder than the target's `done_priority`. |
 
 ## Documentation
 

@@ -15,6 +15,7 @@ from .const import (
     CONF_ALERT_ENTITY,
     CONF_AUDIENCE,
     CONF_DEFAULT_PRIORITY,
+    CONF_DONE_PRIORITY,
     CONF_OUTPUTS,
     CONF_PRESENCE_RULE,
     CONF_SILENCE_ENTITIES,
@@ -152,6 +153,11 @@ def validate_target(
     priority = row.get(CONF_DEFAULT_PRIORITY)
     if priority not in VALID_PRIORITIES:
         errors[CONF_DEFAULT_PRIORITY] = "invalid_priority"
+
+    # v0.9 (ADR-0023 §2.1): optional, absent meaning `normal`.
+    done_priority = row.get(CONF_DONE_PRIORITY)
+    if done_priority is not None and done_priority not in VALID_PRIORITIES:
+        errors[CONF_DONE_PRIORITY] = "invalid_priority"
 
     presence_rule = row.get(CONF_PRESENCE_RULE)
     if presence_rule not in VALID_PRESENCE_RULES:

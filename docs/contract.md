@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.8 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.9 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -56,6 +56,15 @@
 > moves. Everything above and below stays the v0 → v0.7 text, unchanged,
 > except the `target` row of the v0.6 step-id table, which the v0.8 addendum
 > supersedes.
+>
+> v0.9 addendum (ADR-0023): one optional target key (`done_priority`) and the
+> ceiling it puts on every done message; one more kind of call that is a done
+> message for its priority (the `done_message` of a Home Assistant `alert:`
+> that lists the router under `notifiers:`); `target_advanced` holds ten
+> fields; and one frozen blueprint path with its six input names. No service,
+> entity, `data` key, drop reason or event type is added. Everything above and
+> below stays the v0 → v0.8 text, unchanged, except the `target_advanced` row
+> of the v0.6 step-id table, which the v0.9 addendum supersedes.
 
 ## Names (public, must not change without a major version)
 
@@ -848,6 +857,102 @@ are no longer opened from menu entries of their own but from a checkbox on the
 screen before them. Every other step id — the menu entries, the pickers, the
 confirmations, `general` and the steps under it — remains internal and may
 change.
+
+## v0.9 addendum (ADR-0023)
+
+This addendum adds one target key, one rule about the priority of a done
+message, one more kind of call that rule applies to, one field on a public
+step, and one blueprint whose path and inputs automations name. No service,
+entity, `data` key, drop reason or `event.switchboard_delivery` type is added
+or removed, and no other routing rule moves.
+
+### `done_priority` — one optional target key
+
+A target may carry `done_priority`: one of `info`, `normal`, `high`,
+`critical`. Absent means **`normal`**; it is written only when it differs from
+`normal`, so a target stored before 0.9.0 keeps the exact row it had.
+
+### A done message never rings louder than `done_priority`
+
+A **done message** is routed at the lower of:
+
+1. the priority it would otherwise have — the caller's `data.priority` or the
+   target's `default_priority`, then `escalate_when_nobody_home` (v0.7);
+2. the target's `done_priority`.
+
+The rank is `info < normal < high < critical`. The ceiling is applied last.
+The capped priority is the effective one everywhere downstream: the silence
+and snooze bypass, `authenticationRequired`, the critical payload, and the
+`priority` of the `routed` event. A done message capped below `critical` is
+therefore held by a silence, deferred, summarised and expired like any other
+message of that priority; a deferred done message keeps its ceiling when it
+is re-decided at its flush.
+
+### Which calls are done messages
+
+Unchanged from v0.5, and keeping everything v0.5 gives them (the
+`not_notified` filter, the `switchboard-<slug>-done` default tag):
+
+- observer mode's `on|off → idle` message;
+- any call carrying `data.switchboard_done: true`.
+
+New, and a done message **for its priority only** — its default tag stays
+`switchboard-<slug>` and it is not filtered by the episode, exactly as before
+0.9.0:
+
+- a call to `notify.switchboard_<slug>`, or to `notify.switchboard` resolving
+  to `<slug>`, made while the target's `alert_entity` is a Home Assistant
+  `alert` entity that is **ending**: its live state already reads `idle`
+  while the state stored in the state machine still reads `on` or `off`, and
+  the stored state reads `idle` once the call has yielded to the event loop
+  once. That is the call core's `alert` makes for its `done_message`.
+
+When the target names no `alert_entity`, when that entity is not a Home
+Assistant `alert` entity, when the call arrives after the state machine
+already reads `idle`, or when the stored state is still not `idle` after the
+yield (an alert stuck by a `done_message` that failed to render), the call is
+routed as in v0.8: a real alarm is never downgraded.
+
+### `target_advanced` holds ten fields
+
+The v0.6 table of public step ids is amended for one row:
+
+| Step id | What it holds |
+|---|---|
+| `target_advanced` | `default_priority`, `presence_rule`, `allow_acknowledge`, `snooze_minutes`, `default_data`, `message`, `done_message`, `done_priority`, `default_title`, `clear_done` |
+
+`done_priority` defaults to `normal` there.
+
+### The blueprint `notify_switchboard/alert_from_a_sensor.yaml`
+
+The integration ships one automation blueprint. When the options flow shows
+the confirmation of an alert tied to no Home Assistant alert, it copies it to
+`blueprints/automation/notify_switchboard/alert_from_a_sensor.yaml` under the
+configuration directory, in the instance language, **only when no file is
+there**. It never overwrites and never deletes that file; it is the user's.
+
+An automation built from it names the path `notify_switchboard/alert_from_a_sensor.yaml`
+and these inputs, which are frozen:
+
+| Input | Meaning |
+|---|---|
+| `trigger_entity` | the entity whose state sets the alert off |
+| `trigger_to` | the state that sets it off (default `on`) |
+| `alert_name` | the target's slug; the automation calls `notify.switchboard_<alert_name>` |
+| `message` | the text; empty means the entity's name |
+| `done_message` | sent with `data.switchboard_done: true` when the entity leaves that state; empty means nothing is sent |
+| `priority` | `default` (no `data.priority`: the target's own), `info`, `normal`, `high` or `critical` |
+
+Every call it makes carries `data.source_entity`. The start trigger fires
+from any state, `unavailable` and `unknown` included; the done trigger does not
+fire on a change to `unavailable` or `unknown`.
+
+### The confirmation of a target is shown after the target is written
+
+When the `target` or `target_edit` form is submitted and leads to a
+confirmation (`target_saved`, `target_ready`, `target_ready_manual`), the
+target is written to the options before that confirmation is shown. Closing
+the confirmation keeps it; its `advanced` box still opens `target_advanced`.
 
 ## Observer mode (plan B, ADR-007)
 

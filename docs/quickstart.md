@@ -50,15 +50,26 @@ made from its name: "Water leak" becomes `notify.switchboard_water_leak`, and
 stays so even if you rename it later.
 
 - **With a Home Assistant alert picked**, the last screen just says who will
-  be told. Nothing to copy, nothing to restart.
+  be told. Nothing to copy, nothing to restart. People get one message when
+  that alert goes off and one when it ends — **not its reminders** (`repeat`).
 - **With nothing picked** — Home Assistant only creates alerts in YAML — the
-  last screen gives two ways to set it off: add the action
-  `notify.switchboard_water_leak` to an automation, or paste the `alert:`
-  block it shows (replace `binary_sensor.CHANGE_ME` with your sensor),
-  restart, then pick that alert under **What sets it off**.
-- Turning observer mode off is the older wiring, where the Home Assistant
-  alert lists the router under `notifiers:`; the last screen then shows that
-  block.
+  last screen puts the blueprint **Notify Switchboard: set an alert off from
+  a sensor** in your blueprints (in your language) and links to them: click
+  it, pick your sensor, type the automation name the screen shows
+  (`water_leak`), save. That automation also sends a back-to-normal
+  message that wakes nobody, if you give it one. The alert is already saved
+  when that screen appears, so following its link loses nothing. Below the link, the same screen still explains
+  the action `notify.switchboard_water_leak` for an automation of your own,
+  and the `alert:` block to paste if you want reminders and an Acknowledge
+  button (replace `binary_sensor.CHANGE_ME` with your sensor, restart, then
+  pick that alert under **What sets it off**).
+- **For reminders**, turn observer mode off: the Home Assistant alert then
+  lists the router under `notifiers:` and every `repeat` reaches people; the
+  last screen shows that block.
+
+However it is wired, the back-to-normal message rings at **normal** at most
+(**Importance of the back-to-normal message**, in the alert's advanced
+settings), so the end of a critical alert does not sound like the alarm.
 
 Both wiring styles:
 [`../README.md`](../README.md#wiring-a-target-to-an-alert); more examples in

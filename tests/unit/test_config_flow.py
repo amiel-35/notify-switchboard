@@ -1226,3 +1226,29 @@ async def test_the_audience_selector_offers_the_notify_services_too(
     assert not any("switchboard" in value for value in values), (
         "offering the router's own service configures a recursion it then has to refuse"
     )
+
+
+async def test_done_priority_is_kept_by_the_basic_editor(hass: HomeAssistant) -> None:
+    """v0.9 (ADR-0023 §2.1): written only when not `normal`, and carried over.
+
+    The basic screen does not show `done_priority`, so submitting it must not
+    be able to clear one the advanced screen set.
+    """
+    async_mock_service(hass, "notify", "mobile_app_alice")
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    await _options_step(hass, entry, "target", _target_input(), {})
+
+    def _row() -> dict[str, Any]:
+        return next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
+
+    await _open_target_advanced(hass, entry, "leak", {"done_priority": "critical"})
+    assert _row()["done_priority"] == "critical"
+
+    await _options_step(
+        hass, entry, "edit_target", {"slug": "leak"}, _basic_values(entry, "leak"), {}
+    )
+    assert _row()["done_priority"] == "critical"
+
+    await _open_target_advanced(hass, entry, "leak", {"done_priority": "normal"})
+    assert "done_priority" not in _row()

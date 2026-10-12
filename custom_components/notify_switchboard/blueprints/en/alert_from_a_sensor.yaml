@@ -1,0 +1,123 @@
+blueprint:
+  name: "Notify Switchboard: set an alert off from a sensor"
+  description: >-
+    When the sensor you pick reaches the state you choose, the people of a
+    Notify Switchboard alert are told. Optionally, they are told again, without
+    waking anybody, when it is back to normal.
+
+
+    The alert's automation name is on the "Alert saved" screen, and on
+    **Change an alert**. This way has no Acknowledge button and no reminders:
+    for those, use a Home Assistant alert instead.
+  domain: automation
+  author: Notify Switchboard
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/custom_components/notify_switchboard/blueprints/en/alert_from_a_sensor.yaml
+  input:
+    trigger_entity:
+      name: Sensor to watch
+      description: >-
+        The device that notices the problem: the leak detector, the door
+        contact, the motion sensor. Not a Home Assistant alert.
+      selector:
+        entity: {}
+    trigger_to:
+      name: State that sets the alert off
+      description: >-
+        Leave "on": it is what Home Assistant shows as "Wet", "Open" or
+        "Detected". For another kind of sensor, the state exactly as Developer
+        tools > States shows it.
+      default: "on"
+      selector:
+        text: {}
+    alert_name:
+      name: The alert's automation name
+      description: >-
+        The one the "Alert saved" screen gave you, for example water_leak.
+      selector:
+        text: {}
+    message:
+      name: Message (optional)
+      description: Empty means the sensor's name.
+      default: ""
+      selector:
+        text: {}
+    done_message:
+      name: Back-to-normal message (optional)
+      description: >-
+        Sent when the sensor leaves that state, never louder than the alert's
+        back-to-normal importance (normal unless you changed it). Empty means
+        nothing is sent.
+      default: ""
+      selector:
+        text: {}
+    priority:
+      name: Importance
+      description: >-
+        Leave the alert's own unless this sensor deserves another. Only a
+        critical message gets through to somebody who does not want to be
+        disturbed.
+      default: default
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - value: default
+              label: The alert's own
+            - value: info
+              label: Not very important
+            - value: normal
+              label: Normal
+            - value: high
+              label: Important
+            - value: critical
+              label: Critical
+
+mode: queued
+max: 10
+
+variables:
+  alert_name: !input alert_name
+  message_text: !input message
+  done_text: !input done_message
+  chosen_priority: !input priority
+  source: !input trigger_entity
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_entity
+    to: !input trigger_to
+    id: start
+  - trigger: state
+    entity_id: !input trigger_entity
+    from: !input trigger_to
+    not_to:
+      - unavailable
+      - unknown
+    id: done
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id == 'start' or done_text | length > 0 }}"
+
+actions:
+  - variables:
+      payload: >-
+        {{ {'source_entity': source} if chosen_priority == 'default'
+           else {'source_entity': source, 'priority': chosen_priority} }}
+  - if:
+      - condition: trigger
+        id: done
+    then:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: "{{ done_text }}"
+          data: "{{ dict(payload, switchboard_done=true) }}"
+    else:
+      - action: "notify.switchboard_{{ alert_name | trim }}"
+        data:
+          message: >-
+            {{ message_text if message_text | length > 0
+               else trigger.to_state.name }}
+          data: "{{ payload }}"

@@ -50,3 +50,16 @@ def expected_lingering_timers(request: pytest.FixtureRequest) -> bool:
     acceptance tests that drive the real `alert` integration, and only those.
     """
     return request.node.nodeid in _ALERT_LINGERING_TIMER_TESTS
+
+
+@pytest.fixture
+def hass_config_dir(hass_tmp_config_dir: str) -> str:
+    """Give every test its own configuration directory.
+
+    From 0.9.0 the options flow writes one file into the configuration
+    directory -- the blueprint of ADR-0023 §1 -- and the default
+    `hass_config_dir` is pytest-homeassistant-custom-component's shared
+    `testing_config`, inside the installed package. A temporary copy keeps one
+    test's blueprint out of the next test, and out of the virtualenv.
+    """
+    return hass_tmp_config_dir

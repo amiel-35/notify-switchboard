@@ -35,7 +35,9 @@
     "picker_no_device": "pas encore d'appareil",
     "picker_quiet": "silence : {entities}",
     "no_target_yet": "aucune alerte pour l'instant",
-    "nobody": "personne"
+    "nobody": "personne",
+    "blueprint_ready": "Le modèle d'automatisation (blueprint) « Standard de notification (Notify Switchboard) : déclencher une alerte depuis un capteur » est déjà dans Home Assistant : [ouvrez vos blueprints](/config/blueprint/dashboard) et cliquez dessus.",
+    "blueprint_import": "[Importez le modèle d'automatisation (blueprint) « Standard de notification (Notify Switchboard) : déclencher une alerte depuis un capteur »]({url}), puis cliquez dessus dans vos blueprints."
   },
   "entity": {
     "binary_sensor": {
@@ -172,7 +174,7 @@
           "name": "Le nom que les gens voient, par exemple Fuite d'eau. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
           "alert_entity": "Pas le détecteur lui-même : une alerte Home Assistant (alert.…) qui le surveille. Elles ne se créent qu'en YAML : sans elle, laissez vide.",
           "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
-          "observer_mode": "Activé par défaut : le Standard de notification regarde lui-même l'alerte Home Assistant, donc les gens sont prévenus aussitôt, sans rien à copier ni redémarrage. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée."
+          "observer_mode": "Activé par défaut : le Standard de notification regarde lui-même l'alerte Home Assistant, donc les gens sont prévenus aussitôt, sans rien à copier ni redémarrage — une fois quand elle se déclenche et une fois quand elle se termine, sans rappels. Pour être relancé jusqu'à ce que quelqu'un réponde, l'écran suivant explique comment. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée."
         }
       },
       "target_edit": {
@@ -192,39 +194,39 @@
           "name": "Le nom que les gens voient. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
           "alert_entity": "Une alerte Home Assistant (alert.…). Nécessaire pour le bouton « J'ai vu ». Vide : l'alerte ne part que si une automatisation l'appelle.",
           "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
-          "observer_mode": "Le Standard de notification regarde lui-même l'alerte Home Assistant : les gens sont prévenus aussitôt. C'est la façon recommandée. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée.",
+          "observer_mode": "Le Standard de notification regarde lui-même l'alerte Home Assistant, donc les gens sont prévenus aussitôt — une fois quand elle se déclenche et une fois quand elle se termine, sans rappels. Pour être relancé jusqu'à ce que quelqu'un réponde, l'écran suivant explique comment. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée.",
           "advanced": "L'importance, la présence, les boutons et les textes. Si vous cochez, tout est enregistré à la validation du dernier écran.",
           "escalation": "Faut-il monter l'importance quand personne n'est à la maison ? Si vous cochez, tout est enregistré à la validation du dernier écran."
         }
       },
       "target_saved": {
         "title": "Alerte enregistrée",
-        "description": "Vous avez décoché cette case : c'est l'alerte Home Assistant elle-même qui fera partir les messages. Copiez une seule fois ce bloc dans votre configuration, remplacez binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPour éviter cette étape, modifiez l'alerte et recochez « Prévenir dès qu'elle se déclenche ».\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
+        "description": "Vous avez décoché cette case : c'est l'alerte Home Assistant elle-même qui fera partir les messages. Copiez une seule fois ce bloc dans votre configuration, remplacez binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPar ce chemin, les gens reçoivent aussi les rappels que l'alerte Home Assistant répète. Si vous n'en avez pas besoin, modifiez l'alerte et recochez « Prévenir dès qu'elle se déclenche » : plus de bloc à copier.\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+          "advanced": "L'alerte est déjà enregistrée. Cochez pour régler tout de suite l'importance, la présence, les boutons et les textes : ils sont enregistrés à la validation de l'écran suivant."
         }
       },
       "target_ready": {
         "title": "Alerte enregistrée",
-        "description": "Dès que « {name} » se déclenche, ces personnes sont prévenues : {audience}. Rien d'autre à faire.\n\nL'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
+        "description": "Dès que « {name} » se déclenche, ces personnes sont prévenues : {audience}. Rien d'autre à faire.\n\nElles reçoivent un message quand elle se déclenche et un quand elle se termine, pas les rappels que l'alerte Home Assistant répète. Pour les rappels, modifiez l'alerte et décochez « Prévenir dès qu'elle se déclenche ».\n\nL'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+          "advanced": "L'alerte est déjà enregistrée. Cochez pour régler tout de suite l'importance, la présence, les boutons et les textes : ils sont enregistrés à la validation de l'écran suivant."
         }
       },
       "target_ready_manual": {
         "title": "Alerte enregistrée",
-        "description": "« {name} » n'est reliée à aucune alerte Home Assistant : elle ne partira pas seule. Deux façons de la faire partir :\n\n1. **Par une automatisation.** Paramètres > Automatisations et scènes > Créer une automatisation. Quand : votre détecteur passe à « détecté » (ou l'état voulu). Alors : l'action {service}, avec un message. Ce chemin n'a pas de bouton « J'ai vu » : il n'y a pas d'alerte Home Assistant à éteindre.\n\n2. **Par une alerte Home Assistant**, qui répète jusqu'à ce qu'on appuie sur « J'ai vu ». Collez ce bloc dans votre configuration, puis redémarrez Home Assistant. Remplacez binary_sensor.CHANGE_ME par le capteur qui signale le problème — le détecteur de fuite, le contact de la fenêtre :\n\n```yaml\n{snippet}\n```\n\nEnsuite, modifiez cette alerte et choisissez-la dans « Ce qui la déclenche ».",
+        "description": "« {name} » est enregistrée, mais elle n'est reliée à aucune alerte Home Assistant : elle ne partira pas seule. Vous pouvez suivre les liens ci-dessous avant de fermer cette fenêtre. Deux façons de la faire partir :\n\n1. **Par une automatisation toute prête.** {blueprint} Dans le formulaire, choisissez votre détecteur et écrivez `{slug}` comme nom de l'alerte pour les automatisations, puis enregistrez. Ce chemin n'a ni bouton « J'ai vu » ni rappels. (Pour construire l'automatisation vous-même : Paramètres > Automatisations et scènes > Créer une automatisation, puis l'action {service}, avec un message.)\n\n2. **Par une alerte Home Assistant**, qui répète jusqu'à ce qu'on appuie sur « J'ai vu ». Collez ce bloc dans votre configuration, puis redémarrez Home Assistant. Remplacez binary_sensor.CHANGE_ME par le capteur qui signale le problème — le détecteur de fuite, le contact de la fenêtre :\n\n```yaml\n{snippet}\n```\n\nEnsuite, modifiez cette alerte et choisissez-la dans « Ce qui la déclenche ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+          "advanced": "L'alerte est déjà enregistrée. Cochez pour régler tout de suite l'importance, la présence, les boutons et les textes : ils sont enregistrés à la validation de l'écran suivant."
         }
       },
       "target_advanced": {
@@ -238,6 +240,7 @@
           "default_data": "Réglages techniques ajoutés à chaque message",
           "message": "Texte du message",
           "done_message": "Texte du retour à la normale",
+          "done_priority": "Importance du retour à la normale",
           "default_title": "Titre par défaut",
           "clear_done": "Effacer le message de retour à la normale"
         },
@@ -247,8 +250,9 @@
           "allow_acknowledge": "Ajoute dans la notification un bouton qui éteint l'alerte.",
           "snooze_minutes": "Des durées en minutes séparées par des virgules, par exemple 15, 60. Vide : aucun bouton « plus tard ».",
           "default_data": "Si le message précise déjà la même chose, c'est lui qui l'emporte.",
-          "message": "Facultatif. Utilisé seulement si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : le nom de l'alerte. Les utilisateurs avancés peuvent écrire un modèle.",
-          "done_message": "Facultatif. Envoyé quand l'alerte Home Assistant s'éteint, si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : un texte tout prêt.",
+          "message": "Facultatif. Utilisé seulement si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : le nom de l'alerte. Les utilisateurs avancés peuvent écrire un modèle. Sans alerte Home Assistant, ce texte se choisit dans l'automatisation.",
+          "done_message": "Facultatif. Envoyé quand l'alerte Home Assistant s'éteint, si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : un texte tout prêt. Sans alerte Home Assistant, ce texte se choisit dans l'automatisation.",
+          "done_priority": "Le message de retour à la normale ne sonne jamais plus fort que ça, ni plus fort que l'alerte elle-même. « Normal » par défaut : la fin d'une alerte critique ne sonne pas comme l'alarme, et attend le matin si quelqu'un dort.",
           "default_title": "Titre utilisé quand l'appel n'en donne pas, et pour tous les messages que le Standard de notification envoie de lui-même.",
           "clear_done": "Retire le message de retour à la normale des téléphones qui l'ont reçu, une fois l'alerte terminée. Désactivé par défaut : il sonne, puis il reste."
         }
