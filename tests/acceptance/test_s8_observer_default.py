@@ -165,3 +165,56 @@ def test_the_observer_confirmations_say_what_is_left_to_do(file: Path):
     assert "{service}" in manual, "the automation action, by name"
     assert "{snippet}" in manual, "and the `alert:` block, as the other path"
     assert "binary_sensor.CHANGE_ME" in manual, "the placeholder is explained"
+
+
+async def test_without_an_alert_the_observer_box_has_no_effect_and_stays_on(
+    hass, enable_custom_integrations, install, options_flow
+):
+    """Unticked with nothing to watch: still the "how to set it off" screen.
+
+    Polish round (ADR-0022 §2, amendment): a box that changes nothing must
+    not send the user to the `notifiers:` YAML of an alert that does not
+    exist. It is stored on, the right value the day an alert is linked.
+    """
+    entry = await install(_household(hass))
+
+    result = await options_flow(
+        entry,
+        "target",
+        {"name": "Doorbell", "audience": ["person.alice"], "observer_mode": False},
+    )
+    assert result["step_id"] == "target_ready_manual"
+
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (row,) = entry.options["targets"]
+    assert row["observer_mode"] is True
+
+
+async def test_the_alert_block_keeps_accents_as_typed(
+    hass, enable_custom_integrations, install, options_flow
+):
+    """ "Fenêtre cuisine" is pasted as "Fenêtre cuisine", not as an escape."""
+    entry = await install(_household(hass))
+
+    for user_input, step_id in (
+        (
+            {
+                "name": "Fenêtre cuisine",
+                "alert_entity": "alert.fenetre",
+                "audience": ["person.alice"],
+                "observer_mode": False,
+            },
+            "target_saved",
+        ),
+        (
+            {"name": "Fenêtre cuisine", "audience": ["person.alice"]},
+            "target_ready_manual",
+        ),
+    ):
+        result = await options_flow(entry, "target", user_input)
+        assert result["step_id"] == step_id
+        snippet = result["description_placeholders"]["snippet"]
+        assert 'name: "Fenêtre cuisine"' in snippet, snippet
+        assert "\\u" not in snippet
+        hass.config_entries.options.async_abort(result["flow_id"])

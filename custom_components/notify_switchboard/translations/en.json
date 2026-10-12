@@ -170,9 +170,9 @@
         },
         "data_description": {
           "name": "The name people see, for example Water leak. It is also the text sent when the alert supplies none.",
-          "alert_entity": "A Home Assistant alert (alert.…). Home Assistant only lets you create those in YAML: if you have none, leave this empty — you will be shown what to do.",
+          "alert_entity": "Not the sensor itself: a Home Assistant alert (alert.…) that watches it. Those are created in YAML only: if you have none, leave this empty.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "On by default: Notify Switchboard watches what sets it off itself, so people are told at once, with nothing to copy and no restart."
+          "observer_mode": "On by default: Notify Switchboard watches the Home Assistant alert itself, so people are told at once, with nothing to copy and no restart. With nothing under “What sets it off”, this box has no effect and stays on."
         }
       },
       "target_edit": {
@@ -192,14 +192,14 @@
           "name": "The name people see. It is also the text sent when the alert supplies none.",
           "alert_entity": "A Home Assistant alert (alert.…). Needed for the Acknowledge button. Empty: the alert only goes off when an automation calls it.",
           "audience": "The people concerned, and a speaker or a tablet if you want one. Nobody else hears anything.",
-          "observer_mode": "Notify Switchboard watches what sets it off itself: people are told at once. This is the recommended way.",
+          "observer_mode": "Notify Switchboard watches the Home Assistant alert itself: people are told at once. This is the recommended way. With nothing under “What sets it off”, this box has no effect and stays on.",
           "advanced": "Importance, presence, buttons and wording. Ticked, everything is saved when the last screen is submitted.",
           "escalation": "Whether to raise the importance when nobody is home. Ticked, everything is saved when the last screen is submitted."
         }
       },
       "target_saved": {
         "title": "Alert saved",
-        "description": "You chose not to tell people as soon as it goes off, so the Home Assistant alert is what calls Notify Switchboard. Copy this block into your configuration once, replace binary_sensor.CHANGE_ME with the sensor to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTo skip this step, change the alert and tick “Tell people as soon as it goes off” instead.\n\nEverything else — importance, presence, buttons, wording — already has a sensible value. Tick the box below to set them up right away, or come back later through “Change an alert”.",
+        "description": "You unticked this box, so the Home Assistant alert itself will send the messages. Copy this block into your configuration once, replace binary_sensor.CHANGE_ME with the sensor to watch, then restart Home Assistant.\n\n```yaml\n{snippet}\n```\n\nTo skip this step, change the alert and tick “Tell people as soon as it goes off” again.\n\nEverything else — importance, presence, buttons, wording — already has a sensible value. Tick the box below to set them up right away, or come back later through “Change an alert”.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
@@ -219,7 +219,7 @@
       },
       "target_ready_manual": {
         "title": "Alert saved",
-        "description": "“{name}” is linked to no Home Assistant alert, so it will not go off on its own. Two ways to set it off:\n\n1. In an automation, add the action {service} with a message.\n\n2. Or create a Home Assistant alert by pasting this block into your configuration, then restart Home Assistant. Replace binary_sensor.CHANGE_ME with the sensor that reports the problem — the leak detector, the gate contact:\n\n```yaml\n{snippet}\n```\n\nThen change this alert and pick it under “What sets it off”.",
+        "description": "“{name}” is linked to no Home Assistant alert, so it will not go off on its own. Two ways to set it off:\n\n1. **With an automation.** Settings > Automations & scenes > Create automation. When: your sensor changes to “Detected” (or the state you want). Then: the action {service}, with a message. This way has no Acknowledge button: there is no Home Assistant alert for it to turn off.\n\n2. **With a Home Assistant alert**, which repeats until it is acknowledged. Paste this block into your configuration, then restart Home Assistant. Replace binary_sensor.CHANGE_ME with the sensor that reports the problem — the leak detector, the window contact:\n\n```yaml\n{snippet}\n```\n\nThen change this alert and pick it under “What sets it off”.",
         "data": {
           "advanced": "Open the advanced settings now"
         },
@@ -415,11 +415,11 @@
     },
     "person_without_outputs": {
       "title": "Somebody has no device at all",
-      "description": "At least one alert tells {person}, but no device is listed for {person}: every message meant for them is lost. Open the Notify Switchboard options, edit that person and give them at least one device."
+      "description": "At least one alert tells {person}, but no device is listed for {person}: every message meant for them is lost. On Notify Switchboard, click Configure, change that person and give them at least one device."
     },
     "alert_entity_missing": {
       "title": "What sets an alert off no longer exists",
-      "description": "The alert “{slug}” is linked to a Home Assistant alert that no longer exists ({entity_id}). So it never goes off on its own, and its Acknowledge button turns nothing off. Create that Home Assistant alert again, or empty the alert's “What sets it off” field, then reload Notify Switchboard."
+      "description": "The alert “{slug}” is linked to a Home Assistant alert that no longer exists ({entity_id}): it never goes off on its own and its Acknowledge button turns nothing off. Create that Home Assistant alert again, or empty “What sets it off”, then reload Notify Switchboard."
     }
   },
   "exceptions": {
@@ -427,7 +427,7 @@
       "message": "There is no alert {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "The alert {target} has no Acknowledge button: it is linked to no Home Assistant alert, or the button is turned off for it."
+      "message": "The alert {target} has no Acknowledge button: no Home Assistant alert is linked, or the button is off."
     },
     "snooze_minutes_not_offered": {
       "message": "The alert {target} does not offer a {minutes} min hold. It offers: {offered}."
@@ -468,11 +468,11 @@
   "services": {
     "acknowledge": {
       "name": "Acknowledge",
-      "description": "Turns off the Home Assistant alert linked to an alert, exactly as the Acknowledge button of a notification does.",
+      "description": "Turns off this alert's Home Assistant alert, like the Acknowledge button of a notification.",
       "fields": {
         "target": {
           "name": "Alert",
-          "description": "The alert concerned (its automation name). It must be linked to a Home Assistant alert and offer the Acknowledge button."
+          "description": "The alert (its automation name). It needs a Home Assistant alert and the Acknowledge button."
         }
       }
     },
@@ -482,7 +482,7 @@
       "fields": {
         "target": {
           "name": "Alert",
-          "description": "The alert concerned (its automation name), the one to put on hold."
+          "description": "The alert to put on hold (its automation name)."
         },
         "minutes": {
           "name": "Minutes",
@@ -500,7 +500,7 @@
       "fields": {
         "target": {
           "name": "Alert",
-          "description": "The alert concerned (its automation name), the one to start again."
+          "description": "The alert to start again (its automation name)."
         },
         "person": {
           "name": "Person",
@@ -534,11 +534,11 @@
     },
     "explain": {
       "name": "Explain",
-      "description": "Answers the question “what would happen to a message sent right now to this alert?”, person by person, without sending anything. Call it asking for the answer.",
+      "description": "Says, person by person, what would happen to a message sent right now through this alert, without sending anything. Call it asking for the answer.",
       "fields": {
         "target": {
           "name": "Alert",
-          "description": "The alert concerned (its automation name), the one to look at."
+          "description": "The alert to look at (its automation name)."
         },
         "priority": {
           "name": "Importance",

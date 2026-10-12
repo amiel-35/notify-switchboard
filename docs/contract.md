@@ -802,7 +802,10 @@ The v0.6 table of public step ids is amended for one row:
   key is unchanged, and so is its meaning when absent from a stored target
   (false).
 - A target created through `target` alone is the row v0.7 wrote for the same
-  answers with `slug` set as above and `observer_mode` as submitted.
+  answers with `slug` set as above and `observer_mode` as submitted — except
+  that a target with no `alert_entity` is always stored with
+  `observer_mode: true`: with nothing to watch the flag changes no routing,
+  and true is the right value the day an alert is linked.
 
 ### `person_outputs` shows two checkboxes that store nothing
 

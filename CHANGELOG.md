@@ -25,8 +25,10 @@ Nothing yet.
   Assistant alert picked under **What sets it off**, the last screen just says
   who will be told: no YAML to copy, no restart.
 - An alert tied to no Home Assistant alert says plainly that it will not go
-  off on its own, and gives both ways to set it off: the action to add to an
-  automation, or a ready-to-paste `alert:` block.
+  off on its own, and gives both ways to set it off: where to create the
+  automation and which action to add (no Acknowledge button that way), or a
+  ready-to-paste `alert:` block. Without a Home Assistant alert, "Tell people
+  as soon as it goes off" has no effect and stays ticked.
 - The options menu is shorter: three entries for the people of the house,
   three for the alerts, and **Settings** for the rest — the alert used by
   default, critical alerts on phones, how long a message set aside stays
@@ -57,6 +59,8 @@ Nothing yet.
 - An alert removed and then added again under the same name starts clean: it
   no longer inherits the "later" holds, the messages set aside or the
   back-to-normal memory of the one it replaces.
+- The `alert:` block to paste keeps accented letters as typed ("Fenêtre
+  cuisine") instead of escape codes.
 
 ## [0.7.1] - 2026-09-07
 

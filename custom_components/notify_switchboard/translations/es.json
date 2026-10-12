@@ -170,9 +170,9 @@
         },
         "data_description": {
           "name": "El nombre que ve la gente, por ejemplo Fuga de agua. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
-          "alert_entity": "Una alerta de Home Assistant (alert.…). Home Assistant solo permite crearlas en YAML: si no tienes ninguna, déjalo vacío — te enseñaremos qué hacer.",
+          "alert_entity": "No el detector en sí: una alerta de Home Assistant (alert.…) que lo vigila. Solo se crean en YAML: si no tienes ninguna, déjalo vacío.",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "Activado por defecto: la Centralita de notificaciones vigila ella misma lo que la dispara, así que se avisa enseguida, sin nada que copiar ni reinicio."
+          "observer_mode": "Activado por defecto: la Centralita de notificaciones vigila ella misma la alerta de Home Assistant, así que se avisa enseguida, sin nada que copiar ni reinicio. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada."
         }
       },
       "target_edit": {
@@ -192,14 +192,14 @@
           "name": "El nombre que ve la gente. Es también el texto que se envía cuando la alerta no proporciona ninguno.",
           "alert_entity": "Una alerta de Home Assistant (alert.…). Necesaria para el botón «Visto». Vacío: la alerta solo salta cuando la llama una automatización.",
           "audience": "Las personas afectadas y, si quieres, un altavoz o una tableta. Nadie más recibe nada.",
-          "observer_mode": "La Centralita de notificaciones vigila ella misma lo que la dispara: se avisa enseguida. Es la forma recomendada.",
+          "observer_mode": "La Centralita de notificaciones vigila ella misma la alerta de Home Assistant: se avisa enseguida. Es la forma recomendada. Si «Lo que la dispara» está vacío, esta casilla no tiene efecto y sigue marcada.",
           "advanced": "La importancia, la presencia, los botones y los textos. Si la marcas, todo se guarda al validar la última pantalla.",
           "escalation": "Si hay que subir la importancia cuando no hay nadie en casa. Si la marcas, todo se guarda al validar la última pantalla."
         }
       },
       "target_saved": {
         "title": "Alerta guardada",
-        "description": "Has elegido no avisar en cuanto salte, así que es la alerta de Home Assistant la que llamará a la Centralita de notificaciones. Copia una sola vez este bloque en tu configuración, sustituye binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPara saltarte este paso, modifica la alerta y marca «Avisar en cuanto salte».\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
+        "description": "Has desmarcado esta casilla: es la propia alerta de Home Assistant la que enviará los mensajes. Copia una sola vez este bloque en tu configuración, sustituye binary_sensor.CHANGE_ME por el sensor que hay que vigilar y reinicia Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPara saltarte este paso, modifica la alerta y vuelve a marcar «Avisar en cuanto salte».\n\nTodo lo demás — importancia, presencia, botones, textos — ya tiene un valor razonable. Marca la casilla de abajo para configurarlos ahora mismo, o vuelve más tarde por «Modificar una alerta».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -219,7 +219,7 @@
       },
       "target_ready_manual": {
         "title": "Alerta guardada",
-        "description": "«{name}» no está vinculada a ninguna alerta de Home Assistant, así que no saltará sola. Dos formas de hacerla saltar:\n\n1. En una automatización, añade la acción {service} con un mensaje.\n\n2. O crea una alerta de Home Assistant pegando este bloque en tu configuración y reinicia Home Assistant. Sustituye binary_sensor.CHANGE_ME por el sensor que señala el problema — el detector de fugas, el contacto de la puerta:\n\n```yaml\n{snippet}\n```\n\nDespués, modifica esta alerta y elígela en «Lo que la dispara».",
+        "description": "«{name}» no está vinculada a ninguna alerta de Home Assistant, así que no saltará sola. Dos formas de hacerla saltar:\n\n1. **Con una automatización.** Ajustes > Automatizaciones y escenas > Crear automatización. Cuando: tu detector cambia a «Detectado» (o el estado que quieras). Entonces: la acción {service}, con un mensaje. Este camino no tiene botón «Visto»: no hay ninguna alerta de Home Assistant que apagar.\n\n2. **Con una alerta de Home Assistant**, que se repite hasta que alguien pulsa «Visto». Pega este bloque en tu configuración y reinicia Home Assistant. Sustituye binary_sensor.CHANGE_ME por el sensor que señala el problema — el detector de fugas, el contacto de la ventana:\n\n```yaml\n{snippet}\n```\n\nDespués, modifica esta alerta y elígela en «Lo que la dispara».",
         "data": {
           "advanced": "Abrir los ajustes avanzados ahora"
         },
@@ -415,11 +415,11 @@
     },
     "person_without_outputs": {
       "title": "Alguien no tiene ningún dispositivo",
-      "description": "Al menos una alerta avisa a {person}, pero no hay ningún dispositivo indicado para {person}: todos los mensajes destinados a esa persona se pierden. Abre las opciones de la Centralita de notificaciones, modifica esa persona y dale al menos un dispositivo."
+      "description": "Al menos una alerta avisa a {person}, pero no hay ningún dispositivo indicado para {person}: todos sus mensajes se pierden. En la Centralita de notificaciones, haz clic en Configurar, modifica a esa persona y dale al menos un dispositivo."
     },
     "alert_entity_missing": {
       "title": "Lo que dispara una alerta ya no existe",
-      "description": "La alerta «{slug}» está vinculada a una alerta de Home Assistant que ya no existe ({entity_id}). Así que nunca salta sola, y su botón «Visto» no apaga nada. Vuelve a crear esa alerta de Home Assistant, o vacía el campo «Lo que la dispara» de la alerta, y recarga la Centralita de notificaciones."
+      "description": "La alerta «{slug}» está vinculada a una alerta de Home Assistant que ya no existe ({entity_id}): nunca salta sola y su botón «Visto» no apaga nada. Vuelve a crear esa alerta de Home Assistant, o vacía «Lo que la dispara», y recarga la Centralita de notificaciones."
     }
   },
   "exceptions": {
@@ -427,7 +427,7 @@
       "message": "No hay ninguna alerta {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "La alerta {target} no tiene botón «Visto»: no está vinculada a ninguna alerta de Home Assistant, o el botón está desactivado."
+      "message": "La alerta {target} no tiene botón «Visto»: no hay alerta de Home Assistant vinculada, o el botón está desactivado."
     },
     "snooze_minutes_not_offered": {
       "message": "La alerta {target} no ofrece una espera de {minutes} min. Ofrece: {offered}."
@@ -468,11 +468,11 @@
   "services": {
     "acknowledge": {
       "name": "Marcar como visto",
-      "description": "Apaga la alerta de Home Assistant vinculada a una alerta, exactamente como el botón «Visto» de una notificación.",
+      "description": "Apaga la alerta de Home Assistant de esta alerta, como el botón «Visto» de una notificación.",
       "fields": {
         "target": {
           "name": "Alerta",
-          "description": "La alerta afectada (su nombre para automatizaciones). Debe estar vinculada a una alerta de Home Assistant y ofrecer el botón «Visto»."
+          "description": "La alerta (su nombre para automatizaciones). Necesita una alerta de Home Assistant y el botón «Visto»."
         }
       }
     },
@@ -482,7 +482,7 @@
       "fields": {
         "target": {
           "name": "Alerta",
-          "description": "La alerta afectada (su nombre para automatizaciones), la que hay que dejar en espera."
+          "description": "La alerta que hay que dejar en espera (su nombre para automatizaciones)."
         },
         "minutes": {
           "name": "Minutos",
@@ -500,7 +500,7 @@
       "fields": {
         "target": {
           "name": "Alerta",
-          "description": "La alerta afectada (su nombre para automatizaciones), la que hay que volver a poner en marcha."
+          "description": "La alerta que hay que volver a poner en marcha (su nombre para automatizaciones)."
         },
         "person": {
           "name": "Persona",
@@ -534,11 +534,11 @@
     },
     "explain": {
       "name": "Explicar",
-      "description": "Responde a la pregunta «¿qué le pasaría a un mensaje enviado ahora mismo a esta alerta?», persona por persona, sin enviar nada. Hay que llamarla pidiendo la respuesta.",
+      "description": "Dice, persona por persona, qué le pasaría a un mensaje enviado ahora mismo por esta alerta, sin enviar nada. Hay que llamarla pidiendo la respuesta.",
       "fields": {
         "target": {
           "name": "Alerta",
-          "description": "La alerta afectada (su nombre para automatizaciones), la que hay que examinar."
+          "description": "La alerta que hay que examinar (su nombre para automatizaciones)."
         },
         "priority": {
           "name": "Importancia",

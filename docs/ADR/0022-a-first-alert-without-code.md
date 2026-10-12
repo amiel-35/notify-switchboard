@@ -330,6 +330,14 @@ ready-to-paste `alert:` block (without `notifiers:`, since the router watches
 that alert once it is picked), with one sentence on `binary_sensor.CHANGE_ME`.
 `observer_mode` reads "Tell people as soon as it goes off (recommended)".
 
+Polish round (same day, second French review at 7/10): with no
+`alert_entity` the box has no effect, so the flow stores it **on** whatever
+was ticked, says so in its help, and always ends on `target_ready_manual` —
+never on the `notifiers:` block of an alert that does not exist. The
+automation path there names the menu (Settings > Automations & scenes >
+Create automation, When / Then) and says it has no Acknowledge button. The
+`alert:` block keeps non-ASCII characters (`json.dumps(..., ensure_ascii=False)`).
+
 ### §5, amended: the helper is created at the last step, and never shared
 
 - The helper is created when the **last** screen of the person editor is

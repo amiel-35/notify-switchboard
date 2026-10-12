@@ -665,13 +665,16 @@ def _alert_snippet(row: dict[str, Any]) -> str:
         str(alert_entity).partition(".")[2] if alert_entity else str(row[CONF_SLUG])
     )
     acknowledge = "true" if row.get(CONF_ALLOW_ACKNOWLEDGE) else "false"
+    name = json.dumps(row.get("name") or row[CONF_SLUG], ensure_ascii=False)
     lines = [
         "alert:",
         f"  {object_id}:",
         # A row name is free text: an unquoted `Fuite: eau # urgence`
         # is a nested mapping truncated at the `#`. `json.dumps` emits a
         # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
-        f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
+        # `ensure_ascii=False` keeps "Fenêtre" as typed: a YAML file is UTF-8,
+        # and a backslash-u escape is valid but unreadable to whoever pastes it.
+        f"    name: {name}",
         f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
         '    state: "on"',
         "    repeat: [5, 15, 60]",
@@ -1409,12 +1412,19 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 if stored is not None
                 else derive_slug(name, [str(other[CONF_SLUG]) for other in targets])
             )
+            alert_entity = user_input.get(CONF_ALERT_ENTITY) or None
             row = {
                 CONF_SLUG: slug,
                 "name": name,
-                CONF_ALERT_ENTITY: user_input.get(CONF_ALERT_ENTITY) or None,
+                CONF_ALERT_ENTITY: alert_entity,
                 CONF_AUDIENCE: list(user_input.get(CONF_AUDIENCE) or []),
-                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE)),
+                # ADR-0022 §2, amended: with no Home Assistant alert linked
+                # there is nothing to watch, so the box has no effect -- it is
+                # kept on, which is the right value the day an alert is
+                # linked, and the confirmation is always the one that says how
+                # to set the alert off.
+                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE))
+                or alert_entity is None,
                 **_advanced_target_values(stored),
             }
             errors = _showable(

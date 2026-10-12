@@ -792,7 +792,7 @@ async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
         hass, entry, "target", _target_input(name="Fuite: eau # urgence")
     )
 
-    assert result["step_id"] == "target_saved"
+    assert result["step_id"] == "target_ready_manual"  # no alert linked (ADR-0022)
     snippet = (result["description_placeholders"] or {})["snippet"]
     parsed = yaml.safe_load(snippet)
     # v0.8 (ADR-0022 §1): the slug -- and so the block's key -- is the name's.
@@ -856,7 +856,10 @@ async def test_the_alert_snippet_of_a_notifiers_row_still_names_the_router(
     await _add_person(hass, entry)
 
     result = await _options_step(
-        hass, entry, "target", _target_input(observer_mode=False)
+        hass,
+        entry,
+        "target",
+        _target_input(observer_mode=False, alert_entity="alert.leak"),
     )
 
     snippet = (result["description_placeholders"] or {})["snippet"]

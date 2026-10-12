@@ -170,9 +170,9 @@
         },
         "data_description": {
           "name": "Le nom que les gens voient, par exemple Fuite d'eau. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
-          "alert_entity": "Une alerte Home Assistant (alert.…). Home Assistant ne permet de les créer qu'en YAML : sans elle, laissez vide — on vous montrera quoi faire.",
+          "alert_entity": "Pas le détecteur lui-même : une alerte Home Assistant (alert.…) qui le surveille. Elles ne se créent qu'en YAML : sans elle, laissez vide.",
           "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
-          "observer_mode": "Activé par défaut : le Standard de notification regarde lui-même ce qui la déclenche, donc les gens sont prévenus aussitôt, sans rien à copier ni redémarrage."
+          "observer_mode": "Activé par défaut : le Standard de notification regarde lui-même l'alerte Home Assistant, donc les gens sont prévenus aussitôt, sans rien à copier ni redémarrage. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée."
         }
       },
       "target_edit": {
@@ -192,14 +192,14 @@
           "name": "Le nom que les gens voient. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
           "alert_entity": "Une alerte Home Assistant (alert.…). Nécessaire pour le bouton « J'ai vu ». Vide : l'alerte ne part que si une automatisation l'appelle.",
           "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
-          "observer_mode": "Le Standard de notification regarde lui-même ce qui la déclenche : les gens sont prévenus aussitôt. C'est la façon recommandée.",
+          "observer_mode": "Le Standard de notification regarde lui-même l'alerte Home Assistant : les gens sont prévenus aussitôt. C'est la façon recommandée. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée.",
           "advanced": "L'importance, la présence, les boutons et les textes. Si vous cochez, tout est enregistré à la validation du dernier écran.",
           "escalation": "Faut-il monter l'importance quand personne n'est à la maison ? Si vous cochez, tout est enregistré à la validation du dernier écran."
         }
       },
       "target_saved": {
         "title": "Alerte enregistrée",
-        "description": "Vous avez choisi de ne pas prévenir dès qu'elle se déclenche : c'est donc l'alerte Home Assistant qui appellera le Standard de notification. Copiez une seule fois ce bloc dans votre configuration, remplacez binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPour éviter cette étape, modifiez l'alerte et cochez plutôt « Prévenir dès qu'elle se déclenche ».\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
+        "description": "Vous avez décoché cette case : c'est l'alerte Home Assistant elle-même qui fera partir les messages. Copiez une seule fois ce bloc dans votre configuration, remplacez binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPour éviter cette étape, modifiez l'alerte et recochez « Prévenir dès qu'elle se déclenche ».\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
@@ -219,7 +219,7 @@
       },
       "target_ready_manual": {
         "title": "Alerte enregistrée",
-        "description": "« {name} » n'est reliée à aucune alerte Home Assistant : elle ne partira pas seule. Deux façons de la faire partir :\n\n1. Dans une automatisation, ajoutez l'action {service}, avec un message.\n\n2. Ou créez une alerte Home Assistant en collant ce bloc dans votre configuration, puis redémarrez Home Assistant. Remplacez binary_sensor.CHANGE_ME par le capteur qui signale le problème — le détecteur de fuite, le contact du portail :\n\n```yaml\n{snippet}\n```\n\nEnsuite, modifiez cette alerte et choisissez-la dans « Ce qui la déclenche ».",
+        "description": "« {name} » n'est reliée à aucune alerte Home Assistant : elle ne partira pas seule. Deux façons de la faire partir :\n\n1. **Par une automatisation.** Paramètres > Automatisations et scènes > Créer une automatisation. Quand : votre détecteur passe à « détecté » (ou l'état voulu). Alors : l'action {service}, avec un message. Ce chemin n'a pas de bouton « J'ai vu » : il n'y a pas d'alerte Home Assistant à éteindre.\n\n2. **Par une alerte Home Assistant**, qui répète jusqu'à ce qu'on appuie sur « J'ai vu ». Collez ce bloc dans votre configuration, puis redémarrez Home Assistant. Remplacez binary_sensor.CHANGE_ME par le capteur qui signale le problème — le détecteur de fuite, le contact de la fenêtre :\n\n```yaml\n{snippet}\n```\n\nEnsuite, modifiez cette alerte et choisissez-la dans « Ce qui la déclenche ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
@@ -247,8 +247,8 @@
           "allow_acknowledge": "Ajoute dans la notification un bouton qui éteint l'alerte.",
           "snooze_minutes": "Des durées en minutes séparées par des virgules, par exemple 15, 60. Vide : aucun bouton « plus tard ».",
           "default_data": "Si le message précise déjà la même chose, c'est lui qui l'emporte.",
-          "message": "Facultatif, et utilisé seulement quand on prévient dès qu'elle se déclenche. Vide : le nom de l'alerte est envoyé. Les utilisateurs avancés peuvent écrire un modèle.",
-          "done_message": "Facultatif, envoyé quand l'alerte Home Assistant s'éteint, si l'on prévient dès qu'elle se déclenche. Vide : un texte tout prêt est envoyé.",
+          "message": "Facultatif. Utilisé seulement si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : le nom de l'alerte. Les utilisateurs avancés peuvent écrire un modèle.",
+          "done_message": "Facultatif. Envoyé quand l'alerte Home Assistant s'éteint, si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : un texte tout prêt.",
           "default_title": "Titre utilisé quand l'appel n'en donne pas, et pour tous les messages que le Standard de notification envoie de lui-même.",
           "clear_done": "Retire le message de retour à la normale des téléphones qui l'ont reçu, une fois l'alerte terminée. Désactivé par défaut : il sonne, puis il reste."
         }
@@ -407,7 +407,7 @@
     },
     "invalid_service_calls_many": {
       "title": "Quelque chose demande sans cesse des noms qui n'existent pas",
-      "description": "Le Standard de notification a maintenant refusé plus de {count} alertes ou personnes différentes. Plutôt qu'un avertissement par nom, celui-ci les représente tous. Quelque chose fabrique des noms qui n'existent pas — le plus souvent une automatisation qui produit un nom faux. Corrigez-le ; cet avertissement disparaît quand vous redémarrez le Standard de notification."
+      "description": "Le Standard de notification a déjà refusé plus de {count} alertes ou personnes différentes. Ce seul avertissement les regroupe toutes. Quelque chose — le plus souvent une automatisation — fabrique des noms qui n'existent pas. Corrigez-le ; l'avertissement disparaît au redémarrage du Standard de notification."
     },
     "person_without_user_id": {
       "title": "Une personne n'est reliée à aucun compte Home Assistant",
@@ -415,11 +415,11 @@
     },
     "person_without_outputs": {
       "title": "Une personne n'a aucun appareil",
-      "description": "Au moins une alerte prévient {person}, mais aucun appareil n'est indiqué pour {person} : tous les messages qui lui sont destinés sont perdus. Ouvrez les options du Standard de notification, modifiez cette personne et donnez-lui au moins un appareil."
+      "description": "Au moins une alerte prévient {person}, mais aucun appareil n'est indiqué pour {person} : tous ses messages sont perdus. Sur le Standard de notification, cliquez sur Configurer, modifiez cette personne et donnez-lui au moins un appareil."
     },
     "alert_entity_missing": {
       "title": "Ce qui déclenche une alerte n'existe plus",
-      "description": "L'alerte « {slug} » est reliée à une alerte Home Assistant qui n'existe plus ({entity_id}). Elle ne part donc jamais seule, et son bouton « J'ai vu » n'éteint rien. Recréez cette alerte Home Assistant, ou videz le champ « Ce qui la déclenche » de l'alerte, puis rechargez le Standard de notification."
+      "description": "L'alerte « {slug} » est reliée à une alerte Home Assistant qui n'existe plus ({entity_id}) : elle ne part donc jamais seule et son bouton « J'ai vu » n'éteint rien. Recréez cette alerte Home Assistant, ou videz « Ce qui la déclenche », puis rechargez le Standard de notification."
     }
   },
   "exceptions": {
@@ -427,7 +427,7 @@
       "message": "Il n'y a pas d'alerte {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "L'alerte {target} n'a pas de bouton « J'ai vu » : elle n'est reliée à aucune alerte Home Assistant, ou le bouton y est désactivé."
+      "message": "L'alerte {target} n'a pas de bouton « J'ai vu » : pas d'alerte Home Assistant reliée, ou bouton désactivé."
     },
     "snooze_minutes_not_offered": {
       "message": "L'alerte {target} ne propose pas de mise en attente de {minutes} min. Elle propose : {offered}."
@@ -439,7 +439,7 @@
       "message": "{person} ne fait pas partie des personnes prévenues par l'alerte {target}."
     },
     "invalid_silence_minutes": {
-      "message": "Un silence dure entre {min} et {max} minutes ; {minutes} n'est ni l'un ni l'autre."
+      "message": "Un silence dure de {min} à {max} minutes ; {minutes} n'en fait pas partie."
     },
     "no_audience": {
       "message": "L'alerte {target} ne prévient personne."
@@ -468,11 +468,11 @@
   "services": {
     "acknowledge": {
       "name": "Marquer comme vu",
-      "description": "Éteint l'alerte Home Assistant reliée à une alerte, exactement comme le bouton « J'ai vu » d'une notification.",
+      "description": "Éteint l'alerte Home Assistant de cette alerte, comme le bouton « J'ai vu » d'une notification.",
       "fields": {
         "target": {
           "name": "Alerte",
-          "description": "L'alerte concernée (son nom pour les automatisations). Elle doit être reliée à une alerte Home Assistant et proposer le bouton « J'ai vu »."
+          "description": "L'alerte (son nom pour les automatisations). Il lui faut une alerte Home Assistant et le bouton « J'ai vu »."
         }
       }
     },
@@ -482,7 +482,7 @@
       "fields": {
         "target": {
           "name": "Alerte",
-          "description": "L'alerte concernée (son nom pour les automatisations), celle à mettre en attente."
+          "description": "L'alerte à mettre en attente (son nom pour les automatisations)."
         },
         "minutes": {
           "name": "Minutes",
@@ -500,7 +500,7 @@
       "fields": {
         "target": {
           "name": "Alerte",
-          "description": "L'alerte concernée (son nom pour les automatisations), celle à remettre en route."
+          "description": "L'alerte à remettre en route (son nom pour les automatisations)."
         },
         "person": {
           "name": "Personne",
@@ -534,15 +534,15 @@
     },
     "explain": {
       "name": "Expliquer",
-      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette alerte ? », personne par personne, sans rien envoyer. À appeler en demandant la réponse.",
+      "description": "Dit, personne par personne, ce qui arriverait à un message envoyé maintenant par cette alerte, sans rien envoyer. À appeler en demandant la réponse.",
       "fields": {
         "target": {
           "name": "Alerte",
-          "description": "L'alerte concernée (son nom pour les automatisations), celle à examiner."
+          "description": "L'alerte à examiner (son nom pour les automatisations)."
         },
         "priority": {
           "name": "Importance",
-          "description": "L'importance à supposer. Laissez vide pour celle que l'alerte utilise par défaut, exactement comme un vrai message."
+          "description": "L'importance à supposer. Vide : celle de l'alerte, comme pour un vrai message."
         },
         "person": {
           "name": "Personne",
