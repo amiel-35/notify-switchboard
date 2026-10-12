@@ -379,6 +379,12 @@ def mobile_app_registration(hass, device_registry, entity_registry):
     return _make
 
 
+# ADR-0022 §3: the entries of the "Settings" sub-menu (`general`).
+SETTINGS_MENU_ENTRIES = frozenset(
+    {"default_target", "critical_payload", "ttl", "test_person", "test_target"}
+)
+
+
 @pytest.fixture
 def options_flow(hass):
     """Drive the options flow: open the menu, pick a step, submit inputs.
@@ -392,6 +398,13 @@ def options_flow(hass):
 
     async def _drive(entry: MockConfigEntry, step: str, *inputs: dict[str, Any] | None):
         result = await hass.config_entries.options.async_init(entry.entry_id)
+        if step in SETTINGS_MENU_ENTRIES:
+            # Sprint 8 (ADR-0022 §3): these entries moved under "Settings",
+            # which is itself a menu. Walking through it here keeps every older
+            # test that opens one of them unchanged.
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"next_step_id": "general"}
+            )
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], {"next_step_id": step}
         )

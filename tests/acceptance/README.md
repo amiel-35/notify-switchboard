@@ -803,3 +803,77 @@ even when today's code already satisfies it.
 - `test_s7_critical_payload.py::test_priority_still_reaches_every_other_output`
   and `::test_a_non_critical_message_gets_no_critical_payload` — the two edges
   of a change that is otherwise all addition.
+
+## Sprint 8 (`test_s8_*.py`, and the v0.8 additions to `test_contract.py`)
+
+Sprint 8 changes the options flow and nothing the router decides: no routing
+rule, service, entity, `data` key, drop reason or event type moves. The tests
+are about what a newcomer meets on the way to a first alert, and about the one
+action the flow now takes on the user's behalf (a `schedule` helper).
+
+Written against `docs/contract.md` §"v0.8 addendum (ADR-0022)",
+`docs/ADR/0022-a-first-alert-without-code.md` and
+`docs/history/sprints/sprint-8-brief.md`.
+
+| File | What it pins |
+|---|---|
+| `test_s8_slug_derived.py` | `target` asks `name`, `alert_entity`, `audience`, `observer_mode` and no slug; the slug is `slugify(name)`, de-duplicated with `_2`, `_3`, falling back to `alert`; `notify.switchboard_<derived slug>` routes; the edit screen shows the slug read-only, ignores a submitted one and never renames it; a stored slug that is not `slugify(name)` keeps working. |
+| `test_s8_observer_default.py` | `observer_mode` defaults to true on `target`; observer on with an alert ends on `target_ready`, a sentence naming the alert and its people, without YAML; observer off still ends on `target_saved` with the `alert:` block; observer on without an alert ends on `target_ready_manual`, naming `notify.switchboard_<slug>`; no observer confirmation carries YAML in any language. |
+| `test_s8_menu.py` | The top menu is exactly seven entries (people, alerts, `general`); `general` is a menu of five; the three "advanced" entries are gone from the menu and from the strings; every menu label equals the title of the screen it opens, at both levels, in `en`/`fr`/`es`; the edit screens open `target_advanced`, `target_escalation` (one after the other when both are ticked, one write at the end) and `person_advanced`; `critical_payload` and `default_target` have screens of their own; a person picker reads "{name} — {devices}, quiet: {silences}". |
+| `test_s8_remove_confirmation.py` | Removing a person or a target opens a confirmation naming what is lost; unticked, it is refused with `not_confirmed` and nothing changes; ticked, the removal is exactly 0.7.1's. |
+| `test_s8_night_schedule.py` | The `night_schedule` checkbox, off by default, creates one core `schedule.*` named after the person, 00:00–07:00 and 22:00–24:00 every day, and lists it in `silence_entities`; ticking it again reuses it; an invalid person screen creates nothing; removing the person and then the config entry leaves the helper in place. |
+| `test_s8_wake_time_format.py` | `7:30`, `07:30`, `7h30`, `7 h 30`, `07:30:00` are accepted and stored as `"HH:MM:SS"`; unreadable values are refused with `invalid_time`; empty is still "no wake time"; the field opens on `07:30`; the routing-table entity still reports `HH:MM:SS`; the help text gives `7:30` as example in every language. |
+| `test_contract.py` | The four frozen fields of `target` and the `observer_mode` default; a created target's derived slug and its `notify.switchboard_<slug>`; the two person checkboxes store nothing and a wake time keeps its stored shape. |
+
+### Older tests amended by Sprint 8, and for nothing else
+
+ADR-0022 changes the field list of the public step `target` and removes three
+menu entries, which a handful of older tests used as their way in. They were
+amended for exactly that; no assertion about what is stored or routed was
+weakened.
+
+- **`conftest.py::options_flow`** walks through the new `general` menu for
+  the five entries that moved under it (`default_target`, `critical_payload`,
+  `ttl`, `test_person`, `test_target`), so every older test that opens one of
+  them is unchanged.
+- **`test_s6_target_editor.py`**: `BASIC_FIELDS` loses `slug`; the two
+  creation tests no longer submit a `slug` (the name "Leak" derives `leak`,
+  the slug they asserted); the two tests that opened "Advanced settings of a
+  target" reach `target_advanced` through the edit screen's `advanced`
+  checkbox.
+- **`test_s6_person_editor.py`**: `OUTPUT_FIELDS` gains the two checkboxes;
+  the test that opened "Set up somebody's night" reaches `person_advanced`
+  through the person screen's `advanced` checkbox.
+- **`test_contract.py::test_class_is_not_a_routing_table_row_key`** no longer
+  submits a `slug` to `target`.
+- **`test_s6_class_removed.py::test_class_is_a_field_of_neither_target_step`**
+  reaches `target_advanced` through the edit screen's `advanced` checkbox.
+
+Review round (ADR-0022, amendment 2026-10-12):
+
+- **`test_s6_vocabulary.py::test_every_issue_or_exception_naming_a_target_says_target`**
+  asks for the word "alert" instead of "target": the screen word changed
+  (ADR-0022 §8); the rule — one word everywhere a user reads — did not.
+- **`test_s8_observer_default.py`**: `target_ready_manual` now carries the
+  `alert:` block as the second way to set an unwired alert off, so the two
+  tests about it assert the block is there (without `notifiers:`) instead of
+  absent. `target_ready` still carries no YAML.
+- The night-schedule ordering, the reuse rule, wake times with seconds and the
+  purge of a removed target's state are pinned in
+  `tests/unit/test_night_schedule.py`.
+
+### Assumptions added by Sprint 8
+
+29. **The night schedule is observed through core's own service.** Its blocks
+    are read back with `schedule.get_schedule`
+    (`$HA_CORE_SRC/homeassistant/components/schedule/__init__.py`,
+    `SERVICE_GET`), which returns `datetime.time` values — so `24:00` reads
+    `23:59:59.999999` (`time.max`, `deserialize_to_time`). How the flow
+    reaches core's storage collection is not asserted: ADR-0022 §5 explains
+    it, and a test pinned to it would pin a core detail.
+30. **Schedules created by a test are removed at teardown**, by the
+    `cleanup_schedules` fixture of `test_s8_night_schedule.py`, for the same
+    reason as `schedule_silence`: a `Schedule` entity always has a timer armed.
+31. **A read-only field is asserted on its selector config**
+    (`validator.config["read_only"]`). That the frontend greys it out is a
+    frontend behaviour, checked end to end on a real instance, not here.

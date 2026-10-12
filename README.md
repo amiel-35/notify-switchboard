@@ -39,19 +39,28 @@ rather than a burst (see [The night](#the-night)).
 The **My Home Assistant** button at the top opens this repository in
 [HACS](https://hacs.xyz/); by hand, add
 `https://github.com/amiel-35/notify-switchboard` as a custom repository. The
-second button starts the config flow. Two short forms — **two fields for a
-person, then five for a target** — are enough for a working
-`notify.switchboard`: adding the first person also creates a `default` target
-with everybody in it, and a speaker can join a target's audience directly (see
-[Bare outputs](#bare-outputs)). Priority, presence rule, buttons, snooze
-durations, templates and default data all have a sane default and live behind
-**Advanced settings** in the options menu. Full walkthrough, including
-**Test a person / Test a target**, in [`docs/quickstart.md`](docs/quickstart.md).
+second button starts the config flow; then click **Configure**. Two short
+forms are enough for a working `notify.switchboard`: a person's screen asks
+**two things** — where to tell them and when not to disturb them — plus two
+optional boxes (create a night schedule, set up their night now); an alert's
+screen asks **four** — its name, what sets it off (optional), who to tell, and
+whether to tell them as soon as it goes off. Adding the first person also
+creates a `default` target with everybody in it, and a speaker can join a
+target's audience directly (see [Bare outputs](#bare-outputs)). On screen, a
+target is called an **alert**; its **automation name**
+(`notify.switchboard_<slug>`) is made from its name once and never changes.
+"Tell people as soon as it goes off" (observer mode) is on by default, so a
+new alert tied to a Home Assistant alert needs no YAML and no restart; one
+tied to nothing is set off by an automation calling its automation name. Priority, presence rule, buttons, snooze durations, templates and
+default data all have a sane default and are opened by a checkbox on the
+**Change an alert** screen. The menu has three entries for people, three for
+alerts, and **Settings**. Full walkthrough, including the two test messages
+under **Settings**, in [`docs/quickstart.md`](docs/quickstart.md).
 
 ## When the house is empty
 
-A target can carry **`escalate_when_nobody_home`** (options menu → *Escalation
-of a target*, off by default). When on, and no person of the target's audience
+A target can carry **`escalate_when_nobody_home`** (**Change an alert** → tick
+*What happens when the house is empty*, off by default). When on, and no person of the target's audience
 is `home`, that message routes **one step louder** — `info→normal`,
 `normal→high`, `high→critical`, `critical` unchanged — for that message only.
 The presence rule is never overridden, so escalation only matters on a target
@@ -120,8 +129,12 @@ wins. The pickers don't offer entities: type the entity id in directly.
 A person with a silence entity has a queue that behaves like something a human
 wakes up to.
 
-- **Wake time** (optional, advanced person settings) flushes the queue at a
-  fixed hour. Without one, it flushes when the silence itself ends (a
+- **A night in one tick**: *Create a night schedule* on a person's screen
+  makes an ordinary `schedule` helper named after them, 22:00–07:00 every day,
+  and lists it as their silence. It is yours from then on — edit its hours in
+  **Settings → Helpers**; the router never changes or deletes it.
+- **Wake time** (optional, the person's night settings, typed as `7:30`)
+  flushes the queue at a fixed hour. Without one, it flushes when the silence itself ends (a
   `schedule.*` publishes that instant; an `input_boolean` does not, so a
   message it silenced is dropped, not deferred).
 - **A floor**: a silence entity publishing a `min_priority` state attribute
@@ -181,8 +194,8 @@ to a missing `alert.*`, and an output that keeps failing.
 
 A `critical` message also carries, on `mobile_app_*` outputs only, the keys
 the [Companion docs](https://companion.home-assistant.io/docs/notifications/critical-notifications/)
-give for a critical notification — full detail and an off switch (**Default
-target** → "Make critical notifications critical") in
+give for a critical notification — full detail and an off switch
+(**Settings** → "Make phones ring for critical alerts") in
 [`docs/contract.md`](docs/contract.md).
 
 For cards, `sensor.switchboard_routing_table` publishes the table itself —
@@ -197,15 +210,25 @@ the **entity id itself never changes** across languages. Spanish is machine
 translated and not yet reviewed by a native speaker — corrections welcome.
 From 0.7.1 the screens use plain language rather than the contract's own
 words; entity ids, service names and option keys are unchanged underneath
-(mapping in [`docs/contract.md`](docs/contract.md)).
+(mapping in [`docs/contract.md`](docs/contract.md)). From 0.8.0 the screens
+call a target an **alert** (« alerte », « alerta ») and its slug its
+**automation name** (« nom pour les automatisations »); a Home Assistant
+`alert.*` entity is always spelled "a Home Assistant alert" to tell the two
+apart.
+
+En français : les principes du projet sont résumés dans
+[`docs/fr/doctrine.md`](docs/fr/doctrine.md).
 
 ## Removal and roadmap
 
 Settings → Devices & services → Notify Switchboard → delete removes the
 `notify.switchboard` service and entity; it does not touch the `notify.*`
-services it forwarded to. Current release: **0.7.1** (two-step editors,
-escalation, a scheduled priority floor, the routing-table sensor, bare and
-entity outputs, a critical push per OS, plain-language interface) — see
+services it forwarded to. A night schedule created from a person's screen is
+an ordinary Home Assistant helper and stays. Current release: **0.8.0** (a
+first alert without code: names instead of identifiers, observer mode by
+default, a shorter menu, a night schedule in one tick; before it, two-step
+editors, escalation, a scheduled priority floor, the routing-table sensor,
+bare and entity outputs, a critical push per OS, plain-language interface) — see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full roadmap.
 
 ## Glossary
@@ -215,7 +238,8 @@ anything.
 
 | Word | What it means here |
 |---|---|
-| **Target** | One routing-table entry: an identity, an alert, an audience, how it is driven. Becomes `notify.switchboard_<slug>` — not the notify `target:` field, which names one or more of these. |
+| **Target** | One routing-table entry: an identity, an alert, an audience, how it is driven. Called an **alert** on screen from 0.8.0. Becomes `notify.switchboard_<slug>` — not the notify `target:` field, which names one or more of these. |
+| **Automation name** | A target's slug, the `<slug>` of `notify.switchboard_<slug>`. Made from the target's name when it is created, never typed, never changed afterwards. |
 | **Person** | A `person.*` this router knows, with the notify services that reach them and the entities that mean they are silent. |
 | **Output** | A `notify.*` service — or, from 0.7.0, entity — a person's messages are handed to. |
 | **Bare output** | An audience entry that is a `notify.*` service name rather than a person. See [Bare outputs](#bare-outputs). |

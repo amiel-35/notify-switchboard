@@ -10,9 +10,9 @@
     "default_target_name": "Tout le monde",
     "test_message": "Message d'essai du Standard de notification.",
     "detail_routed": "Ce message serait envoyé sur : {outputs}.",
-    "detail_deferred": "On ne dérange pas {person} en ce moment — {entities}. Le message attendrait, et serait remis à {until}.",
+    "detail_deferred": "On ne dérange pas {person} en ce moment — {entities}. Le message serait mis de côté, et remis à {until}.",
     "detail_dropped": "Ce message ne serait pas remis à {person} ({reason}).",
-    "detail_presence": "Cette cible ne prévient pas tout le monde en toutes circonstances : sa règle de présence est {rule}, et {person} est actuellement {state}.",
+    "detail_presence": "Cette alerte ne prévient pas tout le monde en toutes circonstances : sa règle de présence est {rule}, et {person} est actuellement {state}.",
     "detail_silenced": "On ne dérange pas {person} en ce moment — {entities}. Seule une alerte critique passerait.",
     "detail_silenced_temporary": "On ne dérange pas {person} pour un moment, jusqu'à {until}. Seule une alerte critique passerait.",
     "detail_snoozed": "{person} a mis « {target} » en attente jusqu'à {until}.",
@@ -23,14 +23,19 @@
     "summary_title": "{count} messages mis de côté pour vous",
     "summary_line": "• {title} — {message}",
     "summary_line_untitled": "• {message}",
-    "detail_expired": "Un message mis en attente pour {person} serait abandonné : il aurait trop attendu pour valoir encore la peine.",
+    "detail_expired": "Un message mis de côté pour {person} serait abandonné : il est resté de côté trop longtemps pour valoir encore la peine.",
     "detail_not_notified": "{person} n'a rien reçu la dernière fois que « {target} » s'est déclenchée : le message de retour à la normale ne concerne pas {person}.",
     "detail_silenced_floor": "On ne dérange pas {person} en ce moment — {entities}, et seuls les messages marqués « {floor} » ou au-dessus passent. Une alerte critique passe toujours.",
     "detail_unknown_target": "« {target} » ne fait plus partie des messages que cette maison sait envoyer : il n'y a nulle part où remettre celui-ci.",
     "detail_delivery_failed": "Ce message a été confié aux appareils indiqués pour {person}, et aucun ne l'a pris : il n'est pas arrivé.",
     "state_home": "à la maison",
     "state_not_home": "hors de la maison",
-    "state_unknown": "à un endroit que la maison ne sait pas nommer"
+    "state_unknown": "à un endroit que la maison ne sait pas nommer",
+    "night_schedule_name": "Nuit de {person}",
+    "picker_no_device": "pas encore d'appareil",
+    "picker_quiet": "silence : {entities}",
+    "no_target_yet": "aucune alerte pour l'instant",
+    "nobody": "personne"
   },
   "entity": {
     "binary_sensor": {
@@ -68,7 +73,7 @@
     "step": {
       "user": {
         "title": "Installer le Standard de notification",
-        "description": "Le Standard de notification décide qui est prévenu, sur quoi et à quel moment ; ce sont vos téléphones et vos enceintes qui sonnent, il ne sonne jamais lui-même. Une fois installé, ouvrez ses options : ajoutez d'abord les personnes de la maison et leurs appareils, puis une cible par alerte."
+        "description": "Le Standard de notification décide qui est prévenu, sur quoi et à quel moment ; ce sont vos téléphones et vos enceintes qui sonnent, il ne sonne jamais lui-même. Une fois installé, cliquez sur Configurer : ajoutez d'abord les personnes de la maison et leurs appareils, puis une alerte par chose qui peut mal tourner."
       }
     },
     "abort": {
@@ -79,21 +84,15 @@
     "step": {
       "init": {
         "title": "Standard de notification",
-        "description": "Commencez par les personnes de la maison : sur quels appareils chacune est prévenue, et quand il ne faut pas la déranger. Créez ensuite une cible par alerte — une fuite d'eau, un portail resté ouvert — en choisissant qui doit être prévenu.",
+        "description": "Commencez par les personnes de la maison : sur quels appareils chacune est prévenue, et quand il ne faut pas la déranger. Ajoutez ensuite une alerte par chose qui peut mal tourner — une fuite d'eau, un portail resté ouvert — en choisissant qui doit être prévenu. Tout le reste est dans Réglages.",
         "menu_options": {
           "person": "Ajouter quelqu'un",
-          "edit_person": "Changer les appareils de quelqu'un",
-          "edit_person_advanced": "Régler la nuit de quelqu'un",
+          "edit_person": "Modifier quelqu'un",
           "remove_person": "Retirer quelqu'un",
-          "target": "Ajouter une cible",
-          "edit_target": "Modifier une cible",
-          "edit_target_advanced": "Réglages avancés d'une cible",
-          "remove_target": "Supprimer une cible",
-          "general": "Cible utilisée par défaut",
-          "ttl": "Combien de temps un message mis de côté reste utile",
-          "test_person": "Envoyer un message d'essai à quelqu'un",
-          "test_target": "Envoyer un message d'essai par une cible",
-          "edit_target_escalation": "Ce qui se passe quand la maison est vide"
+          "target": "Ajouter une alerte",
+          "edit_target": "Modifier une alerte",
+          "remove_target": "Retirer une alerte",
+          "general": "Réglages"
         }
       },
       "person": {
@@ -107,41 +106,38 @@
         }
       },
       "edit_person": {
-        "title": "Changer les appareils de quelqu'un",
-        "description": "Choisissez qui vous voulez modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré.",
+        "title": "Modifier quelqu'un",
+        "description": "Choisissez la personne à modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré.",
         "data": {
           "entity_id": "Personne"
         }
       },
       "person_outputs": {
-        "title": "Changer les appareils de {person}",
+        "title": "Les appareils de {person}",
         "description": "Sur quels appareils {person} reçoit les notifications, et quand faut-il ne pas déranger {person} ?",
         "data": {
           "outputs": "Où prévenir",
-          "silence_entities": "Quand ne pas déranger"
+          "silence_entities": "Quand ne pas déranger",
+          "night_schedule": "Créer un horaire de nuit pour cette personne",
+          "advanced": "Régler sa nuit maintenant"
         },
         "data_description": {
           "outputs": "Ses téléphones sont déjà cochés. Vous pouvez ajouter un appareil qui n'est pas encore installé : il sera utilisé dès qu'il apparaîtra.",
-          "silence_entities": "Un horaire, un interrupteur, ou le mode Concentration de son iPhone : tant qu'il est actif, ses notifications attendent."
+          "silence_entities": "Un horaire, un interrupteur, ou le mode Concentration de son iPhone : tant qu'il est actif, ses notifications sont mises de côté.",
+          "night_schedule": "Ajoute aux moments de silence ci-dessus un horaire « Nuit de … » à son nom, de 22 h à 7 h tous les jours. Il vous appartient ensuite : changez ses heures dans Paramètres > Appareils et services > Entrées.",
+          "advanced": "Ouvre ensuite son heure de réveil et son résumé du matin. Si vous cochez, tout est enregistré à la validation de cet écran."
         }
       },
       "person_advanced": {
-        "title": "Régler la nuit de {person}",
-        "description": "À quelle heure sa nuit se termine, et comment lui rendre au réveil ce qui a été mis de côté. Les deux réponses sont facultatives, et laisser l'heure de réveil vide est une réponse : les messages attendent alors la fin de la période « ne pas déranger » elle-même, quand elle en annonce une — un horaire le fait — et sont abandonnés sinon.",
+        "title": "La nuit de {person}",
+        "description": "Facultatif. Sans heure, les messages de la nuit arrivent à la fin de l'horaire de nuit. Un simple interrupteur n'annonce pas de fin : avec lui, donnez une heure, sinon les messages de la nuit sont perdus.",
         "data": {
           "wake_time": "Heure de réveil",
           "summary": "Tout résumer en un seul message"
         },
         "data_description": {
-          "wake_time": "L'heure à laquelle la nuit se termine, par exemple 07:00. Ce qui a été mis de côté pendant la nuit est remis à ce moment-là, au lieu d'être perdu. Vide : les messages attendent la fin de la période « ne pas déranger », quand elle en annonce une.",
+          "wake_time": "L'heure à laquelle la nuit se termine, par exemple 7:30 ou 7h30. Ce qui a été mis de côté pendant la nuit est remis à ce moment-là. Vide : à la fin de l'horaire de nuit.",
           "summary": "Au réveil, une seule notification qui liste tout ce qui a été mis de côté, au lieu d'une notification par message. Activé par défaut."
-        }
-      },
-      "edit_person_advanced": {
-        "title": "Régler la nuit de quelqu'un",
-        "description": "Choisissez de qui vous voulez régler la nuit. Ses appareils et ses périodes « ne pas déranger » ne sont pas touchés.",
-        "data": {
-          "entity_id": "Personne"
         }
       },
       "remove_person": {
@@ -150,35 +146,85 @@
           "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "Cette personne ne sera plus prévenue par aucune cible. Validez pour la retirer."
+          "entity_id": "Rien n'est encore retiré : l'écran suivant dit ce dont cette personne ne sera plus prévenue."
+        }
+      },
+      "remove_person_confirm": {
+        "title": "Retirer {person} ?",
+        "description": "{person} ne sera plus prévenu(e) par : {targets}.\n\nLe Standard de notification oublie ses appareils et ses moments de silence ; les téléphones, horaires et interrupteurs eux-mêmes restent dans Home Assistant.",
+        "data": {
+          "confirm": "Oui, retirer"
+        },
+        "data_description": {
+          "confirm": "Cochez la case pour confirmer. Pour garder cette personne, fermez cette fenêtre."
         }
       },
       "target": {
-        "title": "Une cible : une alerte, et qui elle prévient",
-        "description": "Une cible, c'est une alerte de la maison — une fuite d'eau, un portail resté ouvert — et les personnes à prévenir quand elle se déclenche. Ces cinq réponses suffisent : l'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable et se règlent plus tard.",
+        "title": "Ajouter une alerte",
+        "description": "Une chose qui peut mal tourner dans la maison — une fuite d'eau, un portail resté ouvert — et les personnes à prévenir quand elle arrive. Ces quatre réponses suffisent : l'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable.",
         "data": {
-          "slug": "Identifiant court",
           "name": "Nom",
-          "alert_entity": "Alerte surveillée",
+          "alert_entity": "Ce qui la déclenche (facultatif)",
           "audience": "Qui prévenir",
-          "observer_mode": "Surveiller l'alerte directement"
+          "observer_mode": "Prévenir dès qu'elle se déclenche (recommandé)"
         },
         "data_description": {
-          "slug": "Lettres minuscules sans espace, par exemple fuite_eau. Ce nom sert en coulisses ; une fois créé, il ne se change plus. Il devient notify.switchboard_fuite_eau.",
-          "name": "Le nom que les gens voient. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
-          "alert_entity": "L'alerte de Home Assistant que cette cible accompagne. Nécessaire pour le bouton « J'ai vu ».",
+          "name": "Le nom que les gens voient, par exemple Fuite d'eau. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
+          "alert_entity": "Pas le détecteur lui-même : une alerte Home Assistant (alert.…) qui le surveille. Elles ne se créent qu'en YAML : sans elle, laissez vide.",
           "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
-          "observer_mode": "Le Standard de notification regarde l'alerte lui-même. Vous n'avez rien d'autre à faire : dès que l'alerte se déclenche, les gens sont prévenus. C'est la façon recommandée."
+          "observer_mode": "Activé par défaut : le Standard de notification regarde lui-même l'alerte Home Assistant, donc les gens sont prévenus aussitôt, sans rien à copier ni redémarrage. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée."
+        }
+      },
+      "target_edit": {
+        "title": "Modifier {target}",
+        "description": "Changez ce qui déclenche « {target} » et qui elle prévient. Son nom pour les automatisations ne change pas : {service}.",
+        "data": {
+          "slug": "Nom pour les automatisations",
+          "name": "Nom",
+          "alert_entity": "Ce qui la déclenche (facultatif)",
+          "audience": "Qui prévenir",
+          "observer_mode": "Prévenir dès qu'elle se déclenche (recommandé)",
+          "advanced": "Ouvrir ensuite les réglages avancés",
+          "escalation": "Ouvrir ensuite ce qui se passe quand la maison est vide"
+        },
+        "data_description": {
+          "slug": "Le nom à utiliser dans vos automatisations. Il a été fait à partir du premier nom de cette alerte et ne change jamais, même si vous la renommez.",
+          "name": "Le nom que les gens voient. C'est aussi le texte envoyé quand l'alerte n'en fournit pas.",
+          "alert_entity": "Une alerte Home Assistant (alert.…). Nécessaire pour le bouton « J'ai vu ». Vide : l'alerte ne part que si une automatisation l'appelle.",
+          "audience": "Les personnes concernées, et si vous voulez une enceinte ou une tablette. Personne d'autre ne reçoit rien.",
+          "observer_mode": "Le Standard de notification regarde lui-même l'alerte Home Assistant : les gens sont prévenus aussitôt. C'est la façon recommandée. Si « Ce qui la déclenche » est vide, cette case n'a pas d'effet et reste cochée.",
+          "advanced": "L'importance, la présence, les boutons et les textes. Si vous cochez, tout est enregistré à la validation du dernier écran.",
+          "escalation": "Faut-il monter l'importance quand personne n'est à la maison ? Si vous cochez, tout est enregistré à la validation du dernier écran."
         }
       },
       "target_saved": {
-        "title": "Cible enregistrée",
-        "description": "Il reste une chose à faire une seule fois : copier ce bloc dans votre configuration, remplacer binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrer Home Assistant.\n\n```yaml\n{snippet}\n```\n\nLe bloc suit le choix que vous venez de faire : si le Standard de notification surveille l'alerte directement, il n'y a personne à prévenir à déclarer ici ; sinon, c'est justement ce qui relie l'alerte au Standard de notification.\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Réglages avancés d'une cible » dans ce menu.",
+        "title": "Alerte enregistrée",
+        "description": "Vous avez décoché cette case : c'est l'alerte Home Assistant elle-même qui fera partir les messages. Copiez une seule fois ce bloc dans votre configuration, remplacez binary_sensor.CHANGE_ME par le capteur à surveiller, puis redémarrez Home Assistant.\n\n```yaml\n{snippet}\n```\n\nPour éviter cette étape, modifiez l'alerte et recochez « Prévenir dès qu'elle se déclenche ».\n\nTout le reste — importance, présence, boutons, textes — a déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
         "data": {
           "advanced": "Ouvrir les réglages avancés maintenant"
         },
         "data_description": {
-          "advanced": "Laissez décoché pour enregistrer la cible telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+        }
+      },
+      "target_ready": {
+        "title": "Alerte enregistrée",
+        "description": "Dès que « {name} » se déclenche, ces personnes sont prévenues : {audience}. Rien d'autre à faire.\n\nL'importance, la présence, les boutons et les textes ont déjà une valeur raisonnable. Cochez la case ci-dessous pour les régler tout de suite, ou revenez plus tard par « Modifier une alerte ».",
+        "data": {
+          "advanced": "Ouvrir les réglages avancés maintenant"
+        },
+        "data_description": {
+          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
+        }
+      },
+      "target_ready_manual": {
+        "title": "Alerte enregistrée",
+        "description": "« {name} » n'est reliée à aucune alerte Home Assistant : elle ne partira pas seule. Deux façons de la faire partir :\n\n1. **Par une automatisation.** Paramètres > Automatisations et scènes > Créer une automatisation. Quand : votre détecteur passe à « détecté » (ou l'état voulu). Alors : l'action {service}, avec un message. Ce chemin n'a pas de bouton « J'ai vu » : il n'y a pas d'alerte Home Assistant à éteindre.\n\n2. **Par une alerte Home Assistant**, qui répète jusqu'à ce qu'on appuie sur « J'ai vu ». Collez ce bloc dans votre configuration, puis redémarrez Home Assistant. Remplacez binary_sensor.CHANGE_ME par le capteur qui signale le problème — le détecteur de fuite, le contact de la fenêtre :\n\n```yaml\n{snippet}\n```\n\nEnsuite, modifiez cette alerte et choisissez-la dans « Ce qui la déclenche ».",
+        "data": {
+          "advanced": "Ouvrir les réglages avancés maintenant"
+        },
+        "data_description": {
+          "advanced": "Laissez décoché pour enregistrer l'alerte telle quelle. Si vous cochez, elle est enregistrée à la validation de l'écran suivant."
         }
       },
       "target_advanced": {
@@ -196,48 +242,81 @@
           "clear_done": "Effacer le message de retour à la normale"
         },
         "data_description": {
-          "default_priority": "Seule une alerte critique passe quand la personne ne veut pas être dérangée ou a mis la cible en attente.",
+          "default_priority": "Seule une alerte critique passe quand la personne ne veut pas être dérangée ou a mis l'alerte en attente.",
           "presence_rule": "Faut-il être à la maison, être sorti, ou peu importe, pour être prévenu ?",
           "allow_acknowledge": "Ajoute dans la notification un bouton qui éteint l'alerte.",
           "snooze_minutes": "Des durées en minutes séparées par des virgules, par exemple 15, 60. Vide : aucun bouton « plus tard ».",
           "default_data": "Si le message précise déjà la même chose, c'est lui qui l'emporte.",
-          "message": "Facultatif, et utilisé seulement quand le Standard de notification surveille l'alerte lui-même. Vide : le nom de la cible est envoyé. Les utilisateurs avancés peuvent écrire un modèle.",
-          "done_message": "Facultatif, envoyé quand l'alerte s'éteint, si le Standard de notification la surveille lui-même. Vide : un texte tout prêt est envoyé.",
+          "message": "Facultatif. Utilisé seulement si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : le nom de l'alerte. Les utilisateurs avancés peuvent écrire un modèle.",
+          "done_message": "Facultatif. Envoyé quand l'alerte Home Assistant s'éteint, si la case « Prévenir dès qu'elle se déclenche » est cochée. Vide : un texte tout prêt.",
           "default_title": "Titre utilisé quand l'appel n'en donne pas, et pour tous les messages que le Standard de notification envoie de lui-même.",
           "clear_done": "Retire le message de retour à la normale des téléphones qui l'ont reçu, une fois l'alerte terminée. Désactivé par défaut : il sonne, puis il reste."
         }
       },
-      "edit_target": {
-        "title": "Modifier une cible",
-        "description": "Choisissez la cible à modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré.",
+      "target_escalation": {
+        "title": "Ce qui se passe quand la maison est vide",
+        "description": "Ce que fait « {target} » quand personne de ceux qu'elle prévient n'est à la maison. Rien d'autre n'est modifié. Ce choix ne sert que si l'alerte prévient aussi les absents : si elle ne prévient que les gens présents, une maison vide veut dire que personne n'est prévenu, et il n'y a plus rien à monter.",
         "data": {
-          "slug": "Cible"
+          "escalate_when_nobody_home": "Monter l'importance quand la maison est vide"
+        },
+        "data_description": {
+          "escalate_when_nobody_home": "Un cran plus fort pour ce message-là seulement : peu important devient normal, normal devient important, important devient critique. Une alerte déjà critique ne bouge pas, et c'est toujours la présence qui décide qui est prévenu."
         }
       },
-      "edit_target_advanced": {
-        "title": "Réglages avancés d'une cible",
-        "description": "Choisissez la cible dont vous voulez ouvrir les réglages avancés. Son alerte et les personnes qu'elle prévient ne sont pas touchées.",
+      "edit_target": {
+        "title": "Modifier une alerte",
+        "description": "Choisissez l'alerte à modifier. L'écran suivant s'ouvre déjà rempli avec ce qui est enregistré, et mène à ses réglages avancés.",
         "data": {
-          "slug": "Cible"
+          "slug": "Alerte"
         }
       },
       "remove_target": {
-        "title": "Supprimer une cible",
+        "title": "Retirer une alerte",
         "data": {
-          "slug": "Cible"
+          "slug": "Alerte"
         },
         "data_description": {
-          "slug": "Ce qui s'en servait pour prévenir les gens ne préviendra plus personne. Validez pour supprimer cette cible."
+          "slug": "Rien n'est encore retiré : l'écran suivant dit qui ne sera plus prévenu."
+        }
+      },
+      "remove_target_confirm": {
+        "title": "Retirer {target} ?",
+        "description": "Plus personne ne sera prévenu de {target} : {persons}.\n\nCe qui appelle encore {service} — une alerte Home Assistant, une automatisation, une carte — ne préviendra plus personne.",
+        "data": {
+          "confirm": "Oui, retirer"
+        },
+        "data_description": {
+          "confirm": "Cochez la case pour confirmer. Pour garder cette alerte, fermez cette fenêtre."
         }
       },
       "general": {
-        "title": "Cible utilisée par défaut",
+        "title": "Réglages",
+        "description": "Ce qui concerne toute la maison plutôt qu'une personne ou une alerte, et les deux messages d'essai.",
+        "menu_options": {
+          "default_target": "Alerte utilisée par défaut",
+          "critical_payload": "Faire sonner les téléphones pour les alertes critiques",
+          "ttl": "Combien de temps un message mis de côté reste utile",
+          "test_person": "Envoyer un message d'essai à quelqu'un",
+          "test_target": "Envoyer un message d'essai par une alerte"
+        }
+      },
+      "default_target": {
+        "title": "Alerte utilisée par défaut",
+        "description": "L'alerte utilisée quand on demande au Standard de notification de prévenir les gens sans dire de quelle alerte il s'agit.",
         "data": {
-          "default_target": "Cible utilisée par défaut",
+          "default_target": "Alerte utilisée par défaut"
+        },
+        "data_description": {
+          "default_target": "Utilisée quand rien d'autre n'est précisé."
+        }
+      },
+      "critical_payload": {
+        "title": "Faire sonner les téléphones pour les alertes critiques",
+        "description": "Une alerte critique est la seule qui passe quand quelqu'un ne doit pas être dérangé. Avec ce réglage, elle fait aussi sonner son téléphone.",
+        "data": {
           "critical_payload": "Faire sonner les téléphones pour les alertes critiques"
         },
         "data_description": {
-          "default_target": "Utilisée quand rien d'autre n'est précisé.",
           "critical_payload": "Une alerte critique fait alors sonner le téléphone même s'il est en « Ne pas déranger ». Activé par défaut ; ne concerne que l'application Home Assistant."
         }
       },
@@ -256,45 +335,28 @@
         }
       },
       "test_target": {
-        "title": "Envoyer un message d'essai par une cible",
-        "description": "Envoie un vrai message d'essai, à tous ceux que cette cible prévient.",
+        "title": "Envoyer un message d'essai par une alerte",
+        "description": "Envoie un vrai message d'essai, à tous ceux que cette alerte prévient.",
         "data": {
-          "slug": "Cible"
+          "slug": "Alerte"
         },
         "data_description": {
-          "slug": "La cible à essayer. Le message compte comme n'importe quel autre."
+          "slug": "L'alerte à essayer. Le message compte comme n'importe quel autre."
         }
       },
       "test_person": {
         "title": "Envoyer un message d'essai à quelqu'un",
-        "description": "Envoie un vrai message d'essai à cette personne, par une cible qui la prévient.",
+        "description": "Envoie un vrai message d'essai à cette personne, par une alerte qui la prévient.",
         "data": {
           "entity_id": "Personne"
         },
         "data_description": {
-          "entity_id": "La cible par défaut est utilisée si elle prévient cette personne, sinon la première cible qui la prévient."
+          "entity_id": "L'alerte par défaut est utilisée si elle prévient cette personne, sinon la première alerte qui la prévient."
         }
       },
       "test_result": {
         "title": "Résultat de l'essai",
         "description": "Le message est parti. Voici ce qui s'est passé pour chacun :\n\n{result}\n\nCes explications sont écrites dans la langue de Home Assistant, qui n'est pas forcément celle de votre compte."
-      },
-      "target_escalation": {
-        "title": "Ce qui se passe quand la maison est vide",
-        "description": "Ce que fait « {target} » quand personne de ceux qu'elle prévient n'est à la maison. Rien d'autre n'est modifié. Ce choix ne sert que si la cible prévient aussi les absents : si elle ne prévient que les gens présents, une maison vide veut dire que personne n'est prévenu, et il n'y a plus rien à monter.",
-        "data": {
-          "escalate_when_nobody_home": "Monter l'importance quand la maison est vide"
-        },
-        "data_description": {
-          "escalate_when_nobody_home": "Un cran plus fort pour ce message-là seulement : peu important devient normal, normal devient important, important devient critique. Une alerte déjà critique ne bouge pas, et c'est toujours la présence qui décide qui est prévenu."
-        }
-      },
-      "edit_target_escalation": {
-        "title": "Ce qui se passe quand la maison est vide",
-        "description": "Choisissez la cible à régler. Tout le reste est laissé tel quel.",
-        "data": {
-          "slug": "Cible"
-        }
       }
     },
     "error": {
@@ -305,79 +367,82 @@
       "component_service_output": "Ce n'est pas un appareil : choisissez un téléphone, une enceinte ou une tablette.",
       "invalid_output": "Ce nom contient des caractères interdits.",
       "invalid_entity": "Cet élément n'existe pas (ou plus) dans votre maison.",
-      "invalid_time": "Indiquez une heure, par exemple 7:30.",
+      "invalid_time": "Donnez une heure, par exemple 7:30.",
       "invalid_slug": "Lettres minuscules, chiffres et le signe _ seulement.",
-      "duplicate_slug": "Une autre cible porte déjà ce nom.",
+      "duplicate_slug": "Une autre alerte porte déjà ce nom.",
       "invalid_priority": "Choisissez : peu important, normal, important ou critique.",
-      "invalid_presence_rule": "Choisissez : toujours, seulement à la maison, ou seulement en cas d'absence.",
+      "invalid_presence_rule": "Choisissez : toujours, à la maison comme dehors ; seulement les personnes à la maison ; seulement les personnes sorties.",
       "not_an_alert": "Choisissez une alerte.",
       "empty_audience": "Choisissez au moins une personne.",
-      "unknown_person": "Cette cible veut prévenir quelqu'un qui n'est pas dans la liste des personnes de la maison.",
+      "unknown_person": "Cette alerte veut prévenir quelqu'un qui n'est pas dans la liste des personnes de la maison.",
       "invalid_snooze_minutes": "Utilisez des minutes entières, positives, séparées par des virgules.",
-      "invalid_default_data": "Ce champ est réservé aux réglages techniques ; laissez-le vide si vous ne savez pas."
+      "invalid_default_data": "Ce champ est réservé aux réglages techniques ; laissez-le vide si vous ne savez pas.",
+      "empty_name": "Donnez-lui un nom.",
+      "not_confirmed": "Cochez la case pour confirmer, ou fermez cette fenêtre pour annuler.",
+      "night_schedule_failed": "L'horaire de nuit n'a pas pu être créé. Créez un horaire dans Paramètres > Appareils et services > Entrées, puis choisissez-le ci-dessus."
     },
     "abort": {
       "nothing_to_remove": "Il n'y a encore rien à supprimer.",
       "nothing_to_edit": "Il n'y a encore rien à modifier.",
-      "nothing_to_configure": "Créez d'abord une cible.",
-      "nothing_to_test": "Aucune cible ne prévient cette personne : il n'y a rien à lui envoyer. Ajoutez-la d'abord à une cible."
+      "nothing_to_configure": "Créez d'abord une alerte.",
+      "nothing_to_test": "Aucune alerte ne prévient cette personne : il n'y a rien à lui envoyer. Ajoutez-la d'abord à une alerte."
     }
   },
   "issues": {
     "unknown_target": {
-      "title": "Une cible demandée n'existe pas",
-      "description": "Quelque chose a demandé la cible « {slug} », qui n'existe pas. Le message a été abandonné. Créez cette cible, ou corrigez ce qui la demande."
+      "title": "Une alerte demandée n'existe pas",
+      "description": "Quelque chose a demandé l'alerte « {slug} », qui n'existe pas. Le message a été abandonné. Créez cette alerte, ou corrigez ce qui la demande."
     },
     "missing_output": {
       "title": "Un appareil ne répond plus",
       "description": "L'appareil « {output} » n'a rien reçu plusieurs fois de suite : il n'existe pas, ou tous les envois se sont soldés par une erreur. Les messages qui lui sont destinés sont perdus. Réparez-le, ou retirez-le des appareils de la personne."
     },
     "invalid_service_target": {
-      "title": "Quelque chose demande sans cesse une cible qui n'existe pas",
-      "description": "Le Standard de notification ne trouve pas la cible « {value} ». Quelque chose — le plus souvent une carte ou un script resté sur une cible renommée — continue de la demander. Corrigez-le, ou créez cette cible."
+      "title": "Quelque chose demande sans cesse une alerte qui n'existe pas",
+      "description": "Le Standard de notification ne trouve pas l'alerte « {value} ». Quelque chose — le plus souvent une carte ou un script resté sur une alerte renommée — continue de la demander. Corrigez-le, ou créez cette alerte."
     },
     "invalid_service_person": {
       "title": "Quelque chose nomme sans cesse quelqu'un qu'il ne peut pas prévenir",
-      "description": "Le Standard de notification ne trouve pas « {value} » : cette personne n'est pas dans la liste des personnes de la maison, ou n'est pas prévenue par cette cible. Corrigez ce qui la demande, ou ajoutez cette personne."
+      "description": "Le Standard de notification ne trouve pas « {value} » : cette personne n'est pas dans la liste des personnes de la maison, ou n'est pas prévenue par cette alerte. Corrigez ce qui la demande, ou ajoutez cette personne."
     },
     "invalid_service_calls_many": {
       "title": "Quelque chose demande sans cesse des noms qui n'existent pas",
-      "description": "Le Standard de notification a maintenant refusé plus de {count} cibles ou personnes différentes. Plutôt qu'un avertissement par nom, celui-ci les représente tous. Quelque chose fabrique des noms qui n'existent pas — le plus souvent une automatisation qui produit un nom faux. Corrigez-le ; cet avertissement disparaît quand vous redémarrez le Standard de notification."
+      "description": "Le Standard de notification a déjà refusé plus de {count} alertes ou personnes différentes. Ce seul avertissement les regroupe toutes. Quelque chose — le plus souvent une automatisation — fabrique des noms qui n'existent pas. Corrigez-le ; l'avertissement disparaît au redémarrage du Standard de notification."
     },
     "person_without_user_id": {
       "title": "Une personne n'est reliée à aucun compte Home Assistant",
-      "description": "{person} reçoit des notifications avec les boutons « J'ai vu » et « Plus tard », mais sa fiche n'est reliée à aucun compte Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à tous ceux que la cible prévient. Reliez cette personne à son compte dans Paramètres > Personnes, puis rechargez le Standard de notification."
+      "description": "{person} reçoit des notifications avec les boutons « J'ai vu » et « Plus tard », mais sa fiche n'est reliée à aucun compte Home Assistant. Le Standard de notification ne peut donc pas savoir qui a appuyé, et applique l'action à tous ceux que l'alerte prévient. Reliez cette personne à son compte dans Paramètres > Personnes, puis rechargez le Standard de notification."
     },
     "person_without_outputs": {
       "title": "Une personne n'a aucun appareil",
-      "description": "Au moins une cible prévient {person}, mais aucun appareil n'est indiqué pour {person} : tous les messages qui lui sont destinés sont perdus. Ouvrez les options du Standard de notification, modifiez cette personne et donnez-lui au moins un appareil."
+      "description": "Au moins une alerte prévient {person}, mais aucun appareil n'est indiqué pour {person} : tous ses messages sont perdus. Sur le Standard de notification, cliquez sur Configurer, modifiez cette personne et donnez-lui au moins un appareil."
     },
     "alert_entity_missing": {
-      "title": "Une cible surveille une alerte qui n'existe pas",
-      "description": "La cible « {slug} » surveille une alerte qui n'existe plus ({entity_id}). Elle ne surveille donc rien et son bouton « J'ai vu » n'éteint rien. Créez cette alerte, ou retirez-la du champ « Alerte surveillée » de la cible, puis rechargez le Standard de notification."
+      "title": "Ce qui déclenche une alerte n'existe plus",
+      "description": "L'alerte « {slug} » est reliée à une alerte Home Assistant qui n'existe plus ({entity_id}) : elle ne part donc jamais seule et son bouton « J'ai vu » n'éteint rien. Recréez cette alerte Home Assistant, ou videz « Ce qui la déclenche », puis rechargez le Standard de notification."
     }
   },
   "exceptions": {
     "unknown_target": {
-      "message": "Il n'y a pas de cible {target}."
+      "message": "Il n'y a pas d'alerte {target}."
     },
     "acknowledge_not_allowed": {
-      "message": "La cible {target} n'a pas de bouton « J'ai vu » : elle ne surveille aucune alerte, ou le bouton y est désactivé."
+      "message": "L'alerte {target} n'a pas de bouton « J'ai vu » : pas d'alerte Home Assistant reliée, ou bouton désactivé."
     },
     "snooze_minutes_not_offered": {
-      "message": "La cible {target} ne propose pas de mise en attente de {minutes} min. Elle propose : {offered}."
+      "message": "L'alerte {target} ne propose pas de mise en attente de {minutes} min. Elle propose : {offered}."
     },
     "unknown_person": {
       "message": "{person} n'est pas dans la liste des personnes que le Standard de notification connaît."
     },
     "person_not_in_audience": {
-      "message": "{person} ne fait pas partie des personnes prévenues par la cible {target}."
+      "message": "{person} ne fait pas partie des personnes prévenues par l'alerte {target}."
     },
     "invalid_silence_minutes": {
-      "message": "Un silence dure entre {min} et {max} minutes ; {minutes} n'est ni l'un ni l'autre."
+      "message": "Un silence dure de {min} à {max} minutes ; {minutes} n'en fait pas partie."
     },
     "no_audience": {
-      "message": "La cible {target} ne prévient personne."
+      "message": "L'alerte {target} ne prévient personne."
     },
     "no_loaded_entry": {
       "message": "Le Standard de notification est éteint. Rallumez-le, puis réessayez."
@@ -403,29 +468,29 @@
   "services": {
     "acknowledge": {
       "name": "Marquer comme vu",
-      "description": "Éteint l'alerte que surveille une cible, exactement comme le bouton « J'ai vu » d'une notification.",
+      "description": "Éteint l'alerte Home Assistant de cette alerte, comme le bouton « J'ai vu » d'une notification.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "La cible concernée (son identifiant court). Elle doit surveiller une alerte et proposer le bouton « J'ai vu »."
+          "name": "Alerte",
+          "description": "L'alerte (son nom pour les automatisations). Il lui faut une alerte Home Assistant et le bouton « J'ai vu »."
         }
       }
     },
     "snooze": {
       "name": "Mettre en attente",
-      "description": "Coupe les messages d'une cible pendant un moment, pour une personne ou pour tous ceux qu'elle prévient.",
+      "description": "Coupe les messages d'une alerte pendant un moment, pour une personne ou pour tous ceux qu'elle prévient.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "La cible concernée (son identifiant court), celle à mettre en attente."
+          "name": "Alerte",
+          "description": "L'alerte à mettre en attente (son nom pour les automatisations)."
         },
         "minutes": {
           "name": "Minutes",
-          "description": "Combien de temps. Cette durée doit faire partie de celles que la cible propose."
+          "description": "Combien de temps. Cette durée doit faire partie de celles que l'alerte propose."
         },
         "person": {
           "name": "Personne",
-          "description": "Pour qui. Laissez vide pour tous ceux que la cible prévient."
+          "description": "Pour qui. Laissez vide pour tous ceux que l'alerte prévient."
         }
       }
     },
@@ -434,18 +499,18 @@
       "description": "Remet tout de suite les messages en route, sans attendre la fin de la mise en attente.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "La cible concernée (son identifiant court), celle à remettre en route."
+          "name": "Alerte",
+          "description": "L'alerte à remettre en route (son nom pour les automatisations)."
         },
         "person": {
           "name": "Personne",
-          "description": "Pour qui. Laissez vide pour tous ceux que la cible prévient."
+          "description": "Pour qui. Laissez vide pour tous ceux que l'alerte prévient."
         }
       }
     },
     "silence": {
       "name": "Ne pas déranger quelqu'un",
-      "description": "Arrête de déranger quelqu'un pendant un moment, pour toutes les cibles. Ses propres horaires et interrupteurs ne sont pas touchés ; seule une alerte critique passe encore.",
+      "description": "Arrête de déranger quelqu'un pendant un moment, pour toutes les alertes. Ses propres horaires et interrupteurs ne sont pas touchés ; seule une alerte critique passe encore.",
       "fields": {
         "person": {
           "name": "Personne",
@@ -469,19 +534,19 @@
     },
     "explain": {
       "name": "Expliquer",
-      "description": "Répond à la question « qu'arriverait-il à un message envoyé maintenant sur cette cible ? », personne par personne, sans rien envoyer. À appeler en demandant la réponse.",
+      "description": "Dit, personne par personne, ce qui arriverait à un message envoyé maintenant par cette alerte, sans rien envoyer. À appeler en demandant la réponse.",
       "fields": {
         "target": {
-          "name": "Cible",
-          "description": "La cible concernée (son identifiant court), celle à examiner."
+          "name": "Alerte",
+          "description": "L'alerte à examiner (son nom pour les automatisations)."
         },
         "priority": {
           "name": "Importance",
-          "description": "L'importance à supposer. Laissez vide pour celle que la cible utilise par défaut, exactement comme un vrai message."
+          "description": "L'importance à supposer. Vide : celle de l'alerte, comme pour un vrai message."
         },
         "person": {
           "name": "Personne",
-          "description": "Sur qui répondre. Laissez vide pour tous ceux que la cible prévient."
+          "description": "Sur qui répondre. Laissez vide pour tous ceux que l'alerte prévient."
         }
       }
     }

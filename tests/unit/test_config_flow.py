@@ -16,7 +16,10 @@ from pytest_homeassistant_custom_component.common import (
     async_mock_service,
 )
 
-from custom_components.notify_switchboard.config_flow import _showable
+from custom_components.notify_switchboard.config_flow import (
+    _alert_snippet,
+    _showable,
+)
 from custom_components.notify_switchboard.const import (
     CONF_DEFAULT_TARGET,
     CONF_PERSONS,
@@ -53,23 +56,87 @@ def suggested_value(result: Any, key: str) -> Any:
     raise AssertionError(f"{key} is not a field of step {result.get('step_id')!r}")
 
 
-# ADR-0020 §1 splits the target editor in two. The five fields that make a
-# target route are the `target` step; the nine preferences are
-# `target_advanced`, reached from the checkbox `target_saved` grew or from its
-# own menu entry.
-TARGET_BASIC = ("slug", "name", "alert_entity", "audience", "observer_mode")
+# ADR-0020 §1 splits the target editor in two. The fields that make a target
+# route are the `target` step; the nine preferences are `target_advanced`,
+# reached from the checkbox of the confirmation or of `target_edit`. From 0.8.0
+# (ADR-0022 §1) the slug is derived from the name, so "Leak" is `leak`.
+TARGET_BASIC = ("name", "alert_entity", "audience", "observer_mode")
+
+# ADR-0022 §3: the entries of the "Settings" menu (`general`).
+SETTINGS_ENTRIES = frozenset(
+    {"default_target", "critical_payload", "ttl", "test_person", "test_target"}
+)
 
 
 def _target_input(**overrides: Any) -> dict[str, Any]:
-    """The five fields of the `target` step."""
+    """The four fields of the `target` step."""
     data = {
-        "slug": "leak",
-        "name": "Fuite d'eau",
+        "name": "Leak",
         "audience": ["person.alice"],
         "observer_mode": False,
     }
     data.update(overrides)
     return data
+
+
+def _basic_values(entry: MockConfigEntry, slug: str) -> dict[str, Any]:
+    """Return what `target_edit` opens on for a stored target, ready to submit."""
+    row = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == slug)
+    data: dict[str, Any] = {
+        "name": row["name"],
+        "audience": list(row["audience"]),
+        "observer_mode": bool(row.get("observer_mode")),
+    }
+    if row.get("alert_entity"):
+        data["alert_entity"] = row["alert_entity"]
+    return data
+
+
+async def _open_target_advanced(
+    hass: HomeAssistant, entry: MockConfigEntry, slug: str, *inputs: Any
+) -> Any:
+    """Reach `target_advanced` the 0.8 way: `target_edit`'s checkbox."""
+    return await _options_step(
+        hass,
+        entry,
+        "edit_target",
+        {"slug": slug},
+        {**_basic_values(entry, slug), "advanced": True},
+        *inputs,
+    )
+
+
+async def _open_target_escalation(
+    hass: HomeAssistant, entry: MockConfigEntry, slug: str, *inputs: Any
+) -> Any:
+    """Reach `target_escalation` the 0.8 way: `target_edit`'s checkbox."""
+    return await _options_step(
+        hass,
+        entry,
+        "edit_target",
+        {"slug": slug},
+        {**_basic_values(entry, slug), "escalation": True},
+        *inputs,
+    )
+
+
+async def _open_person_advanced(
+    hass: HomeAssistant, entry: MockConfigEntry, person: str, *inputs: Any
+) -> Any:
+    """Reach `person_advanced` the 0.8 way: `person_outputs`' checkbox."""
+    row = next(row for row in entry.options[CONF_PERSONS] if row["entity_id"] == person)
+    return await _options_step(
+        hass,
+        entry,
+        "edit_person",
+        {"entity_id": person},
+        {
+            "outputs": list(row["outputs"]),
+            "silence_entities": list(row["silence_entities"]),
+            "advanced": True,
+        },
+        *inputs,
+    )
 
 
 def _target_advanced_input(**overrides: Any) -> dict[str, Any]:
@@ -113,27 +180,30 @@ async def test_options_menu_lists_every_step(hass: HomeAssistant) -> None:
     entry = await _create_entry(hass)
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.MENU
-    assert set(result["menu_options"]) == {
+    # v0.8 (ADR-0022 §3): people, alerts, settings; the advanced editors are
+    # reached from checkboxes, not from entries of their own.
+    assert result["menu_options"] == [
         "person",
         "edit_person",
-        # v0.6 (ADR-0020 §1 and §2): a labelled menu entry is a step id, so
-        # each advanced editor needs a picker of its own.
-        "edit_person_advanced",
         "remove_person",
         "target",
         "edit_target",
-        "edit_target_advanced",
-        # v0.7 (ADR-0021 §1): `escalate_when_nobody_home` gets a step of its
-        # own, because contract v0.6 enumerates what `target_advanced` holds.
-        "edit_target_escalation",
         "remove_target",
         "general",
+    ]
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "general"}
+    )
+    assert result["type"] is FlowResultType.MENU
+    assert result["menu_options"] == [
+        "default_target",
+        "critical_payload",
         # v0.5 (ADR-0019 §1): the household's time-to-live policy.
         "ttl",
         # v0.4 (ADR-0018 §6): send one real message and read what happened.
         "test_person",
         "test_target",
-    }
+    ]
 
 
 async def _options_step(
@@ -153,6 +223,10 @@ async def _options_step(
     Switchboard._async_reset_counters", roughly two runs in ten under load).
     """
     result = await hass.config_entries.options.async_init(entry.entry_id)
+    if step in SETTINGS_ENTRIES:
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"next_step_id": "general"}
+        )
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], {"next_step_id": step}
     )
@@ -172,30 +246,23 @@ async def _add_person(
 ) -> Any:
     """Drive the person editor to the end, advanced step included when asked.
 
-    ADR-0020 §2 moved `wake_time` and `summary` to `person_advanced`, which has
-    no shortcut from `person_outputs` on purpose: the one form a first install
-    fills stays at two fields. A caller that names either one therefore walks
-    the picker afterwards, exactly as somebody would in the UI.
+    ADR-0020 §2 moved `wake_time` and `summary` to `person_advanced`; from
+    0.8.0 (ADR-0022 §3) `person_outputs`' `advanced` checkbox opens it, which
+    is what a caller naming either one walks through.
     """
     advanced = {key: kw.pop(key) for key in PERSON_ADVANCED if key in kw}
-    result = await _options_step(
-        hass, entry, "person", {"entity_id": person}, _person_outputs_input(**kw)
-    )
-    if not advanced or result["type"] is not FlowResultType.CREATE_ENTRY:
-        return result
-    return await _options_step(
-        hass,
-        entry,
-        "edit_person_advanced",
-        {"entity_id": person},
-        advanced,
-    )
+    if advanced:
+        kw["advanced"] = True
+    inputs: list[Any] = [_person_outputs_input(**kw)]
+    if advanced:
+        inputs.append(advanced)
+    return await _options_step(hass, entry, "person", {"entity_id": person}, *inputs)
 
 
 async def _add_target(
     hass: HomeAssistant, entry: MockConfigEntry, **overrides: Any
 ) -> Any:
-    """Drive the whole target editor: five fields, snippet, then the nine.
+    """Drive the whole target editor: four fields, snippet, then the nine.
 
     Both halves every time, through the `advanced` checkbox of `target_saved`
     (ADR-0020 §1), so a helper called with `snooze_minutes=` or `message=`
@@ -257,7 +324,9 @@ async def test_the_managed_row_is_not_recreated_once_it_is_gone(
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
     await _add_target(hass, entry)
-    await _options_step(hass, entry, "remove_target", {"slug": "default"})
+    await _options_step(
+        hass, entry, "remove_target", {"slug": "default"}, {"confirm": True}
+    )
     await hass.async_block_till_done()
     assert [row["slug"] for row in entry.options[CONF_TARGETS]] == ["leak"]
 
@@ -299,33 +368,48 @@ async def test_a_person_with_no_output_is_refused_by_the_second_step(
     assert entry.options[CONF_PERSONS] == []
 
 
-async def test_resubmitting_a_slug_updates_the_row(hass: HomeAssistant) -> None:
-    """The target step is keyed by slug: re-submitting one edits it in place.
+async def test_adding_the_same_name_twice_adds_a_second_target(
+    hass: HomeAssistant,
+) -> None:
+    """v0.8 (ADR-0022 §1): `target` only creates; the derived slug is de-duplicated.
 
-    Uniqueness is therefore structural here; `validate_target`'s
-    `duplicate_slug` rule guards any other caller.
+    Up to 0.7 the step was keyed by a typed slug, so re-submitting one edited
+    the target in place. A creation step that silently overwrote an existing
+    alert because two names slugify alike would be the worse surprise.
     """
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
     await _add_target(hass, entry)
 
-    result = await _add_target(hass, entry, name="Another leak")
+    result = await _add_target(hass, entry, name="LEAK")
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
-    rows = [row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak"]
-    assert len(rows) == 1
-    assert rows[0]["name"] == "Another leak"
+    rows = {row["slug"]: row for row in entry.options[CONF_TARGETS]}
+    assert rows["leak"]["name"] == "Leak"
+    assert rows["leak_2"]["name"] == "LEAK"
 
 
-async def test_invalid_slug_is_rejected_by_the_flow(hass: HomeAssistant) -> None:
-    """A slug has to be a slug (accents and spaces included)."""
+async def test_a_name_with_accents_and_spaces_gets_a_valid_slug(
+    hass: HomeAssistant,
+) -> None:
+    """v0.8 (ADR-0022 §1): the name is free text; the slug is made from it."""
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
     result = await _options_step(
-        hass, entry, "target", _target_input(slug="Fuite d'eau")
+        hass, entry, "target", _target_input(name="Fuite d'eau"), {}
     )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    await hass.async_block_till_done()
+    assert "fuite_d_eau" in [row["slug"] for row in entry.options[CONF_TARGETS]]
+
+
+async def test_an_empty_name_is_refused(hass: HomeAssistant) -> None:
+    """A name made of spaces would derive a slug for nobody to recognise."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+    result = await _options_step(hass, entry, "target", _target_input(name="   "))
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"slug": "invalid_slug"}
+    assert result["errors"] == {"name": "empty_name"}
 
 
 async def test_target_without_an_audience_is_rejected(hass: HomeAssistant) -> None:
@@ -348,7 +432,7 @@ async def test_removing_a_person_cleans_every_audience(hass: HomeAssistant) -> N
     await _add_target(hass, entry)
 
     result = await _options_step(
-        hass, entry, "remove_person", {"entity_id": "person.alice"}
+        hass, entry, "remove_person", {"entity_id": "person.alice"}, {"confirm": True}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -364,7 +448,9 @@ async def test_removing_the_last_target_clears_the_default(
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
 
-    result = await _options_step(hass, entry, "remove_target", {"slug": "default"})
+    result = await _options_step(
+        hass, entry, "remove_target", {"slug": "default"}, {"confirm": True}
+    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert entry.options[CONF_TARGETS] == []
@@ -379,19 +465,38 @@ async def test_remove_steps_abort_on_an_empty_table(hass: HomeAssistant) -> None
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "nothing_to_remove"
 
-    result = await _options_step(hass, entry, "general")
+    result = await _options_step(hass, entry, "default_target")
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "nothing_to_configure"
 
 
-async def test_general_step_picks_the_default_target(hass: HomeAssistant) -> None:
+async def test_an_unticked_removal_removes_nothing(hass: HomeAssistant) -> None:
+    """v0.8 (ADR-0022 §4): the box is required, for a person as for a target."""
+    entry = await _create_entry(hass)
+    await _add_person(hass, entry)
+
+    result = await _options_step(
+        hass, entry, "remove_person", {"entity_id": "person.alice"}, {}
+    )
+    assert result["errors"] == {"confirm": "not_confirmed"}
+    result = await _options_step(hass, entry, "remove_target", {"slug": "default"}, {})
+    assert result["errors"] == {"confirm": "not_confirmed"}
+    assert len(entry.options[CONF_PERSONS]) == 1
+    assert len(entry.options[CONF_TARGETS]) == 1
+
+
+async def test_default_target_step_picks_the_default_target(
+    hass: HomeAssistant,
+) -> None:
     """With two rows, the default target becomes a choice."""
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
     await _add_target(hass, entry)
     assert entry.options[CONF_DEFAULT_TARGET] == "default"
 
-    result = await _options_step(hass, entry, "general", {"default_target": "leak"})
+    result = await _options_step(
+        hass, entry, "default_target", {"default_target": "leak"}
+    )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
     assert entry.options[CONF_DEFAULT_TARGET] == "leak"
@@ -467,12 +572,8 @@ async def test_an_unparsable_row_template_is_rejected_by_the_schema(
 
     for field, bad in (("message", "{{ unclosed "), ("done_message", "{% if %}")):
         with pytest.raises(InvalidData) as err:
-            await _options_step(
-                hass,
-                entry,
-                "edit_target_advanced",
-                {"slug": "leak"},
-                _target_advanced_input(**{field: bad}),
+            await _open_target_advanced(
+                hass, entry, "leak", _target_advanced_input(**{field: bad})
             )
         assert field in str(err.value)
 
@@ -518,14 +619,16 @@ async def test_editing_a_target_pre_fills_every_field_it_is_about_to_overwrite(
 
     result = await _options_step(hass, entry, "edit_target", {"slug": "leak"})
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "target"
+    # v0.8 (ADR-0022 §1): editing has an internal step of its own, which shows
+    # the slug read-only.
+    assert result["step_id"] == "target_edit"
 
     suggested = _suggested(result["data_schema"])
     assert suggested["slug"] == "leak"
-    assert suggested["name"] == "Fuite d'eau"
+    assert suggested["name"] == "Leak"
     assert suggested["audience"] == ["person.alice"]
 
-    result = await _options_step(hass, entry, "edit_target_advanced", {"slug": "leak"})
+    result = await _open_target_advanced(hass, entry, "leak")
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "target_advanced"
 
@@ -555,11 +658,10 @@ async def test_editing_a_person_pre_fills_their_row(hass: HomeAssistant) -> None
     assert suggested["outputs"] == ["mobile_app_alice"]
     assert suggested["silence_entities"] == ["input_boolean.night"]
 
-    result = await _options_step(
-        hass, entry, "edit_person_advanced", {"entity_id": "person.alice"}
-    )
+    result = await _open_person_advanced(hass, entry, "person.alice")
     assert result["step_id"] == "person_advanced"
-    assert _suggested(result["data_schema"])["wake_time"] == "07:00:00"
+    # v0.8 (ADR-0022 §6): shown the way it is typed, without seconds.
+    assert _suggested(result["data_schema"])["wake_time"] == "07:00"
 
 
 async def test_a_validation_error_gives_back_what_was_typed(
@@ -570,24 +672,19 @@ async def test_a_validation_error_gives_back_what_was_typed(
     await _add_person(hass, entry)
 
     result = await _options_step(
-        hass, entry, "target", _target_input(slug="Not A Slug", name="Kept")
+        hass, entry, "target", _target_input(name="Kept", audience=[])
     )
     assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {"slug": "invalid_slug"}
+    assert result["errors"] == {"audience": "empty_audience"}
 
     suggested = _suggested(result["data_schema"])
-    assert suggested["slug"] == "Not A Slug"
     assert suggested["name"] == "Kept"
-    assert suggested["audience"] == ["person.alice"]
+    assert suggested["audience"] == []
 
     # And the same on the other half of the editor (ADR-0020 §1).
     await _add_target(hass, entry)
-    result = await _options_step(
-        hass,
-        entry,
-        "edit_target_advanced",
-        {"slug": "leak"},
-        _target_advanced_input(snooze_minutes="every hour"),
+    result = await _open_target_advanced(
+        hass, entry, "leak", _target_advanced_input(snooze_minutes="every hour")
     )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"snooze_minutes": "invalid_snooze_minutes"}
@@ -695,10 +792,11 @@ async def test_the_alert_snippet_quotes_a_name_yaml_would_misread(
         hass, entry, "target", _target_input(name="Fuite: eau # urgence")
     )
 
-    assert result["step_id"] == "target_saved"
+    assert result["step_id"] == "target_ready_manual"  # no alert linked (ADR-0022)
     snippet = (result["description_placeholders"] or {})["snippet"]
     parsed = yaml.safe_load(snippet)
-    assert parsed["alert"]["leak"]["name"] == "Fuite: eau # urgence", (
+    # v0.8 (ADR-0022 §1): the slug -- and so the block's key -- is the name's.
+    assert parsed["alert"]["fuite_eau_urgence"]["name"] == "Fuite: eau # urgence", (
         f"the snippet must round-trip the row name through YAML; got {snippet!r}"
     )
 
@@ -735,16 +833,12 @@ async def test_the_alert_snippet_of_an_observer_row_names_no_notifiers(
     `repeat`, and the router routes the same event again on its own. What the
     user sees is a duplicated notification they were told to create.
     """
-    async_mock_service(hass, "notify", "mobile_app_alice")
-    entry = await _create_entry(hass)
-    await _add_person(hass, entry)
-
-    result = await _options_step(
-        hass, entry, "target", _target_input(observer_mode=True)
+    # v0.8 (ADR-0022 §2): an observer target no longer ends on the snippet at
+    # all, so the builder is asked directly -- it stays right for whoever
+    # calls it with an observer row.
+    snippet = _alert_snippet(
+        {"slug": "leak", "name": "Leak", "observer_mode": True, "alert_entity": None}
     )
-
-    assert result["step_id"] == "target_saved"
-    snippet = (result["description_placeholders"] or {})["snippet"]
     assert "notifiers" not in snippet, (
         f"an observer row is wired by the router, not by the alert; got {snippet!r}"
     )
@@ -762,7 +856,10 @@ async def test_the_alert_snippet_of_a_notifiers_row_still_names_the_router(
     await _add_person(hass, entry)
 
     result = await _options_step(
-        hass, entry, "target", _target_input(observer_mode=False)
+        hass,
+        entry,
+        "target",
+        _target_input(observer_mode=False, alert_entity="alert.leak"),
     )
 
     snippet = (result["description_placeholders"] or {})["snippet"]
@@ -880,7 +977,9 @@ async def test_summary_and_clear_done_are_written_only_when_they_differ(
     assert "clear_done" not in row
 
     await _add_person(hass, entry, summary=False)
-    await _add_target(hass, entry, clear_done=True)
+    await _open_target_advanced(
+        hass, entry, "leak", _target_advanced_input(clear_done=True)
+    )
 
     person = entry.options[CONF_PERSONS][0]
     row = next(r for r in entry.options[CONF_TARGETS] if r["slug"] == "leak")
@@ -891,18 +990,6 @@ async def test_summary_and_clear_done_are_written_only_when_they_differ(
 # ---------------------------------------------------------------------------
 # v0.6 (ADR-0020 §1 and §2): the two editors, split in two steps each
 # ---------------------------------------------------------------------------
-
-
-async def test_the_advanced_pickers_abort_on_an_empty_table(
-    hass: HomeAssistant,
-) -> None:
-    """Nothing to open advanced settings on, and the menu says so."""
-    entry = await _create_entry(hass)
-
-    for step in ("edit_person_advanced", "edit_target_advanced"):
-        result = await _options_step(hass, entry, step)
-        assert result["type"] is FlowResultType.ABORT
-        assert result["reason"] == "nothing_to_edit"
 
 
 async def test_target_saved_unticked_writes_the_target_and_ends(
@@ -962,12 +1049,8 @@ async def test_either_half_of_the_target_editor_clears_managed(
     await _add_person(hass, entry)
     assert entry.options[CONF_TARGETS][0]["managed"] is True
 
-    result = await _options_step(
-        hass,
-        entry,
-        "edit_target_advanced",
-        {"slug": "default"},
-        _target_advanced_input(default_priority="high"),
+    result = await _open_target_advanced(
+        hass, entry, "default", _target_advanced_input(default_priority="high")
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -987,12 +1070,8 @@ async def test_person_advanced_writes_only_the_wake_time_and_the_summary(
         hass, entry, outputs=["mobile_app_alice"], silence_entities=["schedule.night"]
     )
 
-    result = await _options_step(
-        hass,
-        entry,
-        "edit_person_advanced",
-        {"entity_id": "person.alice"},
-        {"wake_time": "07:00:00", "summary": False},
+    result = await _open_person_advanced(
+        hass, entry, "person.alice", {"wake_time": "07:00:00", "summary": False}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -1012,9 +1091,7 @@ async def test_clearing_the_wake_time_is_a_supported_answer(
     await _add_person(hass, entry, wake_time="07:00:00")
     assert entry.options[CONF_PERSONS][0]["wake_time"] == "07:00:00"
 
-    result = await _options_step(
-        hass, entry, "edit_person_advanced", {"entity_id": "person.alice"}, {}
-    )
+    result = await _open_person_advanced(hass, entry, "person.alice", {})
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
 
@@ -1044,12 +1121,8 @@ async def test_the_escalation_step_writes_only_its_own_field(
     before = next(row for row in entry.options[CONF_TARGETS] if row["slug"] == "leak")
     assert "escalate_when_nobody_home" not in before, "absent means off"
 
-    result = await _options_step(
-        hass,
-        entry,
-        "edit_target_escalation",
-        {"slug": "leak"},
-        {"escalate_when_nobody_home": True},
+    result = await _open_target_escalation(
+        hass, entry, "leak", {"escalate_when_nobody_home": True}
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
 
@@ -1067,42 +1140,45 @@ async def test_the_escalation_step_opens_on_the_stored_value_and_can_clear_it(
     entry = await _create_entry(hass)
     await _add_person(hass, entry)
     await _add_target(hass, entry, audience=["person.alice"])
-    await _options_step(
-        hass,
-        entry,
-        "edit_target_escalation",
-        {"slug": "leak"},
-        {"escalate_when_nobody_home": True},
+    await _open_target_escalation(
+        hass, entry, "leak", {"escalate_when_nobody_home": True}
     )
 
-    form = await _options_step(hass, entry, "edit_target_escalation", {"slug": "leak"})
+    form = await _open_target_escalation(hass, entry, "leak")
     assert form["step_id"] == "target_escalation"
     assert [str(marker) for marker in form["data_schema"].schema] == [
         "escalate_when_nobody_home"
     ]
+    assert suggested_value(form, "escalate_when_nobody_home") is True
 
-    await _options_step(
-        hass,
-        entry,
-        "edit_target_escalation",
-        {"slug": "leak"},
-        {"escalate_when_nobody_home": False},
+    await _open_target_escalation(
+        hass, entry, "leak", {"escalate_when_nobody_home": False}
     )
     row = next(item for item in entry.options[CONF_TARGETS] if item["slug"] == "leak")
     assert "escalate_when_nobody_home" not in row
 
 
-async def test_the_escalation_picker_aborts_on_an_empty_table(
+async def test_the_advanced_step_keeps_the_escalation_flag(
     hass: HomeAssistant,
 ) -> None:
-    """No target, nothing to open."""
+    """`target_advanced` carries over a field it does not show (ADR-0022 §3)."""
     entry = await _create_entry(hass)
-    result = await _options_step(hass, entry, "edit_target_escalation")
-    assert result["type"] is FlowResultType.ABORT
-    assert result["reason"] == "nothing_to_edit"
+    await _add_person(hass, entry)
+    await _add_target(hass, entry)
+    await _open_target_escalation(
+        hass, entry, "leak", {"escalate_when_nobody_home": True}
+    )
+
+    await _open_target_advanced(
+        hass, entry, "leak", _target_advanced_input(default_priority="high")
+    )
+
+    row = next(item for item in entry.options[CONF_TARGETS] if item["slug"] == "leak")
+    assert row["default_priority"] == "high"
+    assert row["escalate_when_nobody_home"] is True
 
 
-async def test_the_general_step_carries_the_critical_payload_option(
+async def test_the_critical_payload_step_carries_the_option(
     hass: HomeAssistant,
 ) -> None:
     """Written only when it is turned off; absent keeps meaning on."""
@@ -1111,12 +1187,7 @@ async def test_the_general_step_carries_the_critical_payload_option(
     await _add_target(hass, entry)
     assert "critical_payload" not in entry.options
 
-    await _options_step(
-        hass,
-        entry,
-        "general",
-        {"default_target": "leak", "critical_payload": False},
-    )
+    await _options_step(hass, entry, "critical_payload", {"critical_payload": False})
     assert entry.options["critical_payload"] is False
 
     # And editing something else must not silently put it back on: `_load`
@@ -1124,12 +1195,10 @@ async def test_the_general_step_carries_the_critical_payload_option(
     await _add_person(hass, entry, person="person.bob")
     assert entry.options["critical_payload"] is False
 
-    await _options_step(
-        hass,
-        entry,
-        "general",
-        {"default_target": "leak", "critical_payload": True},
-    )
+    form = await _options_step(hass, entry, "critical_payload")
+    assert suggested_value(form, "critical_payload") is False
+
+    await _options_step(hass, entry, "critical_payload", {"critical_payload": True})
     assert "critical_payload" not in entry.options
 
 

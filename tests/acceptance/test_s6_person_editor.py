@@ -39,8 +39,10 @@ from homeassistant.data_entry_flow import FlowResultType
 
 from .conftest import make_entry, make_person, make_target, schema_field
 
-# ADR-0020 §2: the two steps of the person editor.
-OUTPUT_FIELDS = ["outputs", "silence_entities"]
+# ADR-0020 §2: the two steps of the person editor. Amended by Sprint 8
+# (ADR-0022 §3 and §5): `person_outputs` also shows two checkboxes that store
+# nothing -- create a night schedule, open the night settings.
+OUTPUT_FIELDS = ["outputs", "silence_entities", "night_schedule", "advanced"]
 ADVANCED_FIELDS = ["wake_time", "summary"]
 
 NIGHT = datetime(2026, 9, 10, 21, 30, tzinfo=dt_util.UTC)  # 23:30 Europe/Paris
@@ -106,14 +108,19 @@ async def test_person_advanced_holds_the_wake_time_and_the_summary(
         )
     )
 
+    # Amended by Sprint 8 (ADR-0022 §3): the menu entry is gone; the person
+    # screen's `advanced` checkbox opens the same step.
     result = await options_flow(
-        entry, "edit_person_advanced", {"entity_id": "person.alice"}
+        entry,
+        "edit_person",
+        {"entity_id": "person.alice"},
+        {"outputs": ["mobile_app_alice"], "advanced": True},
     )
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "person_advanced", (
         "`person_advanced` is a public step id (contract v0.6), reached from "
-        "the 'Advanced settings of a person' menu entry (ADR-0020 §2)"
+        "the person screen (ADR-0022 §3)"
     )
     assert _field_names(result) == ADVANCED_FIELDS
     assert _default(result, "wake_time") is None, (

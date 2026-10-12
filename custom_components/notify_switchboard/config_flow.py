@@ -41,6 +41,24 @@ collapsible section.
   builds `vol.Schema({"next_step_id": vol.In(menu_options)})` at line 894, so
   a labelled entry cannot be a parameterised call into an existing step.
 
+From 0.8.0 (ADR-0022) the flow is built for somebody adding a first alert:
+
+- `target` asks four things -- `name`, `alert_entity`, `audience`,
+  `observer_mode` (on by default) -- and the slug is derived from the name
+  when the target is created; editing goes through the internal `target_edit`
+  step, which shows the slug read-only and never renames it;
+- the confirmation after a target is `target_saved` (the `alert:` block) only
+  when observer mode is off; an observer target ends on `target_ready`, or on
+  `target_ready_manual` when it watches no alert;
+- the menu is seven entries -- three about people, three about alerts, and
+  `general`, itself a menu of five -- and the advanced steps are reached from
+  checkboxes on the edit screens instead of menu entries of their own;
+- removing a person or a target goes through a confirmation that says what
+  is lost;
+- `person_outputs` can create a core `schedule` helper for the person's night
+  (`night_schedule.py`), and `person_advanced` takes a wake time without
+  seconds.
+
 Home Assistant APIs used here (paths in home-assistant/core 2026.9.1):
 - homeassistant/helpers/selector.py: SelectSelector / SelectSelectorConfig
   (line 1883, `custom_value` and `sort`), SelectOptionDict (line 1869),
@@ -127,8 +145,15 @@ from .dispatcher import (
     named_entity,
     output_label as _output_label,
 )
-from .router import NON_OUTPUT_COMPONENT_SERVICES, is_recursive_output
-from .validation import parse_snooze_minutes, validate_person, validate_target
+from .night_schedule import async_ensure_night_schedule
+from .router import NON_OUTPUT_COMPONENT_SERVICES, is_recursive_output, parse_wake_time
+from .validation import (
+    derive_slug,
+    normalise_wake_time,
+    parse_snooze_minutes,
+    validate_person,
+    validate_target,
+)
 
 if TYPE_CHECKING:
     from .dispatcher import Switchboard
@@ -204,9 +229,14 @@ MAX_TTL_MINUTES = 43200
 # both halves of an editor have to agree on the split -- one writes exactly
 # these keys and the other must not touch them -- and because the errors a
 # step can show are exactly the errors on its own fields.
-TARGET_BASIC_FIELDS: frozenset[str] = frozenset(
-    {CONF_SLUG, "name", CONF_ALERT_ENTITY, CONF_AUDIENCE, CONF_OBSERVER_MODE}
+#
+# v0.8 (ADR-0022 §1): the `target` form asks four of the five basic values;
+# the slug is derived and never a field anybody types, but it is still one of
+# the values the advanced steps carry over untouched.
+TARGET_FORM_FIELDS: frozenset[str] = frozenset(
+    {"name", CONF_ALERT_ENTITY, CONF_AUDIENCE, CONF_OBSERVER_MODE}
 )
+TARGET_BASIC_FIELDS: frozenset[str] = TARGET_FORM_FIELDS | {CONF_SLUG}
 TARGET_ADVANCED_FIELDS: frozenset[str] = frozenset(
     {
         CONF_DEFAULT_PRIORITY,
@@ -231,8 +261,47 @@ PERSON_ADVANCED_FIELDS: frozenset[str] = frozenset({CONF_WAKE_TIME, CONF_SUMMARY
 
 # The checkbox `target_saved` grows (ADR-0020 §1): ticked, the flow carries on
 # into `target_advanced` for the target just described instead of writing and
-# ending. Not a public name -- `target_saved` itself is internal.
+# ending. Not a public name -- `target_saved` itself is internal. From 0.8.0
+# (ADR-0022 §3) the same word opens `person_advanced` from `person_outputs`.
 CONF_ADVANCED = "advanced"
+# ADR-0022 §3: the second checkbox of `target_edit`, opening `target_escalation`.
+CONF_ESCALATION = "escalation"
+# ADR-0022 §5: create (or reuse) a `schedule` helper for the person's night.
+CONF_NIGHT_SCHEDULE = "night_schedule"
+# ADR-0022 §4: the "Yes, remove" box of the two removal confirmations.
+CONF_CONFIRM = "confirm"
+
+# ADR-0022 §3: the menu, in three blocks, and the "Settings" menu under it.
+MENU_OPTIONS = [
+    "person",
+    "edit_person",
+    "remove_person",
+    "target",
+    "edit_target",
+    "remove_target",
+    "general",
+]
+SETTINGS_MENU_OPTIONS = [
+    "default_target",
+    "critical_payload",
+    "ttl",
+    "test_person",
+    "test_target",
+]
+
+# ADR-0022 §2: the three confirmations a new or edited target can end on.
+STEP_TARGET_SAVED = "target_saved"
+STEP_TARGET_READY = "target_ready"
+STEP_TARGET_READY_MANUAL = "target_ready_manual"
+
+# ADR-0022 §5 and §7: words the flow builds sentences and labels from.
+SENTENCE_FALLBACKS: dict[str, str] = {
+    "night_schedule_name": "{person}'s night",
+    "picker_no_device": "no device yet",
+    "picker_quiet": "quiet: {entities}",
+    "no_target_yet": "no alert yet",
+    "nobody": "nobody",
+}
 
 
 def _advanced_target_values(stored: dict[str, Any] | None) -> dict[str, Any]:
@@ -492,16 +561,71 @@ def _audience_options(
 
 
 @callback
+def _person_summary(
+    hass: HomeAssistant,
+    row: Mapping[str, Any],
+    texts: Mapping[str, str],
+    devices: Mapping[str, str],
+) -> str:
+    """Return "{name} — {devices}, quiet: {silences}" for one person (ADR-0022 §7).
+
+    One line that says who somebody is to this integration: their phones by
+    the name their owner gave them, anything else in the words the outputs
+    picker uses, and their silences by friendly name -- so the night helper of
+    ADR-0022 §5 reads "Bob's night", not `schedule.bob_s_night`.
+    """
+    name = _person_label(hass, str(row["entity_id"]))
+    outputs = [
+        str(output).removeprefix(f"{NOTIFY_DOMAIN}.")
+        for output in row.get(CONF_OUTPUTS) or []
+    ]
+    device_words = [
+        devices.get(output) or _output_label(output, devices, texts)
+        for output in outputs
+    ]
+    label = f"{name} — {', '.join(device_words) or texts['picker_no_device']}"
+    silences = [
+        friendly_name(hass, str(entity))
+        for entity in row.get(CONF_SILENCE_ENTITIES) or []
+    ]
+    if silences:
+        label += ", " + texts["picker_quiet"].replace("{entities}", ", ".join(silences))
+    return label
+
+
+@callback
 def _person_picker_options(
-    hass: HomeAssistant, persons: list[dict[str, Any]]
+    hass: HomeAssistant,
+    persons: list[dict[str, Any]],
+    texts: Mapping[str, str] | None = None,
 ) -> list[selector.SelectOptionDict]:
-    """Return the options of every "pick a person" step, labelled by name."""
+    """Return the options of every "pick a person" step, one line per person.
+
+    v0.7.1 labelled them by name; v0.8 (ADR-0022 §7) adds what the person is
+    told on and when they are left alone, so two Bobs -- or one Bob and the
+    question "is he the one with the night?" -- are told apart at a glance.
+    """
+    words = dict(OPTION_LABEL_FALLBACKS) | dict(SENTENCE_FALLBACKS) | dict(texts or {})
+    devices = _companion_device_names(hass)
     return [
         selector.SelectOptionDict(
-            value=row["entity_id"], label=_person_label(hass, row["entity_id"])
+            value=row["entity_id"], label=_person_summary(hass, row, words, devices)
         )
         for row in persons
     ]
+
+
+def _wake_time_display(stored: Any) -> str | None:
+    """Return a stored `"HH:MM:SS"` wake time the way it is typed.
+
+    `HH:MM` when the seconds are zero -- every value 0.8 writes -- and the full
+    `HH:MM:SS` otherwise, so a 0.7 value such as `07:30:15` is shown as it is
+    and survives an unchanged submit instead of being rounded.
+    """
+    parsed = parse_wake_time(stored)
+    if parsed is None:
+        return None
+    return parsed.strftime("%H:%M:%S" if parsed.second else "%H:%M")
 
 
 def _target_picker_options(
@@ -512,6 +636,17 @@ def _target_picker_options(
         selector.SelectOptionDict(value=row[CONF_SLUG], label=_target_label(row))
         for row in targets
     ]
+
+
+def _target_picker_schema(targets: list[dict[str, Any]]) -> vol.Schema:
+    """Return the schema of every "pick a target" step."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_SLUG): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=_target_picker_options(targets))
+            )
+        }
+    )
 
 
 def _alert_snippet(row: dict[str, Any]) -> str:
@@ -530,13 +665,16 @@ def _alert_snippet(row: dict[str, Any]) -> str:
         str(alert_entity).partition(".")[2] if alert_entity else str(row[CONF_SLUG])
     )
     acknowledge = "true" if row.get(CONF_ALLOW_ACKNOWLEDGE) else "false"
+    name = json.dumps(row.get("name") or row[CONF_SLUG], ensure_ascii=False)
     lines = [
         "alert:",
         f"  {object_id}:",
         # A row name is free text: an unquoted `Fuite: eau # urgence`
         # is a nested mapping truncated at the `#`. `json.dumps` emits a
         # double-quoted scalar, which YAML 1.1 reads exactly like JSON.
-        f"    name: {json.dumps(row.get('name') or row[CONF_SLUG])}",
+        # `ensure_ascii=False` keeps "Fenêtre" as typed: a YAML file is UTF-8,
+        # and a backslash-u escape is valid but unreadable to whoever pastes it.
+        f"    name: {name}",
         f"    entity_id: {ALERT_SNIPPET_ENTITY_PLACEHOLDER}",
         '    state: "on"',
         "    repeat: [5, 15, 60]",
@@ -607,6 +745,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
         self._pending_target: dict[str, Any] | None = None
         # The `explain` summary of the message the test step has just sent.
         self._test_result: str | None = None
+        # v0.8 (ADR-0022 §3): `target_edit` with both boxes ticked opens
+        # `target_advanced`, then `target_escalation`; this remembers the
+        # second half of that chain while the first is on screen.
+        self._then_escalation = False
+        # v0.8 (ADR-0022 §5): `night_schedule` was ticked on `person_outputs`
+        # together with `advanced`; the helper is created when
+        # `person_advanced` is submitted, never before.
+        self._pending_night = False
 
     @property
     def _switchboard(self) -> Switchboard | None:
@@ -685,26 +831,36 @@ class SwitchboardOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show the options menu."""
+        """Show the options menu: people, alerts, settings (ADR-0022 §3).
+
+        Home Assistant menus are flat -- no heading, no separator -- so the
+        grouping is carried by the order and by the words of the labels, each
+        of which is also the title of the screen it opens.
+        """
+        self._load()
+        return self.async_show_menu(step_id="init", menu_options=MENU_OPTIONS)
+
+    async def async_step_general(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the "Settings" menu: what is not about one person or one alert."""
         self._load()
         return self.async_show_menu(
-            step_id="init",
-            menu_options=[
-                "person",
-                "edit_person",
-                "edit_person_advanced",
-                "remove_person",
-                "target",
-                "edit_target",
-                "edit_target_advanced",
-                "edit_target_escalation",
-                "remove_target",
-                "general",
-                "ttl",
-                "test_person",
-                "test_target",
-            ],
+            step_id="general", menu_options=SETTINGS_MENU_OPTIONS
         )
+
+    async def _async_texts(self, *groups: Mapping[str, str]) -> dict[str, str]:
+        """Return translated `common.*` words, with English fallbacks."""
+        fallbacks: dict[str, str] = {}
+        for group in groups:
+            fallbacks |= dict(group)
+        translations = await async_get_translations(
+            self.hass, self.hass.config.language, "common", {DOMAIN}
+        )
+        return {
+            name: translations.get(f"component.{DOMAIN}.common.{name}", fallback)
+            for name, fallback in fallbacks.items()
+        }
 
     # ------------------------------------------------------------------
     # The managed `default` row (ADR-0018 §4)
@@ -896,12 +1052,25 @@ class SwitchboardOptionsFlow(OptionsFlow):
             errors = _showable(
                 validate_person(row, persons, is_new=is_new), PERSON_BASIC_FIELDS
             )
+            if not errors and user_input.get(CONF_ADVANCED):
+                # ADR-0022 §3: the night settings, for the same person, before
+                # anything is written -- submitting them saves both. The night
+                # helper, if asked for, is created then and only then: a user
+                # who closes the next screen leaves nothing behind (§5).
+                self._pending_night = bool(user_input.get(CONF_NIGHT_SCHEDULE))
+                self._stage_person(row)
+                await self._async_bootstrap_default_target()
+                return await self.async_step_person_advanced()
+            # v0.8 (ADR-0022 §5): this is the last step, and the person is
+            # known to be valid, so a refused form never leaves a helper.
+            if (
+                not errors
+                and user_input.get(CONF_NIGHT_SCHEDULE)
+                and not await self._async_add_night(row)
+            ):
+                errors = {CONF_NIGHT_SCHEDULE: "night_schedule_failed"}
             if not errors:
-                persons = [
-                    other for other in persons if other["entity_id"] != person_id
-                ]
-                persons.append(row)
-                self._options[CONF_PERSONS] = persons
+                self._stage_person(row)
                 await self._async_bootstrap_default_target()
                 return self._save()
 
@@ -931,6 +1100,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
                         multiple=True,
                     )
                 ),
+                # v0.8 (ADR-0022 §3 and §5): two actions, never stored.
+                vol.Optional(
+                    CONF_NIGHT_SCHEDULE, default=False
+                ): selector.BooleanSelector(),
+                vol.Optional(CONF_ADVANCED, default=False): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(
@@ -954,12 +1128,18 @@ class SwitchboardOptionsFlow(OptionsFlow):
         neither of the basic ones. Leaving the wake time empty is a supported
         answer, not an unfinished form: ADR-0020 §3 gives its absence a
         meaning.
+
+        v0.8 (ADR-0022 §6): the wake time is typed, `7:30` or `7h30`, because
+        `TimeSelector` shows seconds and its 2026.9.1 config schema
+        (`make_selector_config_schema()`, `homeassistant/helpers/selector.py`)
+        takes no option to hide them. What is stored is still `"HH:MM:SS"`.
+        The step is reached from `person_outputs`' `advanced` checkbox.
         """
         self._load()
         person_id = self._editing_person
         stored = self._stored_person()
         if stored is None:  # pragma: no cover - unreachable from the UI
-            return await self.async_step_edit_person_advanced()
+            return await self.async_step_edit_person()
 
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -968,39 +1148,44 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 for key, value in stored.items()
                 if key not in PERSON_ADVANCED_FIELDS
             }
-            row[CONF_WAKE_TIME] = user_input.get(CONF_WAKE_TIME) or None
+            typed = str(user_input.get(CONF_WAKE_TIME) or "").strip()
+            # An unreadable value is kept as typed, so `validate_person`
+            # reports it with `invalid_time` rather than it silently vanishing.
+            row[CONF_WAKE_TIME] = (normalise_wake_time(typed) or typed) or None
             if not user_input.get(CONF_SUMMARY, True):
                 row[CONF_SUMMARY] = False
             errors = _showable(
                 validate_person(row, self._persons, is_new=False),
                 PERSON_ADVANCED_FIELDS,
             )
+            if not errors and self._pending_night:
+                # ADR-0022 §5: the night helper ticked on `person_outputs` is
+                # created at the last step, so closing this screen leaves none.
+                if await self._async_add_night(row):
+                    self._pending_night = False
+                else:
+                    errors = {"base": "night_schedule_failed"}
             if not errors:
-                self._options[CONF_PERSONS] = [
-                    row if other["entity_id"] == person_id else other
-                    for other in self._persons
-                ]
+                self._stage_person(row)
                 return self._save()
 
         schema = vol.Schema(
             {
-                vol.Optional(CONF_WAKE_TIME): selector.TimeSelector(
-                    selector.TimeSelectorConfig()
+                vol.Optional(CONF_WAKE_TIME): selector.TextSelector(
+                    selector.TextSelectorConfig()
                 ),
                 vol.Optional(CONF_SUMMARY, default=True): selector.BooleanSelector(),
             }
         )
+        suggested: dict[str, Any] = {}
+        if (shown := _wake_time_display(stored.get(CONF_WAKE_TIME))) is not None:
+            suggested[CONF_WAKE_TIME] = shown
+        if CONF_SUMMARY in stored:
+            suggested[CONF_SUMMARY] = stored[CONF_SUMMARY]
         return self.async_show_form(
             step_id="person_advanced",
             data_schema=self.add_suggested_values_to_schema(
-                schema,
-                user_input
-                if user_input is not None
-                else {
-                    key: value
-                    for key, value in stored.items()
-                    if key in PERSON_ADVANCED_FIELDS and value is not None
-                },
+                schema, user_input if user_input is not None else suggested
             ),
             errors=errors,
             description_placeholders={
@@ -1008,35 +1193,40 @@ class SwitchboardOptionsFlow(OptionsFlow):
             },
         )
 
-    async def async_step_edit_person_advanced(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Pick whose advanced settings to open.
+    def _stage_person(self, row: dict[str, Any]) -> None:
+        """Put a validated person in the working copy, not yet in the options."""
+        persons = [
+            other for other in self._persons if other["entity_id"] != row["entity_id"]
+        ]
+        persons.append(row)
+        self._options[CONF_PERSONS] = persons
 
-        The person editor has no confirmation step to hang a shortcut on and
-        `person_outputs` deliberately does not grow a checkbox (ADR-0020 §2),
-        so this labelled menu entry is the only way in. Internal, like
-        `edit_target_advanced`.
+    async def _async_add_night(self, row: dict[str, Any]) -> bool:
+        """Create or find the night helper of one person and list it (§5).
+
+        Called only by the last step of the person editor, once the person is
+        valid. A helper already listed as somebody *else's* silence is never
+        reused, so two people with the same display name get two nights.
+        Returns False when no helper could be created; `row` is then unchanged.
         """
-        self._load()
-        persons = self._persons
-        if not persons:
-            return self.async_abort(reason="nothing_to_edit")
-
-        if user_input is not None:
-            self._editing_person = user_input["entity_id"]
-            return await self.async_step_person_advanced()
-
-        schema = vol.Schema(
-            {
-                vol.Required("entity_id"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_person_picker_options(self.hass, persons)
-                    )
-                )
-            }
+        person_id = str(row["entity_id"])
+        texts = await self._async_texts(SENTENCE_FALLBACKS)
+        name = texts["night_schedule_name"].replace(
+            "{person}", _person_label(self.hass, person_id)
         )
-        return self.async_show_form(step_id="edit_person_advanced", data_schema=schema)
+        taken = frozenset(
+            str(entity)
+            for other in self._persons
+            if other["entity_id"] != person_id
+            for entity in other.get(CONF_SILENCE_ENTITIES) or []
+        )
+        night = await async_ensure_night_schedule(self.hass, name, taken)
+        if night is None:
+            return False
+        silences = [str(entity) for entity in row.get(CONF_SILENCE_ENTITIES) or []]
+        if night not in silences:
+            row[CONF_SILENCE_ENTITIES] = [*silences, night]
+        return True
 
     async def _async_option_labels(self) -> dict[str, str]:
         """Return the translated words the two selectors build labels from.
@@ -1066,54 +1256,98 @@ class SwitchboardOptionsFlow(OptionsFlow):
             self._editing_person = user_input["entity_id"]
             return await self.async_step_person_outputs()
 
-        schema = vol.Schema(
+        return self.async_show_form(
+            step_id="edit_person",
+            data_schema=await self._async_person_picker_schema(persons),
+        )
+
+    async def _async_person_picker_schema(
+        self, persons: list[dict[str, Any]]
+    ) -> vol.Schema:
+        """Return the schema of every "pick a person" step (ADR-0022 §7)."""
+        texts = await self._async_texts(OPTION_LABEL_FALLBACKS, SENTENCE_FALLBACKS)
+        return vol.Schema(
             {
                 vol.Required("entity_id"): selector.SelectSelector(
                     selector.SelectSelectorConfig(
-                        options=_person_picker_options(self.hass, persons)
+                        options=_person_picker_options(self.hass, persons, texts)
                     )
                 )
             }
         )
-        return self.async_show_form(step_id="edit_person", data_schema=schema)
 
     async def async_step_remove_person(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Remove one person from the table."""
+        """Pick the person to remove; the next step says what that loses."""
         self._load()
         persons = self._persons
         if not persons:
             return self.async_abort(reason="nothing_to_remove")
 
         if user_input is not None:
-            entity_id = user_input["entity_id"]
-            self._options[CONF_PERSONS] = [
-                row for row in persons if row["entity_id"] != entity_id
-            ]
-            self._options[CONF_TARGETS] = [
-                {
-                    **row,
-                    CONF_AUDIENCE: [
-                        person
-                        for person in row.get(CONF_AUDIENCE) or []
-                        if person != entity_id
-                    ],
-                }
-                for row in self._targets
-            ]
-            return self._save()
+            self._editing_person = user_input["entity_id"]
+            return await self.async_step_remove_person_confirm()
 
-        schema = vol.Schema(
-            {
-                vol.Required("entity_id"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_person_picker_options(self.hass, persons)
-                    )
-                )
-            }
+        return self.async_show_form(
+            step_id="remove_person",
+            data_schema=await self._async_person_picker_schema(persons),
         )
-        return self.async_show_form(step_id="remove_person", data_schema=schema)
+
+    async def async_step_remove_person_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Say which alerts somebody stops hearing about, then remove them.
+
+        ADR-0022 §4: up to 0.7.1 picking somebody was removing them, from the
+        people of the house and from every target's audience, in one click.
+        An unticked box is refused rather than read as "no": a confirmation
+        that Submit alone dismisses is not one, and closing the dialog is how
+        every options flow is left.
+        """
+        self._load()
+        entity_id = self._editing_person
+        if entity_id is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_remove_person()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not user_input.get(CONF_CONFIRM):
+                errors[CONF_CONFIRM] = "not_confirmed"
+            else:
+                self._options[CONF_PERSONS] = [
+                    row for row in self._persons if row["entity_id"] != entity_id
+                ]
+                self._options[CONF_TARGETS] = [
+                    {
+                        **row,
+                        CONF_AUDIENCE: [
+                            person
+                            for person in row.get(CONF_AUDIENCE) or []
+                            if person != entity_id
+                        ],
+                    }
+                    for row in self._targets
+                ]
+                return self._save()
+
+        texts = await self._async_texts(SENTENCE_FALLBACKS)
+        names = [
+            _target_label(row)
+            for row in self._targets
+            if entity_id in (row.get(CONF_AUDIENCE) or [])
+        ]
+        return self.async_show_form(
+            step_id="remove_person_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_CONFIRM, default=False): selector.BooleanSelector()}
+            ),
+            errors=errors,
+            description_placeholders={
+                "person": _person_label(self.hass, entity_id),
+                "targets": ", ".join(names) or texts["no_target_yet"],
+            },
+        )
 
     # ------------------------------------------------------------------
     # Targets
@@ -1122,83 +1356,275 @@ class SwitchboardOptionsFlow(OptionsFlow):
     async def async_step_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Add or update one target: the five things that make it route.
+        """Add one target: the four things that make it route (ADR-0022 §1).
 
-        `slug` and `name` are the identity the user chooses, `alert_entity` is
-        the alert the target is about, `audience` is who it is for, and
-        `observer_mode` says whether the router watches that alert itself or
-        waits to be called. Everything else has a default that is right for
-        almost everybody and lives in `target_advanced` (ADR-0020 §1).
+        `name` is what the household calls it, `alert_entity` is the alert the
+        target is about, `audience` is who it is for, and `observer_mode` says
+        whether the router watches that alert itself -- on by default, because
+        it is the way that needs no YAML (ADR-0022 §2). The slug is derived
+        from the name here, once, and never typed: it is plumbing, what
+        `notify.switchboard_<slug>` is built from.
 
-        The whole target is still built here, the nine advanced values coming
-        from the target being edited when there is one and from the documented
-        defaults when there is not -- which is what makes a target created
-        through this step alone the exact row 0.5.1 wrote for the same answers.
+        Everything else has a default that is right for almost everybody and
+        lives in `target_advanced` (ADR-0020 §1); a target created through this
+        step alone is the row 0.7 wrote for the same answers.
         """
         self._load()
+        self._editing_slug = None
+        return await self._async_target_form("target", user_input)
+
+    async def async_step_target_edit(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Edit the basic values of one target, its slug shown and untouched.
+
+        Internal (contract v0.8): what `edit_target` opens. Its two checkboxes
+        are the way into the advanced settings and the empty-house setting,
+        which used to be menu entries of their own (ADR-0022 §3).
+        """
+        self._load()
+        if self._stored_target(self._editing_slug) is None:  # pragma: no cover
+            return await self.async_step_edit_target()
+        return await self._async_target_form("target_edit", user_input)
+
+    async def _async_target_form(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Show or handle `target` (create) and `target_edit` (edit).
+
+        One form, two ids: the creation step is public and asks four things;
+        the edit step adds the read-only slug and the two checkboxes that open
+        the screens after it. The whole target is built here either way, the
+        advanced values coming from the target being edited when there is one
+        and from the documented defaults when there is not.
+        """
+        editing = step_id == "target_edit"
+        stored = self._stored_target(self._editing_slug) if editing else None
         errors: dict[str, str] = {}
         persons = self._persons
         known_persons = [row["entity_id"] for row in persons]
+        targets = self._targets
 
         if user_input is not None:
-            row = {
-                CONF_SLUG: user_input[CONF_SLUG],
-                "name": user_input.get("name") or user_input[CONF_SLUG],
-                CONF_ALERT_ENTITY: user_input.get(CONF_ALERT_ENTITY) or None,
-                CONF_AUDIENCE: list(user_input.get(CONF_AUDIENCE) or []),
-                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE)),
-                **_advanced_target_values(self._stored_target(user_input[CONF_SLUG])),
-            }
-            targets = self._targets
-            is_new = not any(other[CONF_SLUG] == row[CONF_SLUG] for other in targets)
-            errors = _showable(
-                validate_target(row, targets, known_persons, is_new=is_new),
-                TARGET_BASIC_FIELDS,
+            name = str(user_input.get("name") or "").strip()
+            slug = (
+                str(stored[CONF_SLUG])
+                if stored is not None
+                else derive_slug(name, [str(other[CONF_SLUG]) for other in targets])
             )
+            alert_entity = user_input.get(CONF_ALERT_ENTITY) or None
+            row = {
+                CONF_SLUG: slug,
+                "name": name,
+                CONF_ALERT_ENTITY: alert_entity,
+                CONF_AUDIENCE: list(user_input.get(CONF_AUDIENCE) or []),
+                # ADR-0022 §2, amended: with no Home Assistant alert linked
+                # there is nothing to watch, so the box has no effect -- it is
+                # kept on, which is the right value the day an alert is
+                # linked, and the confirmation is always the one that says how
+                # to set the alert off.
+                CONF_OBSERVER_MODE: bool(user_input.get(CONF_OBSERVER_MODE))
+                or alert_entity is None,
+                **_advanced_target_values(stored),
+            }
+            errors = _showable(
+                validate_target(row, targets, known_persons, is_new=stored is None),
+                TARGET_FORM_FIELDS,
+            )
+            if not name:
+                errors["name"] = "empty_name"
             if not errors:
-                # Nothing is written yet: the confirmation step shows the
-                # `alert:` block this target expects, and submitting *that* is
-                # what writes `entry.options` (ADR-0018 §7). The target is
-                # rebuilt from scratch here, without `managed`, which is
-                # exactly how editing the default target takes ownership of it
-                # (ADR-0018 §4).
+                # Nothing is written yet: the target is rebuilt from scratch,
+                # without `managed`, which is how editing the default target
+                # takes ownership of it (ADR-0018 §4).
+                if editing and (
+                    user_input.get(CONF_ADVANCED) or user_input.get(CONF_ESCALATION)
+                ):
+                    self._stage_target(row)
+                    if user_input.get(CONF_ADVANCED):
+                        self._then_escalation = bool(user_input.get(CONF_ESCALATION))
+                        return await self.async_step_target_advanced()
+                    return await self.async_step_target_escalation()
                 self._pending_target = row
-                return await self.async_step_target_saved()
+                return await self._async_show_target_confirmation()
 
         labels = await self._async_option_labels()
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.TextSelector(
-                    selector.TextSelectorConfig()
-                ),
-                vol.Required("name"): selector.TextSelector(
-                    selector.TextSelectorConfig()
-                ),
-                vol.Optional(CONF_ALERT_ENTITY): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="alert")
-                ),
-                vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_audience_options(self.hass, known_persons, labels),
-                        multiple=True,
-                        # A speaker that is not registered yet must still be
-                        # typable, exactly as an output is (ADR-0018 §2).
-                        custom_value=True,
-                    )
-                ),
+        fields: dict[Any, Any] = {}
+        if editing:
+            # ADR-0022 §1: shown, so the user knows what automations call this
+            # target, and never read back.
+            fields[vol.Optional(CONF_SLUG)] = selector.TextSelector(
+                selector.TextSelectorConfig(read_only=True)
+            )
+        fields |= {
+            vol.Required("name"): selector.TextSelector(selector.TextSelectorConfig()),
+            vol.Optional(CONF_ALERT_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="alert")
+            ),
+            vol.Required(CONF_AUDIENCE, default=[]): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=_audience_options(self.hass, known_persons, labels),
+                    multiple=True,
+                    # A speaker that is not registered yet must still be
+                    # typable, exactly as an output is (ADR-0018 §2).
+                    custom_value=True,
+                )
+            ),
+            # ADR-0022 §2: on for a new target. Off on the edit step, so a
+            # stored target submitted without the key keeps the 0.7 meaning.
+            vol.Optional(
+                CONF_OBSERVER_MODE, default=not editing
+            ): selector.BooleanSelector(),
+        }
+        if editing:
+            fields |= {
+                vol.Optional(CONF_ADVANCED, default=False): selector.BooleanSelector(),
                 vol.Optional(
-                    CONF_OBSERVER_MODE, default=False
+                    CONF_ESCALATION, default=False
                 ): selector.BooleanSelector(),
             }
+        suggested = (
+            user_input if user_input is not None else self._suggested_target() or {}
         )
+        if stored is not None:
+            suggested = {**suggested, CONF_SLUG: stored[CONF_SLUG]}
         return self.async_show_form(
-            step_id="target",
+            step_id=step_id,
             data_schema=self.add_suggested_values_to_schema(
-                schema,
-                user_input if user_input is not None else self._suggested_target(),
+                vol.Schema(fields), suggested
             ),
             errors=errors,
+            description_placeholders=(
+                {
+                    "target": _target_label(stored),
+                    "service": f"{NOTIFY_DOMAIN}.{LEGACY_SERVICE_NAME}_"
+                    f"{stored[CONF_SLUG]}",
+                }
+                if stored is not None
+                else None
+            ),
         )
+
+    def _stage_target(self, row: dict[str, Any]) -> None:
+        """Put a validated target in the working copy, not yet in the options.
+
+        The step that follows opens on it, and submitting *that* step is what
+        writes `entry.options`.
+        """
+        targets = self._targets
+        if any(other[CONF_SLUG] == row[CONF_SLUG] for other in targets):
+            targets = [
+                row if other[CONF_SLUG] == row[CONF_SLUG] else other
+                for other in targets
+            ]
+        else:
+            targets.append(row)
+        self._options[CONF_TARGETS] = targets
+        self._editing_slug = row[CONF_SLUG]
+
+    async def _async_show_target_confirmation(self) -> ConfigFlowResult:
+        """Show the confirmation that fits the target just described (ADR-0022 §2).
+
+        - observer mode off: `target_saved`, the `alert:` block to paste, as
+          in 0.7.1 -- the YAML is what connects the alert to the router;
+        - observer mode on and an alert watched: `target_ready`, one sentence,
+          no YAML and no restart, because there is nothing left to do;
+        - observer mode on and no alert: `target_ready_manual`, which says the
+          target is the service `notify.switchboard_<slug>` an automation
+          calls, because nothing will ever go off on its own.
+        """
+        row = self._pending_target
+        if row is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_init()
+
+        schema = vol.Schema(
+            {vol.Optional(CONF_ADVANCED, default=False): selector.BooleanSelector()}
+        )
+        if not row.get(CONF_OBSERVER_MODE):
+            return self.async_show_form(
+                step_id=STEP_TARGET_SAVED,
+                data_schema=schema,
+                description_placeholders={"snippet": _alert_snippet(row)},
+            )
+        if row.get(CONF_ALERT_ENTITY):
+            texts = await self._async_texts(SENTENCE_FALLBACKS)
+            audience = [
+                _person_label(self.hass, entry)
+                if not entry.startswith(f"{NOTIFY_DOMAIN}.")
+                else _output_label(
+                    entry.removeprefix(f"{NOTIFY_DOMAIN}."),
+                    _companion_device_names(self.hass),
+                    await self._async_option_labels(),
+                )
+                for entry in row.get(CONF_AUDIENCE) or []
+            ]
+            return self.async_show_form(
+                step_id=STEP_TARGET_READY,
+                data_schema=schema,
+                description_placeholders={
+                    "name": _target_label(row),
+                    "audience": ", ".join(audience) or texts["nobody"],
+                },
+            )
+        return self.async_show_form(
+            step_id=STEP_TARGET_READY_MANUAL,
+            data_schema=schema,
+            description_placeholders={
+                "name": _target_label(row),
+                "service": f"{NOTIFY_DOMAIN}.{LEGACY_SERVICE_NAME}_{row[CONF_SLUG]}",
+                # The other way to set it off: a Home Assistant alert of its
+                # own. An observer row's block names no `notifiers:`, which is
+                # right once the user picks that alert in "What sets it off".
+                "snippet": _alert_snippet(row),
+            },
+        )
+
+    async def _async_confirm_target(
+        self, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
+        """Write the target the confirmation was about, or open its advanced step.
+
+        The one checkbox (ADR-0020 §1) carries on into `target_advanced` for
+        the target just described instead of writing and ending. Unticked --
+        and `{}` submitted, as every Sprint 4 test does -- the target is saved.
+        """
+        row = self._pending_target
+        if row is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_init()
+        if user_input is None:
+            return await self._async_show_target_confirmation()
+
+        self._pending_target = None
+        self._stage_target(row)
+        if user_input.get(CONF_ADVANCED):
+            # Still nothing written to `entry.options`: the working copy now
+            # holds the target so the advanced step has something to open on,
+            # and submitting *that* is what saves.
+            return await self.async_step_target_advanced()
+        return self._save()
+
+    async def async_step_target_saved(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm a target that is not in observer mode, with its `alert:` block.
+
+        `_alert_snippet` names `switchboard_<slug>` under `notifiers:`, which
+        is the line that connects the alert to the router; showing the
+        finished block is the cheapest possible answer to "and now what?".
+        """
+        return await self._async_confirm_target(user_input)
+
+    async def async_step_target_ready(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm an observer target in one sentence (ADR-0022 §2)."""
+        return await self._async_confirm_target(user_input)
+
+    async def async_step_target_ready_manual(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm an observer target that watches no alert (ADR-0022 §2)."""
+        return await self._async_confirm_target(user_input)
 
     async def async_step_target_advanced(
         self, user_input: dict[str, Any] | None = None
@@ -1209,12 +1635,16 @@ class SwitchboardOptionsFlow(OptionsFlow):
         Rebuilding the target from the form instead would let somebody who came
         to change a priority walk away with an empty audience -- the 0.2.0
         data-loss bug (`docs/known-issues.md`), re-introduced by a split.
+
+        From 0.8.0 it is opened by a checkbox, on a confirmation or on
+        `target_edit`; when `target_edit` also asked for the empty-house
+        setting, that step follows this one before anything is written.
         """
         self._load()
         slug = self._editing_slug
         stored = self._stored_target(slug) if slug is not None else None
         if stored is None:  # pragma: no cover - unreachable from the UI
-            return await self.async_step_edit_target_advanced()
+            return await self.async_step_edit_target()
 
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -1247,6 +1677,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
             # v0.5 (ADR-0019 §6): same discipline as `managed`, absent is false.
             if user_input.get(CONF_CLEAR_DONE):
                 row[CONF_CLEAR_DONE] = True
+            # v0.7 (ADR-0021 §1): not a field of this step, carried over.
+            if stored.get(CONF_ESCALATE_WHEN_NOBODY_HOME):
+                row[CONF_ESCALATE_WHEN_NOBODY_HOME] = True
             # Re-read the raw value so an unparsable duration is reported.
             row_for_validation = dict(row)
             row_for_validation[CONF_SNOOZE_MINUTES] = user_input.get(
@@ -1260,10 +1693,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 TARGET_ADVANCED_FIELDS,
             )
             if not errors:
-                self._options[CONF_TARGETS] = [
-                    row if other[CONF_SLUG] == row[CONF_SLUG] else other
-                    for other in self._targets
-                ]
+                self._stage_target(row)
+                if self._then_escalation:
+                    self._then_escalation = False
+                    return await self.async_step_target_escalation()
                 return self._save()
 
         schema = vol.Schema(
@@ -1315,86 +1748,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
             description_placeholders={"target": _target_label(stored)},
         )
 
-    async def async_step_edit_target_advanced(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Pick which target's advanced settings to open.
-
-        A menu entry is a step id (`async_show_menu`,
-        `homeassistant/data_entry_flow.py` line 878), so the labelled entry
-        "Advanced settings of a target" needs a step of its own; this is it.
-        Internal, and deliberately not one of the four public step ids.
-        """
-        self._load()
-        targets = self._targets
-        if not targets:
-            return self.async_abort(reason="nothing_to_edit")
-
-        if user_input is not None:
-            self._editing_slug = user_input[CONF_SLUG]
-            return await self.async_step_target_advanced()
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_target_picker_options(targets)
-                    )
-                )
-            }
-        )
-        return self.async_show_form(step_id="edit_target_advanced", data_schema=schema)
-
-    async def async_step_target_saved(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Confirm a validated target, showing the `alert:` block to paste.
-
-        A target has just been described in the UI; the `alert:` that feeds it
-        still has to be written by hand, and what goes in it depends on the row
-        -- `_alert_snippet` names `switchboard_<slug>` under `notifiers:` for
-        an ordinary row and emits no `notifiers:` at all for an observer one,
-        which is a distinction the user should not have to know to make.
-        Showing the finished block here is the cheapest possible answer to "and
-        now what?".
-
-        The one checkbox (ADR-0020 §1) is the second way into the advanced
-        settings, and the one that matters for somebody who has just met the
-        five-field form: ticked, the flow carries on into `target_advanced`
-        instead of writing and ending. Unticked -- and `{}` submitted, as every
-        Sprint 4 test does -- nothing changes at all.
-        """
-        row = self._pending_target
-        if row is None:  # pragma: no cover - unreachable from the UI
-            return await self.async_step_init()
-
-        if user_input is not None:
-            targets = [
-                other for other in self._targets if other[CONF_SLUG] != row[CONF_SLUG]
-            ]
-            targets.append(row)
-            self._options[CONF_TARGETS] = targets
-            self._pending_target = None
-            if user_input.get(CONF_ADVANCED):
-                # Still nothing written to `entry.options`: the working copy
-                # now holds the target so the advanced step has something to
-                # open on, and submitting *that* is what saves.
-                self._editing_slug = row[CONF_SLUG]
-                return await self.async_step_target_advanced()
-            return self._save()
-
-        return self.async_show_form(
-            step_id="target_saved",
-            data_schema=vol.Schema(
-                {vol.Optional(CONF_ADVANCED, default=False): selector.BooleanSelector()}
-            ),
-            description_placeholders={"snippet": _alert_snippet(row)},
-        )
-
     async def async_step_edit_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick which routing-table row to edit, then open it pre-filled."""
+        """Pick which target to edit, then open `target_edit` pre-filled."""
         self._load()
         targets = self._targets
         if not targets:
@@ -1402,18 +1759,11 @@ class SwitchboardOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._editing_slug = user_input[CONF_SLUG]
-            return await self.async_step_target()
+            return await self.async_step_target_edit()
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_target_picker_options(targets)
-                    )
-                )
-            }
+        return self.async_show_form(
+            step_id="edit_target", data_schema=_target_picker_schema(targets)
         )
-        return self.async_show_form(step_id="edit_target", data_schema=schema)
 
     async def async_step_target_escalation(
         self, user_input: dict[str, Any] | None = None
@@ -1425,13 +1775,14 @@ class SwitchboardOptionsFlow(OptionsFlow):
         public" enumerates -- nine fields, a list the v0.7 addendum does not
         amend -- so the tenth boolean lands here instead. Like both halves of
         the target editor, this step writes **only its own field** and carries
-        every other value of the stored row over untouched.
+        every other value of the target over untouched. From 0.8.0 it is opened
+        from `target_edit` (ADR-0022 §3).
         """
         self._load()
         slug = self._editing_slug
         stored = self._stored_target(slug) if slug is not None else None
         if stored is None:  # pragma: no cover - unreachable from the UI
-            return await self.async_step_edit_target_escalation()
+            return await self.async_step_edit_target()
 
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -1450,10 +1801,7 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 TARGET_ESCALATION_FIELDS,
             )
             if not errors:
-                self._options[CONF_TARGETS] = [
-                    row if other[CONF_SLUG] == row[CONF_SLUG] else other
-                    for other in self._targets
-                ]
+                self._stage_target(row)
                 return self._save()
 
         schema = vol.Schema(
@@ -1479,70 +1827,66 @@ class SwitchboardOptionsFlow(OptionsFlow):
             description_placeholders={"target": _target_label(stored)},
         )
 
-    async def async_step_edit_target_escalation(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Pick which target's escalation setting to open.
-
-        A menu entry is a step id (`async_show_menu`,
-        `homeassistant/data_entry_flow.py` line 878), so the labelled entry
-        needs a step of its own; this is it. Internal, like
-        `edit_target_advanced`.
-        """
-        self._load()
-        targets = self._targets
-        if not targets:
-            return self.async_abort(reason="nothing_to_edit")
-
-        if user_input is not None:
-            self._editing_slug = user_input[CONF_SLUG]
-            return await self.async_step_target_escalation()
-
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_target_picker_options(targets)
-                    )
-                )
-            }
-        )
-        return self.async_show_form(
-            step_id="edit_target_escalation", data_schema=schema
-        )
-
     async def async_step_remove_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Remove one routing-table row."""
+        """Pick the target to remove; the next step says what that loses."""
         self._load()
         targets = self._targets
         if not targets:
             return self.async_abort(reason="nothing_to_remove")
 
         if user_input is not None:
-            slug = user_input[CONF_SLUG]
-            self._options[CONF_TARGETS] = [
-                row for row in targets if row[CONF_SLUG] != slug
-            ]
-            return self._save()
+            self._editing_slug = user_input[CONF_SLUG]
+            return await self.async_step_remove_target_confirm()
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_target_picker_options(targets)
-                    )
-                )
-            }
+        return self.async_show_form(
+            step_id="remove_target", data_schema=_target_picker_schema(targets)
         )
-        return self.async_show_form(step_id="remove_target", data_schema=schema)
+
+    async def async_step_remove_target_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Say who stops being told and what stops working, then remove (§4)."""
+        self._load()
+        stored = self._stored_target(self._editing_slug)
+        if stored is None:  # pragma: no cover - unreachable from the UI
+            return await self.async_step_remove_target()
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            if not user_input.get(CONF_CONFIRM):
+                errors[CONF_CONFIRM] = "not_confirmed"
+            else:
+                self._options[CONF_TARGETS] = [
+                    row for row in self._targets if row[CONF_SLUG] != stored[CONF_SLUG]
+                ]
+                return self._save()
+
+        texts = await self._async_texts(SENTENCE_FALLBACKS)
+        persons = [
+            _person_label(self.hass, entry)
+            for entry in stored.get(CONF_AUDIENCE) or []
+            if not entry.startswith(f"{NOTIFY_DOMAIN}.")
+        ]
+        return self.async_show_form(
+            step_id="remove_target_confirm",
+            data_schema=vol.Schema(
+                {vol.Required(CONF_CONFIRM, default=False): selector.BooleanSelector()}
+            ),
+            errors=errors,
+            description_placeholders={
+                "target": _target_label(stored),
+                "persons": ", ".join(persons) or texts["nobody"],
+                "service": f"{NOTIFY_DOMAIN}.{LEGACY_SERVICE_NAME}_{stored[CONF_SLUG]}",
+            },
+        )
 
     # ------------------------------------------------------------------
-    # General
+    # Settings (ADR-0022 §3)
     # ------------------------------------------------------------------
 
-    async def async_step_general(
+    async def async_step_default_target(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Pick the target used by `notify.switchboard` without a target."""
@@ -1553,14 +1897,6 @@ class SwitchboardOptionsFlow(OptionsFlow):
 
         if user_input is not None:
             self._options[CONF_DEFAULT_TARGET] = user_input[CONF_DEFAULT_TARGET]
-            # v0.7 (ADR-0021 §7): the key is written only when it is turned
-            # **off**, so a household that never opens this step keeps an
-            # options dict with the exact keys it always had, and an absent key
-            # keeps meaning "on".
-            if user_input.get(CONF_CRITICAL_PAYLOAD, True):
-                self._options.pop(CONF_CRITICAL_PAYLOAD, None)
-            else:
-                self._options[CONF_CRITICAL_PAYLOAD] = False
             return self._save()
 
         current = self._options.get(CONF_DEFAULT_TARGET) or targets[0][CONF_SLUG]
@@ -1573,13 +1909,39 @@ class SwitchboardOptionsFlow(OptionsFlow):
                         options=_target_picker_options(targets)
                     )
                 ),
+            }
+        )
+        return self.async_show_form(step_id="default_target", data_schema=schema)
+
+    async def async_step_critical_payload(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Turn the Companion critical keys on or off (ADR-0021 §7).
+
+        Moved out of the default-target screen by ADR-0022 §3; same option,
+        same default, same storage.
+        """
+        self._load()
+        if user_input is not None:
+            # v0.7 (ADR-0021 §7): the key is written only when it is turned
+            # **off**, so a household that never opens this step keeps an
+            # options dict with the exact keys it always had, and an absent key
+            # keeps meaning "on".
+            if user_input.get(CONF_CRITICAL_PAYLOAD, True):
+                self._options.pop(CONF_CRITICAL_PAYLOAD, None)
+            else:
+                self._options[CONF_CRITICAL_PAYLOAD] = False
+            return self._save()
+
+        schema = vol.Schema(
+            {
                 vol.Optional(
                     CONF_CRITICAL_PAYLOAD, default=True
                 ): selector.BooleanSelector(),
             }
         )
         return self.async_show_form(
-            step_id="general",
+            step_id="critical_payload",
             data_schema=self.add_suggested_values_to_schema(
                 schema,
                 {CONF_CRITICAL_PAYLOAD: self._options.get(CONF_CRITICAL_PAYLOAD, True)},
@@ -1671,16 +2033,9 @@ class SwitchboardOptionsFlow(OptionsFlow):
         if user_input is not None:
             return await self._async_run_test(user_input[CONF_SLUG])
 
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_SLUG): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_target_picker_options(targets)
-                    )
-                )
-            }
+        return self.async_show_form(
+            step_id="test_target", data_schema=_target_picker_schema(targets)
         )
-        return self.async_show_form(step_id="test_target", data_schema=schema)
 
     async def async_step_test_person(
         self, user_input: dict[str, Any] | None = None
@@ -1704,16 +2059,10 @@ class SwitchboardOptionsFlow(OptionsFlow):
                 return self.async_abort(reason="nothing_to_test")
             return await self._async_run_test(slug)
 
-        schema = vol.Schema(
-            {
-                vol.Required("entity_id"): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_person_picker_options(self.hass, persons)
-                    )
-                )
-            }
+        return self.async_show_form(
+            step_id="test_person",
+            data_schema=await self._async_person_picker_schema(persons),
         )
-        return self.async_show_form(step_id="test_person", data_schema=schema)
 
     async def _async_run_test(self, slug: str) -> ConfigFlowResult:
         """Route one tagged test message, then explain what happened to it.

@@ -96,7 +96,14 @@ async def test_class_is_a_field_of_neither_target_step(
         "nobody should have to answer a question nothing reads (ADR-0020 §4)"
     )
 
-    advanced = await options_flow(entry, "edit_target_advanced", {"slug": "leak"})
+    # Amended by Sprint 8 (ADR-0022 §3): "Advanced settings of a target" left
+    # the menu; the edit screen's `advanced` checkbox opens the same step.
+    advanced = await options_flow(
+        entry,
+        "edit_target",
+        {"slug": "leak"},
+        {"name": "Leak", "audience": ["person.alice"], "advanced": True},
+    )
     assert advanced["step_id"] == "target_advanced"
     assert "class" not in [str(marker) for marker in advanced["data_schema"].schema], (
         "removed, not demoted to the advanced step (ADR-0020 §4)"

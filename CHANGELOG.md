@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.8.0] - 2026-10-12
+
+### Changed
+
+- What you add for each thing that can go wrong is now called an **alert**
+  everywhere on screen — menus, errors, repairs and actions. A Home Assistant
+  alert (`alert.…`) is always called "a Home Assistant alert", so the two are
+  not confused. Nothing is renamed underneath.
+- **Add an alert** no longer asks for a short identifier. You give it a name —
+  "Water leak" — and its **automation name** (`water_leak`, so
+  `notify.switchboard_water_leak`) is made from it. Alerts you already have
+  keep theirs, and renaming an alert never changes it.
+- **Tell people as soon as it goes off** is on by default. With a Home
+  Assistant alert picked under **What sets it off**, the last screen just says
+  who will be told: no YAML to copy, no restart.
+- An alert tied to no Home Assistant alert says plainly that it will not go
+  off on its own, and gives both ways to set it off: where to create the
+  automation and which action to add (no Acknowledge button that way), or a
+  ready-to-paste `alert:` block. Without a Home Assistant alert, "Tell people
+  as soon as it goes off" has no effect and stays ticked.
+- The options menu is shorter: three entries for the people of the house,
+  three for the alerts, and **Settings** for the rest — the alert used by
+  default, critical alerts on phones, how long a message set aside stays
+  useful, and the two test messages.
+- The advanced settings of an alert, what happens when the house is empty,
+  and somebody's night are opened by a box on the screen where you change
+  them, instead of entries of their own in the menu.
+- **Make phones ring for critical alerts** has a screen of its own under
+  **Settings**. Your choice is kept.
+- The wake time is typed the way you say it — `7:30`, `07:30`, `7h30` — and a
+  time saved with seconds keeps them.
+- The lists where you pick somebody show, on one line, their devices and when
+  they are left alone.
+
+### Added
+
+- **Create a night schedule** on a person's screen makes a Home Assistant
+  schedule for them, from 10 pm to 7 am every day, and uses it as their quiet
+  time. It is created only when you save, never shared between two people,
+  and never replaces a schedule of yours with other hours. It is yours: change
+  its hours in **Settings → Devices & services → Helpers**. Removing the
+  person, or Notify Switchboard, leaves it in place.
+- Removing somebody or an alert now asks for confirmation and says what will
+  be lost.
+
+### Fixed
+
+- An alert removed and then added again under the same name starts clean: it
+  no longer inherits the "later" holds, the messages set aside or the
+  back-to-normal memory of the one it replaces.
+- The `alert:` block to paste keeps accented letters as typed ("Fenêtre
+  cuisine") instead of escape codes.
+
 ## [0.7.1] - 2026-09-07
 
 ### Added
@@ -356,7 +409,8 @@ Nothing yet.
 - Upgrading from 0.0.1 reuses `notify.switchboard` instead of leaving an
   unavailable entity beside a new `notify.switchboard_2`. Nothing to do by hand.
 
-[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.5.1...v0.6.0

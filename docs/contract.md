@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.7 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.8 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -46,6 +46,16 @@
 > drop reason and no `event.switchboard_delivery` type is added. Everything
 > above and below stays the v0 / v0.2 / v0.3 / v0.4 / v0.5 / v0.6 text,
 > unchanged.
+>
+> v0.8 addendum (ADR-0022): the public step id `target` holds four fields
+> instead of five — `slug` is derived from `name` when a target is created and
+> never typed or renamed — and `observer_mode` defaults to true there;
+> `person_outputs` shows two checkboxes that store nothing; `wake_time` is
+> typed without seconds and still stored as `"HH:MM:SS"`. No name, service,
+> entity, `data` key, drop reason or event type changes, and no routing rule
+> moves. Everything above and below stays the v0 → v0.7 text, unchanged,
+> except the `target` row of the v0.6 step-id table, which the v0.8 addendum
+> supersedes.
 
 ## Names (public, must not change without a major version)
 
@@ -765,6 +775,79 @@ The response of `notify_switchboard.explain` is a mapping with **five** keys:
 exactly the six keys v0.4 froze; a person silenced by a floored silence reports
 `reason: silenced`, and their `detail` names both the entity that is on and the
 floor it carries.
+
+## v0.8 addendum (ADR-0022)
+
+This addendum changes **what one public options step asks** and nothing a
+caller, an automation or a card can observe at run time. No service, entity,
+`data` key, drop reason or `event.switchboard_delivery` type is added or
+removed; the stored shape of a target and of a person is unchanged.
+
+### `target` asks four things, and the slug is derived
+
+The v0.6 table of public step ids is amended for one row:
+
+| Step id | What it holds |
+|---|---|
+| `target` | the four fields that create a target: `name`, `alert_entity`, `audience`, `observer_mode` |
+
+- `slug` is no longer a field of `target`. When a target is created its slug
+  is `slugify(name)`, de-duplicated against the existing slugs with `_2`,
+  `_3`, …; a name that slugifies to nothing gives `alert`.
+- A stored slug is **never renamed** by the options flow. Editing a target
+  shows its slug read-only and ignores any value submitted for it. Every
+  target written before 0.8.0 keeps the slug it has, so every
+  `notify.switchboard_<slug>` keeps its name.
+- On `target`, `observer_mode` defaults to **true**. The stored meaning of the
+  key is unchanged, and so is its meaning when absent from a stored target
+  (false).
+- A target created through `target` alone is the row v0.7 wrote for the same
+  answers with `slug` set as above and `observer_mode` as submitted — except
+  that a target with no `alert_entity` is always stored with
+  `observer_mode: true`: with nothing to watch the flag changes no routing,
+  and true is the right value the day an alert is linked.
+
+### `person_outputs` shows two checkboxes that store nothing
+
+`person_outputs` still holds a person's `outputs` and `silence_entities`. It
+also shows two checkboxes that are **actions, not settings**, never written to
+the options:
+
+| Field | Effect when ticked |
+|---|---|
+| `night_schedule` | when the last screen of the person editor is submitted, creates a core `schedule` helper named after the person, on 22:00–07:00 every day, and adds it to that person's `silence_entities`. A schedule of that name is reused only when it holds exactly that night and is not another person's silence entity; otherwise the name is de-duplicated. Nothing is created before that last submit. The helper belongs to the user: the router never edits or deletes it, including when the person or the config entry is removed |
+| `advanced` | opens `person_advanced` for the same person before anything is written |
+
+### `wake_time` without seconds
+
+`person_advanced.wake_time` accepts `H:MM`, `HH:MM`, `HHhMM` and `HH:MM:SS`.
+What is stored is unchanged: the `"HH:MM:SS"` string v0.7 documents for
+`sensor.switchboard_routing_table`. A stored value whose seconds are not zero
+is shown and kept as it is.
+
+### One word on screen (amends v0.6 §"One word per concept")
+
+In every user-facing **string** — not in this document or the other technical
+ones — a target is an **alert** (« alerte », « alerta »), and its slug its
+**automation name**. A Home Assistant `alert.*` entity is always called "a
+Home Assistant alert". Documents keep *target*; the README glossary maps the
+two. No key, step id or public name changes.
+
+### A target's leftover state is dropped with it
+
+Snoozes, deferred messages and episodes are keyed on a target's slug. On every
+load of the config entry, those whose slug is no longer in the routing table
+are dropped, so a target re-created under the same name — hence the same
+derived slug — inherits nothing from the one that was removed. Nothing is
+added to what is stored.
+
+### Steps that are reached differently
+
+`target_advanced` and `person_advanced` keep their ids and their fields. They
+are no longer opened from menu entries of their own but from a checkbox on the
+screen before them. Every other step id — the menu entries, the pickers, the
+confirmations, `general` and the steps under it — remains internal and may
+change.
 
 ## Observer mode (plan B, ADR-007)
 
