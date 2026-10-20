@@ -383,9 +383,12 @@ async def test_a_path_already_served_is_reported_not_shadowed(
 
 
 async def test_a_failing_static_path_does_not_fail_the_setup(
-    hass: HomeAssistant, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, "lovelace", {})
 
     with patch.object(
         hass.http, "async_register_static_paths", side_effect=OSError("boom")
@@ -394,3 +397,5 @@ async def test_a_failing_static_path_does_not_fail_the_setup(
 
     assert entry.state is ConfigEntryState.LOADED
     assert "Could not serve the dashboard cards" in caplog.text
+    # Nothing serves the bundle, so no dashboard is told to load it.
+    assert resource_urls(hass) == []
