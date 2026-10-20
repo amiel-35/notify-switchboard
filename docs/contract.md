@@ -1,4 +1,4 @@
-# Notify Switchboard — Public contract (v0.9 addendum, frozen per ADR-011 until 1.0 changes it)
+# Notify Switchboard — Public contract (v0.10 addendum, frozen per ADR-011 until 1.0 changes it)
 
 > English, because it will move to `docs/contract.md` in the `notify-switchboard`
 > repository and is guarded by a contract test. Any change requires an ADR.
@@ -65,6 +65,11 @@
 > entity, `data` key, drop reason or event type is added. Everything above and
 > below stays the v0 → v0.8 text, unchanged, except the `target_advanced` row
 > of the v0.6 step-id table, which the v0.9 addendum supersedes.
+>
+> v0.10 addendum (ADR-0024): the dashboard cards ship with the integration,
+> which serves them at one frozen URL; the two card types are frozen. No
+> service, entity, `data` key, drop reason, event type or routing rule
+> changes. Everything above and below stays the v0 → v0.9 text, unchanged.
 
 ## Names (public, must not change without a major version)
 
@@ -953,6 +958,36 @@ When the `target` or `target_edit` form is submitted and leads to a
 confirmation (`target_saved`, `target_ready`, `target_ready_manual`), the
 target is written to the options before that confirmation is shown. Closing
 the confirmation keeps it; its `advanced` box still opens `target_advanced`.
+
+## v0.10 addendum (ADR-0024)
+
+The cards that were a separate repository up to 0.9.0 ship inside the
+integration. This addendum adds two names users write or see; nothing a
+caller of the router observes changes.
+
+### The cards' URL
+
+The integration serves its `www/` directory at `/notify_switchboard` and the
+bundle at `/notify_switchboard/notify-switchboard-cards.js`. On setup it
+keeps exactly one `module` resource with that path in the dashboards'
+resources, its query string carrying the integration's version
+(`?v=<version>`), and removes it when the entry is removed. Where resources
+are written in YAML it changes nothing in them and loads the same URL as an
+extra frontend module instead.
+
+### Two card types
+
+Dashboards name the cards `custom:switchboard-alerts-card` and
+`custom:switchboard-silence-tile`; both are frozen. Their options are the
+cards' own and are documented in `docs/cards.md`.
+
+### One more `repairs` key
+
+`legacy_cards_resource`: a dashboard resource other than the one above still
+loads a file named `notify-switchboard-cards.js` (the former repository's
+bundle, from `/hacsfiles/…`, `/local/community/…` or `/local/…`). Raised on setup, deleted on the next
+setup that no longer finds it, or with the entry. The integration never
+edits that resource.
 
 ## Observer mode (plan B, ADR-007)
 

@@ -20,7 +20,7 @@ flowchart LR
     SW --> TTS["notify.SPEAKER<br/>core's own tts notify platform,<br/>aimed at a Music Assistant player"]
     SW --> SAT["notify.satellite_*<br/>Assist Satellite Notifier"]
     PH -- "Acknowledge or Snooze tapped" --> SW
-    AL --> CARDS["Cards<br/>a separate repository"]
+    AL --> CARDS["Dashboard cards<br/>shipped in www/"]
     SW --> CARDS
 ```
 
@@ -34,8 +34,10 @@ pause and resume. Two sibling adapters that used to sit where that box is,
 exactly that reason; **Assist Satellite Notifier** stays, in maintenance
 mode, because `assist_satellite` has no `notify` platform of its own.
 
-Cards (a separate repository) read `alert.*` and this integration's own
-entities; there is no intermediate "house" sensor.
+The dashboard cards read `alert.*` and this integration's own entities;
+there is no intermediate "house" sensor. They are built from `cards/` into
+`www/`, served by the integration and registered as a dashboard resource
+(ADR-0024, `cards.py`).
 
 ## Modules
 
@@ -506,3 +508,4 @@ schema; and expose one device per config entry with a `translation_key`.
 | [0021](ADR/0021-escalation-and-places-reduced.md) | Escalation and places, reduced — one step when nobody is home, a scheduled priority floor, the routing table as an entity, acknowledgement authorship, bare and entity outputs, a critical payload per OS |
 | [0022](ADR/0022-a-first-alert-without-code.md) | A first alert without code — a derived code name, observer mode by default, a menu in three blocks, a night the user owns, a confirmation before removal |
 | [0023](ADR/0023-one-click-automation-and-a-quiet-all-clear.md) | One-click automation, a quiet all-clear, and observer mode's reminders said plainly |
+| [0024](ADR/0024-cards-ship-with-the-integration.md) | The dashboard cards ship with the integration — one repository, one version, a resource registered on setup |

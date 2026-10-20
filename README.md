@@ -212,6 +212,12 @@ give for a critical notification — full detail and an off switch
 (**Settings** → "Make phones ring for critical alerts") in
 [`docs/contract.md`](docs/contract.md).
 
+The two [dashboard cards](docs/cards.md) come with the integration: an
+alerts list with Acknowledge and Snooze, and one person's silence tile.
+They are added to your dashboards' resources on startup; search for "Notify
+Switchboard" in the card picker. If you installed them earlier as the separate
+**Notify Switchboard Cards** HACS download, remove that one.
+
 For cards, `sensor.switchboard_routing_table` publishes the table itself —
 state is the number of targets, `targets` and `persons` attributes carry the
 rest (exact keys in `docs/contract.md`) — without a target's `default_data`
@@ -239,9 +245,11 @@ Settings → Devices & services → Notify Switchboard → delete removes the
 `notify.switchboard` service and entity; it does not touch the `notify.*`
 services it forwarded to. A night schedule created from a person's screen is
 an ordinary Home Assistant helper and stays, and so does the blueprint copied
-into your blueprints. Current release: **0.9.0** (one-click automation from a
+into your blueprints, and so does any card you put on a dashboard (its
+resource is removed). Current release: **0.10.0** (the dashboard cards ship
+with the integration; before it, one-click automation from a
 shipped blueprint, a back-to-normal message that wakes nobody, observer mode's missing
-reminders said on screen; before it, a first alert without code — names
+reminders said on screen; before that, a first alert without code — names
 instead of identifiers, observer mode by default, a shorter menu, a night
 schedule in one tick — two-step editors, escalation, a scheduled priority floor, the routing-table sensor,
 bare and entity outputs, a critical push per OS, plain-language interface) — see
@@ -281,6 +289,7 @@ anything.
 - [Quickstart](docs/quickstart.md) — route your first alert in about ten minutes.
 - [Migration guide](docs/migration-guide.md) — moving from inline `notify.mobile_app_*` calls.
 - [Blueprints](docs/blueprints.md) — importable automation blueprints.
+- [Dashboard cards](docs/cards.md) — the alerts card and the silence tile, and their options.
 
 ## License
 

@@ -1,0 +1,58 @@
+name: Cards
+
+# The dashboard cards are built from `cards/` into
+# `custom_components/notify_switchboard/www/`, and the built file is committed:
+# it is what the release zip ships (ADR-0024). This job checks the sources and
+# that the committed build is the one they produce.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  cards:
+    name: Lint, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cards
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: cards/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check bundle size budget
+        run: npm run size
+
+      - name: The committed build matches the sources
+        run: |
+          # `git status` also sees a file the build adds, which `git diff` does not.
+          if [ -n "$(git status --porcelain -- ../custom_components/notify_switchboard/www)" ]; then
+            git status --porcelain -- ../custom_components/notify_switchboard/www
+            echo "::error::custom_components/notify_switchboard/www/ is out of date. Run 'npm run build' in cards/ and commit the result."
+            exit 1
+          fi

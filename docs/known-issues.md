@@ -30,7 +30,20 @@ one; there is no in-place rename.
 
 **Workaround.** Each editor is split into a short form and an advanced step,
 so at least changing one field cannot silently reset the others. A richer
-editor is a cards-repository concern, not this integration's.
+editor is a matter for the dashboard cards (`cards/`), not the options flow.
+
+## A cards resource can outlive the integration
+
+**What.** Notify Switchboard removes its dashboard resource
+(`/notify_switchboard/notify-switchboard-cards.js`) when its entry is
+deleted. It cannot when the integration goes another way: uninstalled from
+HACS with the entry still there, downgraded to 0.9.x, or with its entry
+disabled (the file is then not served).
+
+**Impact.** Dashboards keep asking for a file that is not there; the browser
+console shows a 404 and the cards show as unknown. Nothing else breaks.
+
+**Workaround.** Delete the resource in Settings > Dashboards > ⋮ > Resources.
 
 ## The Companion `device_id` fallback is unverified on a real phone
 

@@ -15,7 +15,7 @@ blueprint:
   author: Notify Switchboard
   homeassistant:
     min_version: 2024.10.0
-  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/custom_components/notify_switchboard/blueprints/fr/alert_from_a_sensor.yaml
+  source_url: https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.10.0/custom_components/notify_switchboard/blueprints/fr/alert_from_a_sensor.yaml
   input:
     trigger_entity:
       name: Capteur à surveiller

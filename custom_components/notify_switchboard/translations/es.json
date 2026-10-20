@@ -424,6 +424,10 @@
     "alert_entity_missing": {
       "title": "Lo que dispara una alerta ya no existe",
       "description": "La alerta «{slug}» está vinculada a una alerta de Home Assistant que ya no existe ({entity_id}): nunca salta sola y su botón «Visto» no apaga nada. Vuelve a crear esa alerta de Home Assistant, o vacía «Lo que la dispara», y recarga la Centralita de notificaciones."
+    },
+    "legacy_cards_resource": {
+      "title": "Las antiguas tarjetas de la Centralita de notificaciones siguen cargadas",
+      "description": "Tus paneles siguen cargando las tarjetas desde su antiguo repositorio independiente ({url}). Las tarjetas vienen ahora con la Centralita de notificaciones, y ambas copias definen las mismas tarjetas, así que el navegador puede mostrar la antigua. En HACS, elimina **Notify Switchboard Cards**. Si añadiste ese recurso tú mismo, bórralo en Ajustes > Paneles > ⋮ > Recursos (visible con el modo avanzado activado en tu perfil), o en tu YAML `lovelace:`. Después recarga la Centralita de notificaciones y actualiza la página."
     }
   },
   "exceptions": {
