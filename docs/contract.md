@@ -968,9 +968,10 @@ caller of the router observes changes.
 ### The cards' URL
 
 The integration serves its `www/` directory at `/notify_switchboard` and the
-bundle at `/notify_switchboard/notify-switchboard-cards.js`. On setup it
-keeps exactly one `module` resource with that path in the dashboards'
-resources, its query string carrying the integration's version
+bundle at `/notify_switchboard/notify-switchboard-cards.js`; when that path
+is already served by something else, it serves nothing, logs a warning and
+writes no resource. On setup it keeps exactly one `module` resource with that
+path (relative or absolute URL) in the dashboards' resources, its query string carrying the integration's version
 (`?v=<version>`), and removes it when the entry is removed. Where resources
 are written in YAML it changes nothing in them and loads the same URL as an
 extra frontend module instead.

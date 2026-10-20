@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from homeassistant.components.frontend import add_extra_js_url, remove_extra_js_url
 from homeassistant.components.http.server import StaticPathConfig
@@ -45,6 +46,10 @@ CARDS_URL_BASE = f"/{DOMAIN}"
 CARDS_URL = f"{CARDS_URL_BASE}/{CARDS_FILENAME}"
 CARDS_DIR = Path(__file__).parent / "www"
 
+# `False` once Home Assistant runs and the path is known not to be served by
+# this integration: a dashboard resource would then only point at a 404.
+DATA_CARDS_SERVED = f"{DOMAIN}_cards_served"
+
 # While the cards had a repository of their own
 # (`amiel-35/notify-switchboard-cards`, up to cards 0.2.0) the bundle had the
 # same file name, served by HACS (`/hacsfiles/...`, `/local/community/...`) or
@@ -53,8 +58,13 @@ ISSUE_LEGACY_CARDS = "legacy_cards_resource"
 
 
 def _url_path(url: str) -> str:
-    """Return a resource URL without its query string."""
-    return url.split("?", 1)[0]
+    """Return a resource URL's path: no scheme, host, query or fragment.
+
+    A resource can be written as an absolute URL
+    (`http://homeassistant.local:8123/notify_switchboard/...`); it is still
+    this integration's bundle.
+    """
+    return urlsplit(url).path
 
 
 async def _async_versioned_url(hass: HomeAssistant) -> str:
@@ -82,11 +92,29 @@ async def async_register_static_path(hass: HomeAssistant) -> None:
     """
     if hass.http is None:
         return
+    # aiohttp accepts a second static resource on a prefix already taken and
+    # keeps serving the first one (`http/server.py`,
+    # `_async_register_static_paths` -> `router.register_resource`): a clash
+    # would pass silently and the bundle would answer 404. Look first.
+    taken = any(
+        resource.canonical == CARDS_URL_BASE
+        or resource.canonical.startswith(f"{CARDS_URL_BASE}/")
+        for resource in hass.http.app.router.resources()
+    )
+    if taken:
+        hass.data[DATA_CARDS_SERVED] = False
+        _LOGGER.warning(
+            "Could not serve the dashboard cards: %s is already served by "
+            "something else",
+            CARDS_URL_BASE,
+        )
+        return
     try:
         await hass.http.async_register_static_paths(
             [StaticPathConfig(CARDS_URL_BASE, str(CARDS_DIR), cache_headers=True)]
         )
-    except Exception:  # noqa: BLE001 - aiohttp raises RuntimeError on a clash
+    except Exception:  # noqa: BLE001 - the cards must not take the actions down
+        hass.data[DATA_CARDS_SERVED] = False
         _LOGGER.warning("Could not serve the dashboard cards", exc_info=True)
 
 
@@ -115,7 +143,7 @@ async def _async_register_resource(hass: HomeAssistant) -> None:
     module instead.
     """
     lovelace = hass.data.get(LOVELACE_DATA)
-    if lovelace is None:
+    if lovelace is None or hass.data.get(DATA_CARDS_SERVED) is False:
         return
     url = await _async_versioned_url(hass)
     resources = lovelace.resources
@@ -131,8 +159,15 @@ async def _async_register_resource(hass: HomeAssistant) -> None:
             await resources.async_create_item({"res_type": "module", "url": url})
         else:
             first, *duplicates = ours
+            # The bundle is an ES module: loaded as a plain `js` resource it
+            # fails on its first `export`, so the type is put back too.
+            updates: dict[str, str] = {}
             if first["url"] != url:
-                await resources.async_update_item(first["id"], {"url": url})
+                updates["url"] = url
+            if first.get("type") != "module":
+                updates["res_type"] = "module"
+            if updates:
+                await resources.async_update_item(first["id"], updates)
             for item in duplicates:
                 await resources.async_delete_item(item["id"])
     elif "frontend" in hass.config.components:

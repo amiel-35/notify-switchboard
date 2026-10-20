@@ -16,11 +16,15 @@ from unittest.mock import patch
 
 import homeassistant.helpers.issue_registry as ir
 import pytest
+from homeassistant.components.http.server import StaticPathConfig
 from homeassistant.components.lovelace.const import LOVELACE_DATA
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.setup import async_setup_component
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import (
+    MockConfigEntry,
+    async_mock_service,
+)
 
 from custom_components.notify_switchboard import cards
 from custom_components.notify_switchboard.const import DOMAIN
@@ -28,6 +32,36 @@ from custom_components.notify_switchboard.const import DOMAIN
 PACKAGE = Path(cards.__file__).parent
 REPO = PACKAGE.parent.parent
 VERSION = json.loads((PACKAGE / "manifest.json").read_text(encoding="utf-8"))["version"]
+# One person, one phone, one target for everybody: enough to see a message go
+# through (the routing itself is `test_dispatcher.py`'s business).
+ROUTING_TABLE: dict[str, Any] = {
+    "persons": [
+        {
+            "entity_id": "person.alice",
+            "outputs": ["notify.mobile_app_alice"],
+            "silence_entities": [],
+            "wake_time": None,
+        }
+    ],
+    "targets": [
+        {
+            "slug": "default",
+            "name": "Default",
+            "default_priority": "normal",
+            "alert_entity": None,
+            "audience": ["person.alice"],
+            "presence_rule": "always",
+            "allow_acknowledge": False,
+            "snooze_minutes": [],
+            "default_data": {},
+            "observer_mode": False,
+            "message": None,
+            "done_message": None,
+            "default_title": None,
+        }
+    ],
+    "default_target": "default",
+}
 URL = f"/notify_switchboard/notify-switchboard-cards.js?v={VERSION}"
 LEGACY_URL = "/hacsfiles/notify-switchboard-cards/notify-switchboard-cards.js"
 
@@ -47,15 +81,17 @@ def seed_resources(hass_storage: dict[str, Any], *urls: str) -> None:
     }
 
 
-async def install(hass: HomeAssistant) -> MockConfigEntry:
-    """Create and set up an entry with an empty routing table."""
+async def install(
+    hass: HomeAssistant, options: dict[str, Any] | None = None
+) -> MockConfigEntry:
+    """Create and set up an entry, with an empty routing table by default."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         entry_id="ns_cards_entry",
         title="Notify Switchboard",
         version=1,
         minor_version=1,
-        options={"persons": [], "targets": [], "default_target": None},
+        options=options or {"persons": [], "targets": [], "default_target": None},
     )
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -121,6 +157,39 @@ async def test_an_older_version_is_moved_to_this_one(
     await install(hass)
 
     assert resource_urls(hass) == ["/local/other-card.js", URL]
+
+
+async def test_a_resource_of_the_wrong_type_is_made_a_module(
+    hass: HomeAssistant, hass_storage: dict[str, Any]
+) -> None:
+    """The bundle is an ES module; as a plain `js` resource it never loads."""
+    hass_storage["lovelace_resources"] = {
+        "version": 1,
+        "minor_version": 1,
+        "key": "lovelace_resources",
+        "data": {"items": [{"id": "res0", "type": "js", "url": URL}]},
+    }
+    assert await async_setup_component(hass, "lovelace", {})
+    await install(hass)
+
+    items = hass.data[LOVELACE_DATA].resources.async_items()
+    assert [(item["type"], item["url"]) for item in items] == [("module", URL)]
+
+
+async def test_an_absolute_url_to_the_bundle_is_ours_not_a_legacy_copy(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    issue_registry: ir.IssueRegistry,
+) -> None:
+    seed_resources(
+        hass_storage,
+        "http://homeassistant.local:8123/notify_switchboard/notify-switchboard-cards.js",
+    )
+    assert await async_setup_component(hass, "lovelace", {})
+    await install(hass)
+
+    assert resource_urls(hass) == [URL]
+    assert issue_registry.async_get_issue(DOMAIN, cards.ISSUE_LEGACY_CARDS) is None
 
 
 async def test_a_reload_adds_nothing(
@@ -269,14 +338,20 @@ async def test_a_failing_resource_registration_does_not_fail_the_entry(
     assert await async_setup_component(hass, "lovelace", {})
     resources = hass.data[LOVELACE_DATA].resources
 
+    phone = async_mock_service(hass, "notify", "mobile_app_alice")
     with patch.object(
         type(resources), "async_create_item", side_effect=RuntimeError("disk full")
     ):
-        entry = await install(hass)
+        entry = await install(hass, ROUTING_TABLE)
 
     assert entry.state is ConfigEntryState.LOADED
-    assert hass.services.has_service("notify", "switchboard")
     assert "Could not add the dashboard cards" in caplog.text
+    # Not only registered: a message still reaches the person's phone.
+    await hass.services.async_call(
+        "notify", "switchboard", {"message": "Leak in the kitchen"}, blocking=True
+    )
+    await hass.async_block_till_done()
+    assert [call.data["message"] for call in phone] == ["Leak in the kitchen"]
 
     # And the next reload, which a broken entry would trip over, works.
     assert await hass.config_entries.async_reload(entry.entry_id)
@@ -285,15 +360,35 @@ async def test_a_failing_resource_registration_does_not_fail_the_entry(
     assert resource_urls(hass) == [URL]
 
 
-async def test_a_clashing_static_path_does_not_fail_the_setup(
+async def test_a_path_already_served_is_reported_not_shadowed(
+    hass: HomeAssistant,
+    hass_storage: dict[str, Any],
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """aiohttp keeps the first static resource on a prefix, silently."""
+    assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, "lovelace", {})
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig("/notify_switchboard", str(tmp_path), cache_headers=False)]
+    )
+
+    entry = await install(hass)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert hass.services.has_service("notify", "switchboard")
+    assert "/notify_switchboard is already served by something else" in caplog.text
+    # No resource pointing at a file this integration does not serve.
+    assert resource_urls(hass) == []
+
+
+async def test_a_failing_static_path_does_not_fail_the_setup(
     hass: HomeAssistant, caplog: pytest.LogCaptureFixture
 ) -> None:
     assert await async_setup_component(hass, "http", {})
 
     with patch.object(
-        hass.http,
-        "async_register_static_paths",
-        side_effect=RuntimeError("Added route will never be executed"),
+        hass.http, "async_register_static_paths", side_effect=OSError("boom")
     ):
         entry = await install(hass)
 

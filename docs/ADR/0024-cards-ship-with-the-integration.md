@@ -60,7 +60,11 @@ points here. Its history stays there; its changelog is copied to
 `StaticPathConfig`, `HomeAssistantHTTP.async_register_static_paths`). It
 lives in `async_setup`, not in the entry: the entry reloads on every options
 change, and a path cannot be registered twice. Without `http` (a test
-instance) nothing is registered.
+instance) nothing is registered. aiohttp accepts a second static resource on
+a prefix already taken and keeps serving the first, so a clash would pass
+silently and the bundle would answer 404: the router is searched first, and
+when `/notify_switchboard` is already taken the cards are not served, a
+warning is logged, and no dashboard resource is written.
 
 ### 3. Registered as a dashboard resource
 
@@ -70,8 +74,10 @@ On every entry setup, idempotently:
   `homeassistant/components/lovelace/resources.py`): exactly one `module`
   resource whose path is `/notify_switchboard/notify-switchboard-cards.js`,
   with `?v=<integration version>` as its query string. A missing one is
-  created; one at another version is updated in place; duplicates are
-  deleted. The version in the URL is the cache-buster that long-lived cache
+  created; one at another version, or of another type (the bundle is an ES
+  module, and fails as a plain `js` resource), is updated in place;
+  duplicates are deleted. A resource written as an absolute URL to the same
+  path counts as ours. The version in the URL is the cache-buster that long-lived cache
   headers need.
 - **Resources written in YAML** (`ResourceYAMLCollection`): the integration
   cannot and does not edit the user's YAML. The same URL is loaded as an
