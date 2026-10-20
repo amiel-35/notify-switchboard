@@ -67,7 +67,7 @@ def test_import_url_points_at_the_language_file_on_github() -> None:
     url = import_url("es")
     assert url.startswith("https://my.home-assistant.io/redirect/blueprint_import/")
     source = (
-        "https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.9.0/"
+        "https://raw.githubusercontent.com/amiel-35/notify-switchboard/v0.10.0/"
         f"custom_components/notify_switchboard/blueprints/es/{BLUEPRINT_FILE}"
     )
     assert url.endswith(f"?blueprint_url={quote(source, safe='')}")

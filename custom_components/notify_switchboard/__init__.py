@@ -11,6 +11,9 @@ A config entry wires three surfaces onto one `Switchboard`:
   (`homeassistant/components/notify/legacy.py`);
 - a `NotifyEntity`, documented as degraded (message + title only);
 - the diagnostic entities of contract §3.5.
+
+It also serves the two dashboard cards built into `www/` and registers them
+as a dashboard resource (ADR-0024, `cards.py`).
 """
 
 from __future__ import annotations
@@ -23,6 +26,11 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
+from .cards import (
+    async_register_resource,
+    async_register_static_path,
+    async_unregister_resource,
+)
 from .const import DOMAIN
 from .dispatcher import Switchboard
 from .legacy import SwitchboardNotificationService
@@ -89,6 +97,9 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     translated `ServiceValidationError`.
     """
     async_register_services(hass)
+    # A static path cannot be registered twice, so it belongs here rather than
+    # to the entry, which reloads with every options change (ADR-0024).
+    await async_register_static_path(hass)
     return True
 
 
@@ -110,6 +121,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: SwitchboardConfigEntry) 
     await legacy_service.async_register(hass)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_options))
+
+    # Per entry, not in `async_setup`: an entry removed and added again in the
+    # same run must bring its dashboard resource back (ADR-0024).
+    await async_register_resource(hass)
     return True
 
 
@@ -142,14 +157,16 @@ async def async_migrate_entry(
 async def async_remove_entry(
     hass: HomeAssistant, entry: SwitchboardConfigEntry
 ) -> None:
-    """Delete the persisted snoozes and deferrals when the entry is removed.
+    """Delete the persisted state and the cards' resource with the entry.
 
     Home Assistant calls this after the entry is gone
     (`homeassistant/config_entries.py`, `ConfigEntries.async_remove`). Without
     it, `.storage/notify_switchboard.data` would survive the integration and
-    a fresh install would inherit somebody else's snoozes.
+    a fresh install would inherit somebody else's snoozes; without the second
+    call, every dashboard would keep loading cards nobody serves any more.
     """
     await SwitchboardStore(hass).async_remove()
+    await async_unregister_resource(hass)
 
 
 async def _async_update_options(

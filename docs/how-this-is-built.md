@@ -1,7 +1,7 @@
 # How this project is built
 
-This integration — and its siblings Assist Satellite Notifier and Notify
-Switchboard Cards (Cast Notifier and AirPlay Notifier are archived) — is
+This integration, its dashboard cards, and its sibling Assist Satellite
+Notifier (Cast Notifier and AirPlay Notifier are archived) are
 written almost entirely by AI models, under the direction and responsibility
 of a single human maintainer. This page says exactly how, so that you can
 judge the result with the right expectations.

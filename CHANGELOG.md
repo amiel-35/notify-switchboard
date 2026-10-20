@@ -9,6 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.10.0] - 2026-10-20
+
+### Changed
+
+- **The dashboard cards now come with the integration.** The alerts card and
+  the silence tile used to be a separate HACS download, Notify Switchboard
+  Cards. If you installed it, remove it from HACS: as long as both copies
+  are loaded, your browser may show the old one, and a repair says so. Your
+  cards' configuration needs no change.
+- The cards now carry the integration's version: one install, one version,
+  nothing to keep in step.
+
+### Added
+
+- The cards are added to your dashboards' resources when Notify Switchboard
+  starts, and kept at the current version after an upgrade. Refresh the page
+  once after upgrading. If your resources are written in YAML, nothing is
+  written there: the cards are loaded on every page instead.
+- Removing Notify Switchboard removes that resource too. Cards you put on a
+  dashboard stay there.
+- A repair, **The old Notify Switchboard Cards are still loaded**, when a
+  dashboard still loads them from the former separate download, or from a
+  copy you placed in `www/` yourself.
+
 ## [0.9.0] - 2026-10-12
 
 ### Changed
@@ -446,7 +470,9 @@ Nothing yet.
 - Upgrading from 0.0.1 reuses `notify.switchboard` instead of leaving an
   unavailable entity beside a new `notify.switchboard_2`. Nothing to do by hand.
 
-[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/amiel-35/notify-switchboard/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/amiel-35/notify-switchboard/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/amiel-35/notify-switchboard/compare/v0.6.0...v0.7.0

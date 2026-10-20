@@ -424,6 +424,10 @@
     "alert_entity_missing": {
       "title": "What sets an alert off no longer exists",
       "description": "The alert “{slug}” is linked to a Home Assistant alert that no longer exists ({entity_id}): it never goes off on its own and its Acknowledge button turns nothing off. Create that Home Assistant alert again, or empty “What sets it off”, then reload Notify Switchboard."
+    },
+    "legacy_cards_resource": {
+      "title": "The old Notify Switchboard Cards are still loaded",
+      "description": "Your dashboards still load the cards from their former separate repository ({url}). The cards now come with Notify Switchboard, and both copies define the same cards, so the browser may show the old one. In HACS, remove **Notify Switchboard Cards**. If you added that resource yourself, delete it in Settings > Dashboards > ⋮ > Resources (shown when Advanced mode is on in your profile), or from your `lovelace:` YAML. Then reload Notify Switchboard and refresh the page."
     }
   },
   "exceptions": {

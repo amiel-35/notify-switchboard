@@ -33,3 +33,7 @@ notify_switchboard.zip
 
 # Agent worktrees live inside the repository, never at the parent directory
 .worktrees/
+
+# Dashboard cards (cards/), built into custom_components/notify_switchboard/www/
+node_modules/
+cards/coverage/

@@ -67,6 +67,11 @@ message; `target_advanced` holds ten fields; one frozen blueprint path and its
 six input names. What the ceiling *does* to each kind of done message is
 `test_s9_done_priority.py`'s business; what the blueprint does,
 `test_s9_blueprint.py`'s.
+
+Extended a ninth time for the v0.10 addendum (ADR-0024): the integration
+serves the dashboard cards at one frozen URL, and the two card types
+dashboards name are frozen. What registering the resource does is
+`tests/unit/test_cards.py`'s business.
 """
 
 from __future__ import annotations
@@ -973,3 +978,20 @@ def test_the_blueprint_path_and_inputs_are_frozen():
             "done_message",
             "priority",
         ], f"{language}: the six frozen inputs, in this order (contract v0.9)"
+
+
+# ---------------------------------------------------------------------------
+# v0.10 addendum (ADR-0024): the cards ship with the integration
+# ---------------------------------------------------------------------------
+
+
+def test_the_cards_url_and_types_are_frozen():
+    """v0.10 addendum: one URL for the bundle, two card types dashboards name."""
+    from custom_components.notify_switchboard import cards  # noqa: PLC0415
+
+    assert cards.CARDS_URL == "/notify_switchboard/notify-switchboard-cards.js"
+    bundle = (cards.CARDS_DIR / cards.CARDS_FILENAME).read_text(encoding="utf-8")
+    for card_type in ("switchboard-alerts-card", "switchboard-silence-tile"):
+        assert f'customElements.define("{card_type}"' in bundle, (
+            f"`custom:{card_type}` is a frozen card type (contract v0.10)"
+        )

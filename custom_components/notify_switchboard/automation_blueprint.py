@@ -62,7 +62,7 @@ PACKAGED_FOLDER = Path(__file__).parent / "blueprints"
 # fetches the file it came from. Pinned to the release tag of this version,
 # never `main`: re-importing must not fetch a blueprint newer than the
 # integration that installed it. A test keeps it equal to `v<manifest version>`.
-BLUEPRINT_REF = "v0.9.0"
+BLUEPRINT_REF = "v0.10.0"
 RAW_BASE_URL = (
     f"https://raw.githubusercontent.com/amiel-35/notify-switchboard/{BLUEPRINT_REF}/"
     f"custom_components/{DOMAIN}/{BLUEPRINT_FOLDER}"

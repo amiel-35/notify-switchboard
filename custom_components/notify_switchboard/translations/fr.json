@@ -424,6 +424,10 @@
     "alert_entity_missing": {
       "title": "Ce qui déclenche une alerte n'existe plus",
       "description": "L'alerte « {slug} » est reliée à une alerte Home Assistant qui n'existe plus ({entity_id}) : elle ne part donc jamais seule et son bouton « J'ai vu » n'éteint rien. Recréez cette alerte Home Assistant, ou videz « Ce qui la déclenche », puis rechargez le Standard de notification."
+    },
+    "legacy_cards_resource": {
+      "title": "Les anciennes cartes du Standard de notification sont encore chargées",
+      "description": "Vos tableaux de bord chargent encore les cartes depuis leur ancien dépôt séparé ({url}). Les cartes sont désormais fournies avec le Standard de notification, et les deux copies définissent les mêmes cartes : le navigateur peut donc afficher l'ancienne. Dans HACS, supprimez **Notify Switchboard Cards**. Si vous aviez ajouté cette ressource vous-même, supprimez-la dans Paramètres > Tableaux de bord > ⋮ > Ressources (visible quand le mode avancé est activé dans votre profil), ou dans votre YAML `lovelace:`. Rechargez ensuite le Standard de notification et actualisez la page."
     }
   },
   "exceptions": {
