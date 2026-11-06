@@ -36,10 +36,9 @@ rather than a burst (see [The night](#the-night)).
 
 ## Install and configure
 
-The **My Home Assistant** button at the top opens this repository in
-[HACS](https://hacs.xyz/); by hand, add
-`https://github.com/amiel-35/notify-switchboard` as a custom repository. The
-second button starts the config flow; then click **Configure**. Two short
+Notify Switchboard is in the default [HACS](https://hacs.xyz/) store: search
+for it in HACS, or let the **My Home Assistant** button at the top open it
+there. The second button starts the config flow; then click **Configure**. Two short
 forms are enough for a working `notify.switchboard`: a person's screen asks
 **two things** — where to tell them and when not to disturb them — plus two
 optional boxes (create a night schedule, set up their night now); an alert's
