@@ -30,8 +30,13 @@ jobs:
         run: pip install -r requirements_dev.txt
 
       - name: Install latest Home Assistant (dev matrix leg)
+        # Upgrade the test harness, not homeassistant alone: each release of
+        # pytest-homeassistant-custom-component pins the Home Assistant it was
+        # built for, so this leg runs the newest Home Assistant the harness
+        # supports. Upgrading homeassistant past it breaks pytest at start-up
+        # (2026.11.0 against 0.13.364: "httpx was already imported").
         if: matrix.pre
-        run: pip install --pre --upgrade homeassistant
+        run: pip install --pre --upgrade pytest-homeassistant-custom-component
 
       - name: Run unit tests with coverage
         # The acceptance suite (tests/acceptance) is the executable specification of the
